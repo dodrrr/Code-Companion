@@ -1,0 +1,23 @@
+kind = "mobile"
+previewPath = "/"
+title = "Chain"
+version = "1.0.0"
+id = "artifacts/chain"
+router = "expo-domain"
+
+[[services]]
+name = "expo"
+ensurePreviewReachable = "/status"
+paths = [ "/" ]
+localPort = 22331
+
+[services.development]
+run = "pnpm --filter @workspace/chain run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/chain", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/chain", "run", "serve" ]
+
+[services.env]
+PORT = "22331"
+BASE_PATH = "/"

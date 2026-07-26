@@ -1,0 +1,297 @@
+import React, { useRef, useState } from 'react';
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { useColors } from '@/hooks/useColors';
+import { CHAIN_COLORS } from '@/constants/colors';
+import { useChains } from '@/context/ChainsContext';
+
+const SUGGESTIONS = [
+  'Write daily', 'Morning run', 'Meditate', 'Read 30 min',
+  'No phone after 10pm', 'Cold shower', 'Gym', 'Ship something',
+];
+
+export default function NewChainScreen() {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const { addChain } = useChains();
+
+  const [name, setName] = useState('');
+  const [selectedColor, setSelectedColor] = useState(CHAIN_COLORS[0]);
+  const inputRef = useRef<TextInput>(null);
+
+  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
+
+  function handleCreate() {
+    if (!name.trim()) {
+      inputRef.current?.focus();
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    addChain(name, selectedColor);
+    router.back();
+  }
+
+  return (
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: topPad + 16 }]}>
+        <Pressable onPress={() => router.back()} hitSlop={12}>
+          <Ionicons name="close" size={24} color={colors.mutedForeground} />
+        </Pressable>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]}>
+          New Chain
+        </Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <View style={styles.body}>
+        {/* Color preview strip */}
+        <View
+          style={[
+            styles.previewCard,
+            { backgroundColor: colors.card, borderColor: selectedColor },
+          ]}
+        >
+          <View style={[styles.previewStripe, { backgroundColor: selectedColor }]} />
+          <View style={styles.previewContent}>
+            <Text
+              style={[
+                styles.previewName,
+                { color: name ? colors.foreground : colors.mutedForeground },
+              ]}
+            >
+              {name || 'Your chain name'}
+            </Text>
+            <Text style={[styles.previewMeta, { color: colors.mutedForeground }]}>
+              0 day streak · starts today
+            </Text>
+          </View>
+          <View style={[styles.previewCheck, { borderColor: selectedColor }]} />
+        </View>
+
+        {/* Name input */}
+        <Text style={[styles.label, { color: colors.mutedForeground }]}>
+          HABIT NAME
+        </Text>
+        <View
+          style={[
+            styles.inputWrap,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <TextInput
+            ref={inputRef}
+            value={name}
+            onChangeText={setName}
+            placeholder="e.g. Write daily, Morning run..."
+            placeholderTextColor={colors.mutedForeground}
+            style={[styles.input, { color: colors.foreground }]}
+            maxLength={40}
+            returnKeyType="done"
+            onSubmitEditing={handleCreate}
+            autoFocus
+          />
+        </View>
+
+        {/* Suggestions */}
+        <View style={styles.suggestions}>
+          {SUGGESTIONS.map((s) => (
+            <Pressable
+              key={s}
+              onPress={() => setName(s)}
+              style={({ pressed }) => [
+                styles.chip,
+                {
+                  backgroundColor:
+                    name === s ? selectedColor + '22' : colors.card,
+                  borderColor: name === s ? selectedColor : colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.chipText,
+                  { color: name === s ? selectedColor : colors.mutedForeground },
+                ]}
+              >
+                {s}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {/* Color picker */}
+        <Text style={[styles.label, { color: colors.mutedForeground }]}>
+          CHAIN COLOR
+        </Text>
+        <View style={styles.colorRow}>
+          {CHAIN_COLORS.map((c) => (
+            <Pressable
+              key={c}
+              onPress={() => {
+                setSelectedColor(c);
+                Haptics.selectionAsync();
+              }}
+              style={[
+                styles.colorSwatch,
+                { backgroundColor: c },
+                selectedColor === c && styles.colorSwatchSelected,
+              ]}
+            >
+              {selectedColor === c && (
+                <Ionicons name="checkmark" size={16} color="#fff" />
+              )}
+            </Pressable>
+          ))}
+        </View>
+      </View>
+
+      {/* Create button */}
+      <View style={[styles.footer, { paddingBottom: botPad + 24 }]}>
+        <Pressable
+          onPress={handleCreate}
+          style={({ pressed }) => [
+            styles.createBtn,
+            {
+              backgroundColor: name.trim() ? selectedColor : colors.border,
+              opacity: pressed ? 0.85 : 1,
+            },
+          ]}
+        >
+          <Ionicons name="link" size={20} color="#fff" />
+          <Text style={styles.createBtnText}>Start this chain</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+  },
+  headerTitle: {
+    fontSize: 17,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  body: {
+    flex: 1,
+    paddingHorizontal: 20,
+    gap: 12,
+  },
+  previewCard: {
+    flexDirection: 'row',
+    borderRadius: 18,
+    borderWidth: 2,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  previewStripe: {
+    width: 5,
+  },
+  previewContent: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    gap: 4,
+  },
+  previewName: {
+    fontSize: 17,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  previewMeta: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+  },
+  previewCheck: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    alignSelf: 'center',
+    marginRight: 16,
+  },
+  label: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+    letterSpacing: 1.2,
+    marginTop: 4,
+  },
+  inputWrap: {
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  input: {
+    fontSize: 16,
+    fontFamily: 'Inter_400Regular',
+    padding: 16,
+  },
+  suggestions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  chipText: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  colorRow: {
+    flexDirection: 'row',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  colorSwatch: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  colorSwatchSelected: {
+    transform: [{ scale: 1.15 }],
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  footer: {
+    paddingHorizontal: 20,
+  },
+  createBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 18,
+    borderRadius: 32,
+    gap: 10,
+  },
+  createBtnText: {
+    color: '#fff',
+    fontSize: 17,
+    fontFamily: 'Inter_600SemiBold',
+  },
+});

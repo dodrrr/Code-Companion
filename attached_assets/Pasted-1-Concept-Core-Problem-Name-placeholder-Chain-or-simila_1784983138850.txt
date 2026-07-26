@@ -1,0 +1,63 @@
+1. Concept & Core Problem
+
+Name placeholder: "Chain" (or similar single-word, verb-adjacent name — think Streaks, Structured, Endel).
+
+Core problem: People don't fail at habits because they lack motivation on day one — they fail because of two specific failure moments: (a) the invisible moment they open a distracting app on autopilot instead of doing the thing, and (b) the moment they wake up with no plan, so the day gets eaten by reaction instead of intention. Pure streak-trackers (Streaks) solve visibility but not willpower. Pure blockers (Opal, One Sec, unrespiro) solve friction but not motivation or planning. Nobody has cleanly unified "the thing I'm committing to," "the thing pulling me away from it," and "tomorrow's plan" into one loop.
+
+The loop the app owns: Plan tonight → Protect the chain during the day (friction on distractions) → Don't break the chain → Reflect/replan tomorrow night. That's a closed circle, which is what makes it retentive rather than a novelty.
+
+2. Market Demand, Demographics, Urgency
+
+Screen-time anxiety is no longer a niche wellness topic — it's mainstream and getting more urgent, not less. The average adult now exceeds two hours of daily social media use, and by age 30 people will have spent roughly five years of their lives on social platforms alone. That statistic alone is why an entire sub-category of "friction apps" has emerged in the last two years (One Sec, Opal, App Pause, unrespiro, Ocupal-listed apps). 
+Balance Phone
+
+Demographics with real willingness to pay:
+
+22–35 knowledge workers / freelancers / students — high phone anxiety, high self-improvement app spend, primary Streaks/One Sec audience.
+"Side-income" builders (your prompt nails this) — people running a side hustle before/after a day job, who need both a streak mechanism for consistency and a blocker to protect the 90 minutes they have.
+Digital-minimalism-adjacent audience already paying for Opal/Freedom/One Sec — provable willingness to pay $8–12/mo for just the blocking piece.
+
+Urgency is rising because of a structural shift: both Apple's ecosystem and Android 17's new "Pause Point" feature are now building 10-second forced pauses and breathing prompts directly into the OS before opening flagged distracting apps. That's a signal the market is validated at the platform level — but it's also your single biggest risk (see #5). 
+El Progreso
+Xataka Móvil
+
+3. Why This Fits 2026 Behavior Better Than 2020
+AI adoption: your "plan tomorrow" pillar is the natural AI wedge — a lightweight on-device/LLM-assisted planner that turns "workout, write, call mom" into a structured, time-boxed plan is something that wasn't cheap or fast to build 5 years ago. Now it's a $0.001/user API call.
+Subscription fatigue: people are actively canceling redundant subscriptions, which means you can't sell "a habit tracker" — you need to sell a system that replaces 2–3 apps (Streaks + One Sec + a to-do app). Bundling is your pricing defense against fatigue, not a nice-to-have.
+Side-income seeking: the "don't break the chain" mechanic (Seinfeld method) has a second life right now specifically because of side-hustle culture — people aren't just trying to meditate more, they're trying to ship a newsletter, build a portfolio, post content consistently. Position the product around output streaks (did you do the work today) rather than generic wellness.
+Native OS creep is real but incomplete: Screen Time and Pause Point handle blocking, but neither handles the commitment/streak layer or the evening planning layer — so your differentiation is bundling identity + friction + planning, not out-friction-ing the OS.
+4. Comparable Apps — What to Borrow, What to Fix
+App	What to borrow	What to fix/improve
+Streaks (Crunchy Bagel)	The clean iOS-native widget/haptic feedback design, simplicity of "up to 12 tasks, that's it"	It's static — no intervention when you're about to break the streak. You can close the loop by nudging at the moment of temptation, not just showing a calendar after the fact.
+One Sec	The forced-pause-before-opening-app mechanic, breathing animation	Positioned purely as a blocker with no upside identity/goal attached — pausing feels punitive, not connected to your streak. Tie the pause screen directly to "you're 14 days into your chain, is this worth breaking it?"
+unrespiro	Nothing structurally — worth studying as a cautionary tale (see risks)	Real user reviews call it "a very poor app" for charging 27€ for functionality that largely duplicates native iPhone Screen Time features with a nicer interface. 
+App Store
+ Don't repeat this: your blocking layer needs to feel meaningfully smarter (tied to streak state, adaptive), not just prettier.
+Android Pause Point (OS-level, May 2026)	Validates the whole category at platform scale	This is now free and built into Android 17 — a 10-second reflection screen with breathing exercises and a photo carousel before opening flagged apps. 
+Xataka Móvil
+ You cannot compete on "we pause you before TikTok" alone anymore — that's becoming a free OS feature. Your moat has to be the streak + planning layer wrapped around it, not the pause mechanic itself.
+Opal / Freedom	Routine/schedule-based auto-blocking	Feel enterprise-y/clinical. Your Apple-style smoothness and single-goal focus (protect this streak, not "reduce all screen time") is a real emotional differentiator.
+5. Product Architecture (3 Pillars)
+
+Pillar 1 — The Chain. Up to ~5 daily commitments max (constraint = focus, à la Streaks). Big, tactile calendar-chain visual, satisfying haptic + micro-animation on check-off (spring physics, not a static checkmark — this is where "Apple-style smooth" earns its keep). Freeze tokens (1–2/month) so one bad day doesn't nuke months of chain — this alone meaningfully improves retention over rigid streak apps, which have a known failure mode: people quit entirely after breaking a long streak.
+
+Pillar 2 — The Pause Gate. User selects which apps trigger the gate. On open: a full-screen, beautifully animated interstitial — breathing circle, a personalized line ("You're on day 23 of Write Daily — still want to open this?"), 5–10 second forced delay, then a binary choice: "Not now" (returns to chain) or "Open anyway" (no shame, just friction, tracked). Critically: tie the copy and stats to their specific active chains, which no competitor does — this is your defensibility against Pause Point being free on Android.
+
+Pillar 3 — Tomorrow's Plan. Every evening (push notification at a user-set time, e.g. 9 PM), a 60-second flow: reflect on today's chains (auto-populated from what was completed), then time-block 3–5 items for tomorrow. Lightweight AI assist here (optional, premium): user types "gym, finish deck, call landlord" → app suggests realistic time slots based on their historical completion patterns. This is genuinely differentiated — nobody in this category does evening planning tied to streak data.
+
+Design language: SF Pro / Apple system font, generous whitespace, one accent color per chain (user-customizable, not skeuomorphic), spring-based transitions (react-native-reanimated or SwiftUI's native spring physics if going native), no more than one primary action per screen. Onboarding should be under 60 seconds — this category loses people at setup.
+
+6. Monetization
+Free tier: 1 active chain, no pause-gate, no AI planning — enough to feel the core loop, not enough to sustain it.
+Annual subscription (primary): $39.99–49.99/year (~$3.50–4/mo effective) — deliberately undercuts One Sec/Opal's $8–12/mo positioning by leading with annual-only or annual-discounted pricing, which also fights subscription fatigue by asking for one decision, not a recurring monthly reminder.
+Monthly option: $6.99/mo, priced higher on purpose to push people to annual (classic anchor pricing).
+Lifetime: consider a limited-time $99 lifetime tier for early adopters — generates cash flow pre-scale and builds an evangelist base (Streaks and many indie iOS apps use this well).
+Acquisition channels: TikTok/Reels productivity-creator seeding (this audience already watches "day in my life" streak content — ironic given your product fights that same app, but it's where they live), App Store search ads on terms like "don't break the chain," "streaks app," "screen time," Product Hunt / Indie Hackers launch for the initial credible cohort, and organic ASO around "Seinfeld method app."
+7. Honest Risks & Tradeoffs
+Platform risk is your biggest one. Apple restricts third-party access to Screen Time APIs (via the Screen Time / Family Controls framework), and both Apple and Google are actively building your Pillar 2 feature into the OS for free. Android's Pause Point already puts a mandatory pause and breathing exercise in front of flagged apps at the system level. If you lead the marketing with "we block TikTok," you're racing a free OS feature you can't win. Lead with the chain + planning identity layer instead — that's the part the OS will never build because it's not a platform feature, it's a personal accountability system. 
+El Progreso
+The unrespiro cautionary tale is real: users are explicitly angry about paying premium prices for functionality that "literally took Apple's existing features and put a nice interface on it," and reported the blocking mechanism buggy in practice. Your pause-gate has to be technically airtight and clearly additive (streak-aware, personalized) or you'll get the same review pattern. 
+App Store
+Streak-app churn is structurally high — once someone breaks a long chain, a large share quit the app entirely within days. The freeze-token mechanic mitigates but doesn't eliminate this; budget for it in your retention modeling rather than assuming Streaks-style permanence.
+Notification fatigue: a nightly-planning push plus pause-gate interruptions is a lot of touchpoints. If not tuned carefully (smart timing, easy snooze), you risk becoming exactly the kind of app people mute or delete — the opposite of your value prop.
+Scope creep risk: three pillars is ambitious for v1. The temptation will be to build all three fully before launch. Ship the Chain + Pause Gate first (that's your differentiated wedge vs. Streaks), add evening planning in a fast-follow update once you have real usage data on what people are already trying to plan.
