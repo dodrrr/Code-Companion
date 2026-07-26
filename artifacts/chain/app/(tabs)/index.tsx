@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { Chain, useChains } from '@/context/ChainsContext';
 import ChainCard from '@/components/ChainCard';
+import { getDailyQuote } from '@/constants/quotes';
 
 function formatDate(): string {
   return new Date().toLocaleDateString('en-US', {
@@ -29,6 +30,8 @@ function getGreeting(): string {
   return 'Good evening';
 }
 
+const quote = getDailyQuote();
+
 export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -40,6 +43,20 @@ export default function TodayScreen() {
   const renderChain = useCallback(
     ({ item }: { item: Chain }) => <ChainCard chain={item} />,
     [],
+  );
+
+  const ListHeader = (
+    <>
+      {/* Daily quote */}
+      <View style={styles.quoteWrap}>
+        <Text style={[styles.quoteText, { color: colors.mutedForeground }]}>
+          "{quote.text}"
+        </Text>
+        <Text style={[styles.quoteAuthor, { color: colors.mutedForeground + 'aa' }]}>
+          — {quote.author}
+        </Text>
+      </View>
+    </>
   );
 
   return (
@@ -61,7 +78,7 @@ export default function TodayScreen() {
               styles.addBtn,
               {
                 backgroundColor: colors.primary,
-                opacity: pressed ? 0.8 : 1,
+                transform: [{ scale: pressed ? 0.94 : 1 }],
               },
             ]}
           >
@@ -91,27 +108,36 @@ export default function TodayScreen() {
             onPress={() => router.push('/chain/new')}
             style={({ pressed }) => [
               styles.emptyBtn,
-              { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 },
+              {
+                backgroundColor: colors.primary,
+                transform: [{ scale: pressed ? 0.96 : 1 }],
+              },
             ]}
           >
             <Text style={styles.emptyBtnText}>Add your first chain</Text>
           </Pressable>
+          {/* Quote in empty state */}
+          <View style={styles.emptyQuote}>
+            <Text style={[styles.quoteText, { color: colors.mutedForeground, textAlign: 'center' }]}>
+              "{quote.text}"
+            </Text>
+            <Text style={[styles.quoteAuthor, { color: colors.mutedForeground + '99', textAlign: 'center' }]}>
+              — {quote.author}
+            </Text>
+          </View>
         </View>
       ) : (
-        <>
-          <FlatList
-            data={chains}
-            keyExtractor={(c) => c.id}
-            renderItem={renderChain}
-            contentContainerStyle={[
-              styles.list,
-              { paddingBottom: botPad + 80 },
-            ]}
-            showsVerticalScrollIndicator={false}
-          />
-          {/* Subtle add more link when chains exist but < 5 */}
-          {chains.length < 5 && chains.length > 0 && null}
-        </>
+        <FlatList
+          data={chains}
+          keyExtractor={(c) => c.id}
+          renderItem={renderChain}
+          ListHeaderComponent={ListHeader}
+          contentContainerStyle={[
+            styles.list,
+            { paddingBottom: botPad + 80 },
+          ]}
+          showsVerticalScrollIndicator={false}
+        />
       )}
     </View>
   );
@@ -126,7 +152,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 16,
   },
   headerLeft: {
     gap: 3,
@@ -138,7 +164,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
   },
   dateStr: {
-    fontSize: 22,
+    fontSize: 24,
     fontFamily: 'Inter_700Bold',
   },
   addBtn: {
@@ -151,6 +177,21 @@ const styles = StyleSheet.create({
   list: {
     paddingHorizontal: 20,
     paddingTop: 4,
+  },
+  quoteWrap: {
+    marginBottom: 20,
+    gap: 4,
+  },
+  quoteText: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    lineHeight: 20,
+    fontStyle: 'italic',
+  },
+  quoteAuthor: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    letterSpacing: 0.3,
   },
   empty: {
     flex: 1,
@@ -168,7 +209,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   emptyTitle: {
-    fontSize: 22,
+    fontSize: 24,
     fontFamily: 'Inter_700Bold',
     textAlign: 'center',
   },
@@ -188,5 +229,10 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
+  },
+  emptyQuote: {
+    marginTop: 24,
+    gap: 6,
+    paddingHorizontal: 8,
   },
 });

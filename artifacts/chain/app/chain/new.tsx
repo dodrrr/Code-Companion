@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import {
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -25,7 +26,7 @@ export default function NewChainScreen() {
   const insets = useSafeAreaInsets();
   const { addChain } = useChains();
 
-  const [name, setName] = useState('');
+  const [name,          setName]          = useState('');
   const [selectedColor, setSelectedColor] = useState(CHAIN_COLORS[0]);
   const inputRef = useRef<TextInput>(null);
 
@@ -49,18 +50,21 @@ export default function NewChainScreen() {
         <Pressable onPress={() => router.back()} hitSlop={12}>
           <Ionicons name="close" size={24} color={colors.mutedForeground} />
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>
-          New Chain
-        </Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]}>New Chain</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      <View style={styles.body}>
-        {/* Color preview strip */}
+      <ScrollView
+        style={styles.scrollRoot}
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Live preview card */}
         <View
           style={[
             styles.previewCard,
-            { backgroundColor: colors.card, borderColor: selectedColor },
+            { backgroundColor: colors.card, borderColor: selectedColor + '88' },
           ]}
         >
           <View style={[styles.previewStripe, { backgroundColor: selectedColor }]} />
@@ -77,19 +81,14 @@ export default function NewChainScreen() {
               0 day streak · starts today
             </Text>
           </View>
-          <View style={[styles.previewCheck, { borderColor: selectedColor }]} />
+          <View style={[styles.previewCheck, { borderColor: selectedColor }]}>
+            <View style={[styles.previewCheckInner, { backgroundColor: selectedColor + '22' }]} />
+          </View>
         </View>
 
         {/* Name input */}
-        <Text style={[styles.label, { color: colors.mutedForeground }]}>
-          HABIT NAME
-        </Text>
-        <View
-          style={[
-            styles.inputWrap,
-            { backgroundColor: colors.card, borderColor: colors.border },
-          ]}
-        >
+        <Text style={[styles.label, { color: colors.mutedForeground }]}>HABIT NAME</Text>
+        <View style={[styles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <TextInput
             ref={inputRef}
             value={name}
@@ -113,19 +112,13 @@ export default function NewChainScreen() {
               style={({ pressed }) => [
                 styles.chip,
                 {
-                  backgroundColor:
-                    name === s ? selectedColor + '22' : colors.card,
-                  borderColor: name === s ? selectedColor : colors.border,
-                  opacity: pressed ? 0.7 : 1,
+                  backgroundColor: name === s ? selectedColor + '22' : colors.card,
+                  borderColor:     name === s ? selectedColor : colors.border,
+                  opacity:         pressed ? 0.7 : 1,
                 },
               ]}
             >
-              <Text
-                style={[
-                  styles.chipText,
-                  { color: name === s ? selectedColor : colors.mutedForeground },
-                ]}
-              >
+              <Text style={[styles.chipText, { color: name === s ? selectedColor : colors.mutedForeground }]}>
                 {s}
               </Text>
             </Pressable>
@@ -133,30 +126,39 @@ export default function NewChainScreen() {
         </View>
 
         {/* Color picker */}
-        <Text style={[styles.label, { color: colors.mutedForeground }]}>
-          CHAIN COLOR
-        </Text>
+        <Text style={[styles.label, { color: colors.mutedForeground }]}>CHAIN COLOR</Text>
         <View style={styles.colorRow}>
-          {CHAIN_COLORS.map((c) => (
-            <Pressable
-              key={c}
-              onPress={() => {
-                setSelectedColor(c);
-                Haptics.selectionAsync();
-              }}
-              style={[
-                styles.colorSwatch,
-                { backgroundColor: c },
-                selectedColor === c && styles.colorSwatchSelected,
-              ]}
-            >
-              {selectedColor === c && (
-                <Ionicons name="checkmark" size={16} color="#fff" />
-              )}
-            </Pressable>
-          ))}
+          {CHAIN_COLORS.map((c) => {
+            const isSelected = selectedColor === c;
+            return (
+              // Outer ring — visible border when selected
+              <View
+                key={c}
+                style={[
+                  styles.swatchRing,
+                  isSelected
+                    ? { borderColor: c, borderWidth: 2.5 }
+                    : { borderColor: 'transparent', borderWidth: 2.5 },
+                ]}
+              >
+                <Pressable
+                  onPress={() => {
+                    setSelectedColor(c);
+                    Haptics.selectionAsync();
+                  }}
+                  style={[
+                    styles.colorSwatch,
+                    { backgroundColor: c },
+                    isSelected && styles.colorSwatchSelected,
+                  ]}
+                >
+                  {isSelected && <Ionicons name="checkmark" size={16} color="#fff" />}
+                </Pressable>
+              </View>
+            );
+          })}
         </View>
-      </View>
+      </ScrollView>
 
       {/* Create button */}
       <View style={[styles.footer, { paddingBottom: botPad + 24 }]}>
@@ -166,7 +168,7 @@ export default function NewChainScreen() {
             styles.createBtn,
             {
               backgroundColor: name.trim() ? selectedColor : colors.border,
-              opacity: pressed ? 0.85 : 1,
+              transform: [{ scale: pressed ? 0.97 : 1 }],
             },
           ]}
         >
@@ -179,7 +181,8 @@ export default function NewChainScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
+  root:       { flex: 1 },
+  scrollRoot: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -192,9 +195,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   body: {
-    flex: 1,
     paddingHorizontal: 20,
     gap: 12,
+    paddingBottom: 16,
   },
   previewCard: {
     flexDirection: 'row',
@@ -221,12 +224,16 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
   },
   previewCheck: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     borderWidth: 2,
     alignSelf: 'center',
     marginRight: 16,
+    overflow: 'hidden',
+  },
+  previewCheckInner: {
+    flex: 1,
   },
   label: {
     fontSize: 11,
@@ -260,8 +267,13 @@ const styles = StyleSheet.create({
   },
   colorRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
     flexWrap: 'wrap',
+    alignItems: 'center',
+  },
+  swatchRing: {
+    borderRadius: 26,
+    padding: 3,
   },
   colorSwatch: {
     width: 44,
@@ -271,12 +283,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   colorSwatchSelected: {
-    transform: [{ scale: 1.15 }],
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 5,
   },
   footer: {
     paddingHorizontal: 20,

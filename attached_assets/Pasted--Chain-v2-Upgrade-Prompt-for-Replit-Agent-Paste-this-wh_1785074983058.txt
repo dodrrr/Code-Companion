@@ -1,0 +1,104 @@
+# Chain — v2 Upgrade Prompt for Replit Agent
+
+Paste this whole thing into the Replit Agent chat. It's organized by module so you can also run it in chunks if the agent handles smaller diffs better.
+
+---
+
+## Context (paste first if the agent needs orientation)
+
+This is "Chain," a habit/streak tracking app (Expo / React Native) with three tabs: **Today** (chain list + check-in), **Gate** (app-pause / friction screen before opening distracting apps), and **Plan** (evening planning for tomorrow). Dark theme, single accent color per chain, minimal/Apple-style aesthetic. The goal of this pass is to fix real bugs, add depth to under-built screens, and raise the overall polish to match native iOS quality — smooth spring animations, proper type hierarchy, no flat/default-looking components.
+
+---
+
+## 1. BUG FIX — Chain color picker not applying
+
+**Symptom:** When creating or editing a chain, selecting a color swatch doesn't reliably change the chain's accent color, or the change doesn't persist/display correctly.
+
+**What to check and fix:**
+- Confirm the selected swatch has a clear visual selected-state (ring/border + checkmark, not just a subtle highlight) so it's obvious a selection registered.
+- Confirm the selected color value is actually being written to component state on tap (log/verify `onPress` fires and updates state — a common bug here is the touch target being smaller than the visible swatch, so taps near the edge don't register).
+- Confirm the selected color is saved to the chain object on submit (not just held in local form state and discarded).
+- **Critical:** confirm the saved color is then applied consistently everywhere the chain's accent shows up: the chain card on Today, the big streak number, the progress ring/dots, the calendar heatmap "done" dots, the Gate screen's chain reference, and the Plan screen's chain chip. If the color updates in one place but not others, that's a sign the accent color is hardcoded in some components instead of read from the chain object — audit every place `chain.color` (or equivalent) should be used.
+- Add a live preview: as the user taps a color, the "New Chain" card at the top of the form should update in real time, so they see the result before saving.
+
+---
+
+## 2. Chain Detail — Bigger, better calendar
+
+Replace the current small calendar with a larger, more usable heatmap:
+- Full-width monthly grid (GitHub-contributions style), swipeable month-to-month.
+- Each day cell should be tappable — tapping a past day shows a small popover/sheet with that day's status (Done / Frozen / Missed) and lets the user retroactively mark a day if they forgot to check in (cap this — e.g., only allow edits within the last 3 days, to avoid gaming the streak).
+- Increase cell size and spacing so it reads clearly at a glance — this is the emotional core of the "don't break the chain" mechanic, it should feel satisfying to look at, not cramped.
+- Use the chain's accent color for "Done" cells, a distinct muted blue for "Frozen," and a low-opacity outline (not solid gray) for "Missed" so the grid doesn't look punishing.
+- Add a subtle scale/fade-in animation on the current day's cell when it gets marked done.
+
+---
+
+## 3. App Launch — Splash + first screen
+
+- Build a fast (under ~1.2s), clean splash animation: logo mark scales/fades in with a spring curve, then transitions smoothly into the first screen — no jarring hard cut.
+- On the first screen (before or alongside the chain list), add a rotating motivational quote — short (under ~12 words), relevant to consistency/discipline/habits, not generic "believe in yourself" filler. Build a small local JSON array of ~40-60 quotes tagged by theme (discipline, focus, consistency) so they can rotate daily rather than repeating every launch, and randomize with a "no repeat until the pool is exhausted" rule.
+- Keep the quote typographically quiet — smaller, secondary-gray text, not competing with the chain list itself.
+
+---
+
+## 4. Gate — Fix TikTok icon + add setup tutorial
+
+**Icon bug:** The TikTok logo isn't rendering correctly in the protected-apps list. Check whether it's using a raster asset that failed to bundle, a broken remote URL, or a vector icon set that doesn't include TikTok's brand mark (most icon libraries like Ionicons/Feather don't — you likely need a dedicated SVG asset for brand logos, bundled locally, not fetched at runtime). Audit all brand icons in that list the same way, not just TikTok.
+
+**Add a setup tutorial:** Right now users land on the Gate screen and have to guess how to configure app-blocking. Add a short (3-4 screen) tutorial, triggered the first time a user opens the Gate tab, that:
+1. Explains the concept in one line ("Chain pauses you before you open apps you've flagged, so you can protect your streak").
+2. Shows how to toggle an app as protected.
+3. **Explains the underlying OS permission clearly** — since this likely relies on iOS Screen Time / Family Controls (or Android equivalent), walk the user through granting that permission with a real screenshot or illustration of what the system prompt looks like, so it doesn't feel like a random dead-end permission request.
+4. Ends with a "You're all set" confirmation and a way to re-open this tutorial later from Settings.
+
+---
+
+## 5. Plan — Redesign + richer task controls
+
+Current state is too flat/plain for a screen that's meant to feel like the emotionally satisfying "close out the day" ritual. Upgrade:
+
+**Visual redesign:**
+- Give each task row more presence — subtle card background, not just a flat list line. Left accent bar in the task's color (see below).
+- Add a small progress indicator at the top ("3/5 planned") with a filling bar or ring, not just plain text.
+- Empty state (before any tasks are added) should have a short prompt + illustration, not a blank void.
+
+**Functional upgrades:**
+- **Custom time picker**: replace whatever quick-pick time chips exist now with a proper time picker that allows any hour/minute, while still keeping the quick-pick chips (6 AM, 7 AM, etc.) as shortcuts above it — best of both, don't force users into a full picker for common times.
+- **Per-task color**: let users assign a color to each task (or inherit from a linked chain automatically, with manual override). Useful for people visually grouping task types (deep work vs. errands vs. chain-linked habits).
+- **Reminders/alarms**: add a per-task toggle for a local notification a configurable number of minutes before start time (default 15 min, let user pick 5/15/30/60). Use Expo's local notifications scheduling — these need to be scheduled at "tonight's plan" save time and cleared/rescheduled if the user edits the task.
+- **Linking a task to a chain**: if a planned task corresponds to an active chain (e.g., "Gym"), auto-suggest linking it so completing the task also marks the chain done for that day — this ties Plan and Today together instead of them being separate systems the user has to update twice.
+
+---
+
+## 6. Global polish pass (apply everywhere, not just new screens)
+
+- **Type scale**: one large bold headline size (~34pt) per screen, one secondary/gray subtitle size (~15-17pt), consistent body size (~15pt) — audit every screen for inconsistent or same-weight text and fix.
+- **Buttons**: rounded/pill shape, spring-based press animation (scale to ~0.96 on touch-down, spring back on release), primary CTA should have a subtle shadow/glow in the accent color.
+- **Screen transitions**: replace any hard cuts with slide/fade + spring transitions (react-native-reanimated or the Expo Router's built-in transition config) — this is the single highest-leverage fix for making the app feel premium rather than templated.
+- **Haptics**: add light haptic feedback on check-ins, color selection, and task completion (Expo Haptics) — cheap to add, disproportionately improves perceived quality.
+- **Icon consistency**: pick one icon language (recommend SF Symbols-style line icons) and use it across Chain, Gate, and Plan — no mixing icon sets.
+
+---
+
+## What else I'd prioritize (recommendations, not just bug fixes)
+
+A few things worth building before this goes to real users, roughly in priority order:
+
+1. **Milestone celebrations.** A small full-screen confetti/animation moment at 7, 30, 100-day streaks. This is one of the cheapest, highest-emotional-payoff features you can build — it's the moment people screenshot and share, which is free marketing.
+
+2. **Paywall screen.** You don't have one yet based on what I've seen, and it needs real design attention — this is the highest-leverage screen in the entire app for revenue. Should appear after the user has completed onboarding and used the app for a day or two (not immediately), clearly show the annual price with the effective monthly breakdown, and list the 3 pillars (Chain, Gate, Plan) as what unlocks.
+
+3. **Home screen widget.** iOS widget showing today's chains and streak counts. This is a major retention lever for exactly this category — Streaks' widget is one of its most-cited features in reviews — and it keeps the app visible without opening it.
+
+4. **Notification copy tied to streak state**, not generic reminders — "Don't lose your 14-day Gym streak" converts far better than "Don't forget to check in."
+
+5. **Onboarding pre-permission screens.** Before both the notification permission prompt and the Screen Time permission prompt, show one app-designed screen explaining the benefit first — this measurably improves permission-grant rates versus a cold OS prompt.
+
+6. **Accessibility pass.** Support Dynamic Type (text scaling) and make sure color isn't the only signal for Done/Frozen/Missed (add a shape or icon too) — matters both ethically and for App Store review/ratings from accessibility-conscious users.
+
+7. **Data backup/sync.** Even a simple iCloud/local backup so a streak isn't lost on phone loss or reinstall — losing a 60-day streak to a bug is the fastest way to get a 1-star review and a churned user.
+
+8. **Analytics events** on the core funnel (chain created → first check-in → Gate configured → first Plan completed → day-7 retention) so you can see where people actually drop off once this is live, rather than guessing.
+
+Happy to turn any one of these — the paywall screen especially — into its own detailed spec/prompt if you want to tackle them one at a time.

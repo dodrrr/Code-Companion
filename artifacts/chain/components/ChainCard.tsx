@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -13,20 +13,34 @@ import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { Chain, getStreak, useChains } from '@/context/ChainsContext';
 import WeekStrip from './WeekStrip';
+import MilestoneModal from './MilestoneModal';
 
 interface Props {
   chain: Chain;
 }
 
+const MILESTONES = new Set([7, 30, 100]);
+
 // Extracted component so useAnimatedStyle is never called inside a .map()
 export default function ChainCard({ chain }: Props) {
   const colors = useColors();
   const { toggleToday, isCompletedToday } = useChains();
-  const done = isCompletedToday(chain);
+  const done   = isCompletedToday(chain);
   const streak = getStreak(chain);
 
-  const cardScale = useSharedValue(1);
+  const cardScale  = useSharedValue(1);
   const checkScale = useSharedValue(1);
+
+  // Milestone celebration
+  const [celebratingMilestone, setCelebratingMilestone] = useState<number | null>(null);
+  const prevDoneRef = useRef(done);
+
+  useEffect(() => {
+    if (!prevDoneRef.current && done && MILESTONES.has(streak)) {
+      setCelebratingMilestone(streak);
+    }
+    prevDoneRef.current = done;
+  }, [done, streak]);
 
   const cardStyle = useAnimatedStyle(() => ({
     transform: [{ scale: cardScale.value }],
@@ -58,65 +72,72 @@ export default function ChainCard({ chain }: Props) {
   }, [chain.id]);
 
   return (
-    <Pressable
-      onPress={handleCardPress}
-      style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
-    >
-      <Animated.View
-        style={[
-          styles.card,
-          { backgroundColor: colors.card, borderColor: colors.border },
-          cardStyle,
-        ]}
+    <>
+      <Pressable
+        onPress={handleCardPress}
+        style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
       >
-        {/* Color accent stripe */}
-        <View style={[styles.stripe, { backgroundColor: chain.color }]} />
+        <Animated.View
+          style={[
+            styles.card,
+            { backgroundColor: colors.card, borderColor: colors.border },
+            cardStyle,
+          ]}
+        >
+          {/* Color accent stripe */}
+          <View style={[styles.stripe, { backgroundColor: chain.color }]} />
 
-        <View style={styles.body}>
-          {/* Top row: name + streak + check */}
-          <View style={styles.topRow}>
-            <Text
-              style={[styles.name, { color: colors.foreground }]}
-              numberOfLines={1}
-            >
-              {chain.name}
-            </Text>
-            <View style={styles.rightSide}>
-              <View style={styles.streakBlock}>
-                <Text style={[styles.streakNum, { color: chain.color }]}>
-                  {streak}
-                </Text>
-                <Text
-                  style={[styles.streakLabel, { color: colors.mutedForeground }]}
-                >
-                  {streak === 1 ? 'day' : 'days'}
-                </Text>
+          <View style={styles.body}>
+            {/* Top row: name + streak + check */}
+            <View style={styles.topRow}>
+              <Text
+                style={[styles.name, { color: colors.foreground }]}
+                numberOfLines={1}
+              >
+                {chain.name}
+              </Text>
+              <View style={styles.rightSide}>
+                <View style={styles.streakBlock}>
+                  <Text style={[styles.streakNum, { color: chain.color }]}>
+                    {streak}
+                  </Text>
+                  <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}>
+                    {streak === 1 ? 'day' : 'days'}
+                  </Text>
+                </View>
+                <Pressable onPress={handleCheck} hitSlop={14}>
+                  <Animated.View style={checkStyle}>
+                    <View
+                      style={[
+                        styles.checkBtn,
+                        {
+                          backgroundColor: done ? chain.color : 'transparent',
+                          borderColor:     done ? chain.color : colors.border,
+                        },
+                      ]}
+                    >
+                      {done && <Ionicons name="checkmark" size={18} color="#fff" />}
+                    </View>
+                  </Animated.View>
+                </Pressable>
               </View>
-              <Pressable onPress={handleCheck} hitSlop={14}>
-                <Animated.View style={checkStyle}>
-                  <View
-                    style={[
-                      styles.checkBtn,
-                      {
-                        backgroundColor: done ? chain.color : 'transparent',
-                        borderColor: done ? chain.color : colors.border,
-                      },
-                    ]}
-                  >
-                    {done && (
-                      <Ionicons name="checkmark" size={18} color="#fff" />
-                    )}
-                  </View>
-                </Animated.View>
-              </Pressable>
             </View>
-          </View>
 
-          {/* 7-day dot strip */}
-          <WeekStrip chain={chain} />
-        </View>
-      </Animated.View>
-    </Pressable>
+            {/* 7-day dot strip */}
+            <WeekStrip chain={chain} />
+          </View>
+        </Animated.View>
+      </Pressable>
+
+      {celebratingMilestone !== null && (
+        <MilestoneModal
+          streak={celebratingMilestone}
+          chainName={chain.name}
+          color={chain.color}
+          onDismiss={() => setCelebratingMilestone(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -158,9 +179,9 @@ const styles = StyleSheet.create({
     gap: 0,
   },
   streakNum: {
-    fontSize: 24,
+    fontSize: 26,
     fontFamily: 'Inter_700Bold',
-    lineHeight: 26,
+    lineHeight: 28,
   },
   streakLabel: {
     fontSize: 10,
@@ -169,9 +190,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   checkBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
