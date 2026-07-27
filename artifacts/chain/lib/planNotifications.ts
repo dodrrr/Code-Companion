@@ -15,6 +15,22 @@ type ReminderResult =
   | { status: 'scheduled'; notificationId: string }
   | { status: 'denied' | 'unavailable' | 'past' };
 
+export type PlanNotificationPermission = 'granted' | 'undetermined' | 'denied' | 'unavailable';
+
+export async function getPlanNotificationPermission(): Promise<PlanNotificationPermission> {
+  if (Platform.OS === 'web') return 'unavailable';
+  const permissions = await Notifications.getPermissionsAsync();
+  if (permissions.status === 'granted') return 'granted';
+  if (permissions.canAskAgain) return 'undetermined';
+  return 'denied';
+}
+
+export async function requestPlanNotificationPermission(): Promise<PlanNotificationPermission> {
+  if (Platform.OS === 'web') return 'unavailable';
+  const permissions = await Notifications.requestPermissionsAsync();
+  return permissions.status === 'granted' ? 'granted' : 'denied';
+}
+
 function getScheduledDate(timeSlot: string, planDate: string, minutesBefore: number): Date | null {
   const match = /^(\d{1,2})(?::(\d{2}))?\s(AM|PM)$/.exec(timeSlot);
   if (!match) return null;
@@ -34,11 +50,8 @@ export async function schedulePlanReminder(item: PlanItem, minutesBefore: number
   if (Platform.OS === 'web') return { status: 'unavailable' };
   const date = getScheduledDate(item.timeSlot, item.planDate, minutesBefore);
   if (!date || date.getTime() <= Date.now()) return { status: 'past' };
-  const permissions = await Notifications.getPermissionsAsync();
-  const status = permissions.status === 'granted'
-    ? permissions.status
-    : (await Notifications.requestPermissionsAsync()).status;
-  if (status !== 'granted') return { status: 'denied' };
+  const permission = await getPlanNotificationPermission();
+  if (permission !== 'granted') return { status: 'denied' };
   const notificationId = await Notifications.scheduleNotificationAsync({
     content: {
       title: item.text,
