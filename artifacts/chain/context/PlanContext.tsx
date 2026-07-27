@@ -19,6 +19,7 @@ interface PlanContextValue {
   items: PlanItem[];
   activeDate: string;
   isToday: boolean;
+  tomorrowItemCount: number;
   showToday: () => void;
   showTomorrow: () => void;
   addItem: (options: PlanItemOptions) => PlanItem;
@@ -78,14 +79,20 @@ const PlanContext = createContext<PlanContextValue | null>(null);
 export function PlanProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<PlanItem[]>([]);
   const [activeDate, setActiveDate] = useState(getPlanTodayKey());
+  const [tomorrowItemCount, setTomorrowItemCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     async function refreshPlan(date = getPlanTodayKey()) {
-      const nextItems = normalizeItems(await AsyncStorage.getItem(KEY_PREFIX + date), date);
+      const [raw, tomorrowRaw] = await Promise.all([
+        AsyncStorage.getItem(KEY_PREFIX + date),
+        AsyncStorage.getItem(KEY_PREFIX + getPlanTomorrowKey()),
+      ]);
+      const nextItems = normalizeItems(raw, date);
       if (!cancelled) {
         setActiveDate(date);
         setItems(nextItems);
+        setTomorrowItemCount(normalizeItems(tomorrowRaw, getPlanTomorrowKey()).length);
       }
     }
     void refreshPlan();
@@ -96,9 +103,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   function showToday() {
     const date = getPlanTodayKey();
-    void AsyncStorage.getItem(KEY_PREFIX + date).then((raw) => {
+    void Promise.all([
+      AsyncStorage.getItem(KEY_PREFIX + date),
+      AsyncStorage.getItem(KEY_PREFIX + getPlanTomorrowKey()),
+    ]).then(([raw, tomorrowRaw]) => {
       setActiveDate(date);
       setItems(normalizeItems(raw, date));
+      setTomorrowItemCount(normalizeItems(tomorrowRaw, getPlanTomorrowKey()).length);
     });
   }
 
@@ -106,13 +117,16 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const date = getPlanTomorrowKey();
     void AsyncStorage.getItem(KEY_PREFIX + date).then((raw) => {
       setActiveDate(date);
-      setItems(normalizeItems(raw, date));
+      const nextItems = normalizeItems(raw, date);
+      setItems(nextItems);
+      setTomorrowItemCount(nextItems.length);
     });
   }
 
   function persist(next: PlanItem[]) {
     setItems(next);
     void AsyncStorage.setItem(KEY_PREFIX + activeDate, JSON.stringify(next));
+    if (activeDate === getPlanTomorrowKey()) setTomorrowItemCount(next.length);
   }
 
   function addItem(options: PlanItemOptions) {
@@ -154,7 +168,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     persist(items.map((item) => item.id === id ? { ...item, completed: !item.completed } : item));
   }
 
-  const value = useMemo(() => ({ items, activeDate, isToday, showToday, showTomorrow, addItem, updateItem, updateReminderMetadata, removeItem, toggleItem }), [items, activeDate, isToday]);
+  const value = useMemo(() => ({ items, activeDate, isToday, tomorrowItemCount, showToday, showTomorrow, addItem, updateItem, updateReminderMetadata, removeItem, toggleItem }), [items, activeDate, isToday, tomorrowItemCount]);
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 
