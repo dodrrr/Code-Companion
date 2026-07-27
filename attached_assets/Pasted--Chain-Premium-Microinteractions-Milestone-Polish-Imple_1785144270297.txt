@@ -1,0 +1,327 @@
+# Chain — Premium Microinteractions & Milestone Polish
+
+Implement a focused visual-polish update for the existing **Chain Expo / React Native app**.
+
+The app already works and its existing functionality, navigation, data persistence, Gate setup, Plan tasks, calendars, colors, notifications, and chain creation must remain unchanged.
+
+Do **not** redesign the whole app.  
+Do **not** replace working screens.  
+Do **not** modify the data model unless strictly necessary.
+
+The objective is to make the app feel more responsive, alive, premium, and native to iOS through lightweight animations, haptics, dynamic home copy, and streak milestone celebrations.
+
+---
+
+## 1. Reusable animated press interaction
+
+Create or improve a reusable animated pressable component that can be applied safely to the main interactive elements.
+
+On press-in:
+
+- Animate scale from `1` to approximately `0.96–0.97`.
+- Use a very fast, smooth response.
+- Slightly reduce opacity only if it improves feedback.
+
+On release:
+
+- Return to scale `1` using a soft spring animation.
+- Avoid exaggerated bouncing.
+- The effect should feel similar to a polished native iOS control.
+
+Apply it to:
+
+- Primary buttons
+- Chain cards
+- Floating `+` button
+- Color swatches
+- Plan task cards
+- Main Gate controls
+- Modal action buttons
+
+Do not apply it to:
+
+- Scroll containers
+- Text inputs
+- Calendar day cells if it harms usability
+- Native pickers
+- Switches that already provide native feedback
+
+Use the animation library already installed in the project. Prefer `react-native-reanimated` if it is already available. Do not install a large new dependency for this feature.
+
+---
+
+## 2. Improve the chain-completion interaction
+
+When the user marks a chain as completed, add a short premium completion sequence.
+
+The sequence should include:
+
+1. A light or medium success haptic.
+2. The completion icon/checkmark appears with a spring scale animation:
+   - Start around scale `0.5`
+   - Animate to approximately `1.08`
+   - Settle at `1`
+3. The chain card performs a very subtle bounce or pulse.
+4. The completed state color fades in smoothly instead of switching instantly.
+5. The displayed streak number animates when it increases.
+
+For the streak number:
+
+- If possible, animate the number from the previous value to the new value.
+- If a full number-counter implementation risks introducing bugs, use a simpler upward slide/fade transition between the old and new value.
+- Do not delay persistence or completion logic while waiting for animations.
+
+The full interaction should last approximately `400–700 ms`.
+
+It must feel satisfying but not childish or excessive.
+
+Respect the system setting for reduced motion. When reduced motion is enabled, use only a short opacity transition and haptic feedback.
+
+---
+
+## 3. Dynamic Home greeting
+
+Add a small contextual greeting near the top of the Today/Home screen.
+
+Use the current local device time.
+
+Suggested copy:
+
+### Morning, approximately 05:00–11:59
+
+**Good morning.**  
+Build today's chain.
+
+### Afternoon, approximately 12:00–17:59
+
+**Good afternoon.**  
+Keep the momentum.
+
+### Evening, approximately 18:00–21:59
+
+**Good evening.**  
+Finish the day with intention.
+
+### Night, approximately 22:00–04:59
+
+**Tomorrow starts tonight.**  
+Plan it before the day begins.
+
+Design requirements:
+
+- Keep it compact.
+- It must not push the chain list too far down.
+- Use a stronger weight for the greeting.
+- Use secondary muted text for the supporting sentence.
+- Do not display the user's name unless the app already stores it reliably.
+- Recalculate the greeting when the screen regains focus or when the app returns from the background.
+
+If a rotating quote is already displayed on Home, do not let both elements compete visually.
+
+Preferred hierarchy:
+
+1. Dynamic greeting
+2. Small quote or progress summary
+3. Chain cards
+
+Alternatively, hide the quote when space is limited.
+
+---
+
+## 4. Compact daily progress summary
+
+Below the dynamic greeting, display a small summary based on today's chains.
+
+Example:
+
+`3 of 5 completed today`
+
+Optionally include a small progress bar.
+
+Requirements:
+
+- Calculate it only from active chains scheduled for today.
+- If there are no chains scheduled today, display:
+  `No chains scheduled today`
+- Animate the progress fill smoothly after a chain is completed.
+- Use the existing app accent system rather than introducing unrelated colors.
+- Keep it visually secondary. It should not become a large dashboard.
+
+Avoid adding complex statistics in this update.
+
+---
+
+## 5. Streak milestone celebrations
+
+Add a reusable full-screen or modal milestone celebration shown when a user reaches one of these streak values:
+
+- 7 days
+- 14 days
+- 30 days
+- 50 days
+- 100 days
+- 365 days
+
+Each milestone must be shown only once per chain.
+
+Persist which milestones have already been celebrated so reopening the app or toggling completion does not repeatedly trigger the same celebration.
+
+Suggested structure:
+
+- Chain logo or flame/chain symbol
+- Large milestone number
+- Label such as `DAY STREAK`
+- Chain name
+- Short motivational line
+- Continue button
+
+Example:
+
+`30`
+
+`DAY STREAK`
+
+`Read 30 min`
+
+`Consistency compounds.`
+
+`Continue`
+
+Visual style:
+
+- Dark premium background consistent with the app
+- Use the specific chain accent color
+- Large typography with generous spacing
+- Minimal soft particles, glow, or subtle confetti
+- No bright multicolor party-confetti effect
+- No cartoon styling
+
+Animation sequence:
+
+1. Background fades in.
+2. Symbol/logo scales in with a restrained spring.
+3. Milestone number rises or fades into place.
+4. A few subtle particles appear.
+5. Continue button fades in last.
+
+Add one stronger success haptic when the milestone appears.
+
+The animation should complete quickly, approximately `1–1.5 seconds`, and the user should be able to dismiss it immediately.
+
+Respect reduced-motion accessibility settings.
+
+---
+
+## 6. Milestone persistence and trigger rules
+
+Milestone celebrations must be reliable.
+
+Trigger a milestone only when:
+
+- The chain changes from incomplete to completed.
+- Completing it causes the current streak to reach one of the milestone values.
+- That specific milestone has not already been shown for that chain.
+
+Do not trigger it:
+
+- Every time the detail screen opens
+- On every application launch
+- Repeatedly after state refreshes
+- When editing unrelated chain settings
+- When restoring an already-completed state
+
+Store milestone history in the existing persistence layer.
+
+A possible model is:
+
+```ts
+celebratedMilestones: number[]
+```
+
+Add this property in a backwards-compatible way so existing chains without it default safely to an empty array.
+
+If modifying the central model presents a high risk, create a separate persistent milestone record keyed by chain ID.
+
+---
+
+## 7. Floating plus button refinement
+
+Improve the existing floating `+` button without changing its location or function.
+
+Adjust it so it feels less like a generic Material Design floating action button and more aligned with the rest of the app.
+
+Suggested changes:
+
+- Slightly smaller visual footprint
+- Clean circular or softly rounded shape
+- Subtle translucent or layered dark background
+- Thin border or soft shadow
+- Press-down scale animation
+- Light haptic on press
+- Maintain a minimum accessible touch target of approximately 44 × 44 points
+
+Do not add an excessive glow.
+
+Do not use an unsupported blur implementation that harms Android or web performance. Use a graceful fallback where necessary.
+
+---
+
+## 8. Haptic consistency
+
+Use Expo Haptics if it is already installed.
+
+Suggested mapping:
+
+- Color selection: light selection haptic
+- Normal button action: light haptic only where appropriate
+- Chain completion: medium success haptic
+- Milestone reached: stronger success haptic
+- Destructive action: warning haptic, only if such actions already exist
+
+Do not add haptics to every tap. They should remain meaningful.
+
+Ensure haptics fail safely on platforms where they are unsupported.
+
+---
+
+## 9. Performance and safety requirements
+
+This is a polish pass, not a rebuild.
+
+Requirements:
+
+- Preserve all current navigation.
+- Preserve chain data and local persistence.
+- Preserve Plan task reminders.
+- Preserve Gate tutorial and protected-app configuration.
+- Preserve the color-picker bug fix.
+- Preserve existing calendar functionality.
+- Do not add blocking animations.
+- Avoid unnecessary rerenders.
+- Do not animate large lists all at once.
+- Test on iOS-sized mobile screens.
+- Ensure web still runs without crashing, even if some native haptics or effects are unavailable.
+- Avoid large new packages.
+- Use existing design tokens and components whenever possible.
+
+---
+
+## 10. Acceptance checklist
+
+Before considering the task complete, verify:
+
+- Pressing primary buttons gives subtle scale feedback.
+- Chain cards animate without interfering with navigation.
+- Completing a chain triggers a smooth check animation and haptic.
+- The streak value updates correctly.
+- The Home greeting changes according to local time.
+- Today's completion summary displays accurate values.
+- The progress indicator updates after completion.
+- Reaching day 7 opens the milestone celebration.
+- Dismissing and reopening the app does not show the same milestone again.
+- Existing chains created before this update still load correctly.
+- Reduced-motion users do not receive large spring or particle animations.
+- Existing Gate, Plan, calendar, colors, and notifications still work.
+- No new TypeScript errors, warnings, or broken routes are introduced.
+
+Implement these changes incrementally. Reuse existing components and avoid rewriting working areas of the application.
