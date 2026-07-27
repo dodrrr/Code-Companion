@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import {
   FlatList,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -12,68 +13,89 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
-import { useChains, getTodayStr, getStreak } from '@/context/ChainsContext';
+import { Chain, getStreak, getTodayStr, useChains } from '@/context/ChainsContext';
 import { PlanItem, usePlan } from '@/context/PlanContext';
 import { CHAIN_COLORS } from '@/constants/colors';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { cancelPlanReminder, schedulePlanReminder } from '@/lib/planNotifications';
 
-function getTomorrowStr(): string {
+const QUICK_TIMES = ['7 AM', '9 AM', '12 PM', '3 PM', '6 PM', '8 PM'];
+const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
+const MINUTES = ['00', '05', '10', '15', '20', '30', '40', '45', '50', '55'];
+const REMINDER_OPTIONS = [5, 15, 30, 60];
+
+function getTomorrowLabel(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return d.toLocaleDateString('en-US', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  });
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
-const TIME_SLOTS = [
-  '6 AM', '7 AM', '8 AM', '9 AM', '10 AM', '11 AM',
-  '12 PM', '1 PM', '2 PM', '3 PM', '4 PM', '5 PM',
-  '6 PM', '7 PM', '8 PM', '9 PM', '10 PM',
-];
-
-const MAX_ITEMS = 5;
+function formatTime(hour: number, minute: string): string {
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  const displayHour = hour % 12 || 12;
+  return `${displayHour}:${minute} ${suffix}`;
+}
 
 export default function PlanScreen() {
-  const colors  = useColors();
-  const insets  = useSafeAreaInsets();
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
   const { chains } = useChains();
-  const { items, addItem, removeItem, toggleItem } = usePlan();
-
-  const [inputText,    setInputText]    = useState('');
+  const { items, addItem, updateReminderMetadata, removeItem, toggleItem } = usePlan();
+  const [inputText, setInputText] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
-  const [showInput,    setShowInput]    = useState(false);
+  const [selectedChainId, setSelectedChainId] = useState<string | undefined>();
+  const [selectedReminder, setSelectedReminder] = useState<number | undefined>();
+  const [reminderNotice, setReminderNotice] = useState('');
+  const [showInput, setShowInput] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [pickerHour, setPickerHour] = useState(9);
+  const [pickerMinute, setPickerMinute] = useState('00');
   const inputRef = useRef<TextInput>(null);
-
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
+  const today = getTodayStr();
+  const completedCount = items.filter((item) => item.completed).length;
+  const progressFill = items.length ? completedCount / items.length : 0;
+  const selectedChain = chains.find((chain) => chain.id === selectedChainId);
+
+  function resetComposer() {
+    setInputText('');
+    setSelectedTime('');
+    setSelectedChainId(undefined);
+    setSelectedReminder(undefined);
+    setReminderNotice('');
+    setShowInput(false);
+  }
 
   function handleAdd() {
     if (!inputText.trim()) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    addItem(inputText, selectedTime);
-    setInputText('');
-    setSelectedTime('');
+    const item = addItem(inputText, selectedTime, {
+      chainId: selectedChain?.id,
+      color: selectedChain?.color,
+      reminderMinutes: selectedTime ? selectedReminder : undefined,
+    });
+    if (selectedTime && selectedReminder) {
+      void schedulePlanReminder(item, selectedReminder).then((result) => {
+        if (result.status === 'scheduled') updateReminderMetadata(item.id, selectedReminder, result.notificationId);
+        if (result.status === 'denied') setReminderNotice('Notifications are off. You can enable them in iPhone Settings.');
+      });
+    }
+    resetComposer();
   }
 
-  function handleToggle(id: string) {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    toggleItem(id);
+  function chooseCustomTime() {
+    setSelectedTime(formatTime(pickerHour, pickerMinute));
+    setShowTimePicker(false);
+    Haptics.selectionAsync();
   }
-
-  const today = getTodayStr();
-  const completedCount = items.filter((i) => i.completed).length;
-  const progressFill   = items.length > 0 ? completedCount / items.length : 0;
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
-      {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
-        <View>
-          <Text style={[styles.headerTitle, { color: colors.foreground }]}>Tonight's Plan</Text>
-          <Text style={[styles.headerSub,   { color: colors.mutedForeground }]}>{getTomorrowStr()}</Text>
-        </View>
+        <Text style={[styles.headerEyebrow, { color: colors.primary }]}>MAKE TOMORROW LIGHTER</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Tonight's Plan</Text>
+        <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>{getTomorrowLabel()}</Text>
       </View>
 
       <KeyboardAwareScrollViewCompat
@@ -82,106 +104,59 @@ export default function PlanScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scroll, { paddingBottom: botPad + 100 }]}
       >
-        {/* ── Today's chains reflection ─────────────────────── */}
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>TODAY'S CHAINS</Text>
-
         {chains.length === 0 ? (
           <View style={[styles.emptySection, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Ionicons name="link-outline" size={22} color={colors.mutedForeground} />
-            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-              No chains yet — add one on the Today tab
-            </Text>
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>Add a chain first to bring its color into your plan.</Text>
           </View>
         ) : (
           <View style={[styles.reflectCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            {chains.map((chain, i) => {
-              const done   = chain.completedDates.includes(today);
-              const streak = getStreak(chain);
-              return (
-                <View key={chain.id}>
-                  <View style={styles.reflectRow}>
-                    {/* Left accent bar */}
-                    <View style={[styles.reflectBar, { backgroundColor: done ? chain.color : colors.border }]} />
-                    <View style={styles.reflectTexts}>
-                      <Text style={[styles.reflectName, { color: colors.foreground }]} numberOfLines={1}>
-                        {chain.name}
-                      </Text>
-                    </View>
-                    <View style={styles.reflectRight}>
-                      {done ? (
-                        <View style={[styles.doneBadge, { backgroundColor: chain.color + '22', borderColor: chain.color + '55' }]}>
-                          <Ionicons name="checkmark" size={11} color={chain.color} />
-                          <Text style={[styles.doneBadgeText, { color: chain.color }]}>{streak}d</Text>
-                        </View>
-                      ) : (
-                        <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>pending</Text>
-                      )}
-                    </View>
-                  </View>
-                  {i < chains.length - 1 && (
-                    <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                  )}
-                </View>
-              );
+            {chains.map((chain, index) => {
+              const done = chain.completedDates.includes(today);
+              return <ChainReflection key={chain.id} chain={chain} done={done} isLast={index === chains.length - 1} />;
             })}
           </View>
         )}
 
-        {/* ── Tomorrow's focus ──────────────────────────────── */}
-        <View style={styles.tomorrowHeader}>
-          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>TOMORROW'S FOCUS</Text>
-          <Text style={[styles.itemCount, { color: colors.mutedForeground }]}>
-            {items.length}/{MAX_ITEMS}
-          </Text>
+        <View style={styles.focusHeading}>
+          <View>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 3 }]}>TOMORROW'S FOCUS</Text>
+            <Text style={[styles.focusCaption, { color: colors.foreground }]}>Keep it to what matters.</Text>
+          </View>
+          <View style={[styles.countPill, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.itemCount, { color: colors.mutedForeground }]}>{items.length} task{items.length === 1 ? '' : 's'}</Text>
+          </View>
         </View>
 
-        {/* Progress bar */}
         {items.length > 0 && (
           <View style={styles.progressWrap}>
             <View style={[styles.progressTrack, { backgroundColor: colors.border }]}>
-              <View
-                style={[
-                  styles.progressFill,
-                  {
-                    backgroundColor: colors.primary,
-                    width: `${Math.round(progressFill * 100)}%` as any,
-                  },
-                ]}
-              />
+              <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${Math.round(progressFill * 100)}%` as any }]} />
             </View>
-            <Text style={[styles.progressLabel, { color: colors.mutedForeground }]}>
-              {completedCount}/{items.length} done
-            </Text>
+            <Text style={[styles.progressLabel, { color: colors.mutedForeground }]}>{completedCount === items.length ? 'Ready' : `${completedCount}/${items.length} complete`}</Text>
           </View>
         )}
 
-        {/* Plan items */}
-        {items.map((item, idx) => (
+        {items.map((item, index) => (
           <PlanItemRow
             key={item.id}
             item={item}
-            index={idx}
-            onToggle={() => handleToggle(item.id)}
-            onRemove={() => removeItem(item.id)}
+            fallbackColor={CHAIN_COLORS[index % CHAIN_COLORS.length]}
+            onToggle={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); toggleItem(item.id); }}
+            onRemove={() => { void cancelPlanReminder(item.notificationId); removeItem(item.id); }}
           />
         ))}
 
-        {/* Empty state */}
         {items.length === 0 && (
           <View style={[styles.emptyFocus, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Ionicons name="moon-outline" size={28} color={colors.mutedForeground} />
-            <Text style={[styles.emptyFocusTitle, { color: colors.foreground }]}>
-              No wins planned yet
-            </Text>
-            <Text style={[styles.emptyFocusBody, { color: colors.mutedForeground }]}>
-              Block out 3–5 things that matter most tomorrow.
-            </Text>
+            <View style={[styles.moonCircle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="moon" size={22} color={colors.primary} /></View>
+            <Text style={[styles.emptyFocusTitle, { color: colors.foreground }]}>A calm start begins tonight.</Text>
+            <Text style={[styles.emptyFocusBody, { color: colors.mutedForeground }]}>Choose what deserves space tomorrow, then let the plan hold the rest.</Text>
           </View>
         )}
 
-        {/* Add item */}
-        {items.length < MAX_ITEMS && (
-          <View style={[styles.addCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[styles.addCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {showInput ? (
               <>
                 <TextInput
@@ -194,377 +169,97 @@ export default function PlanScreen() {
                   returnKeyType="done"
                   onSubmitEditing={handleAdd}
                   autoFocus
-                  multiline={false}
                 />
-                {/* Time slot quick-picks */}
-                <FlatList
-                  data={TIME_SLOTS}
-                  horizontal
-                  keyExtractor={(t) => t}
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.timeSlots}
-                  renderItem={({ item: t }) => (
-                    <Pressable
-                      onPress={() => setSelectedTime(t === selectedTime ? '' : t)}
-                      style={[
-                        styles.timeChip,
-                        {
-                          backgroundColor: t === selectedTime ? colors.primary : colors.background,
-                          borderColor:     t === selectedTime ? colors.primary : colors.border,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.timeChipText,
-                          { color: t === selectedTime ? '#fff' : colors.mutedForeground },
-                        ]}
-                      >
-                        {t}
-                      </Text>
-                    </Pressable>
-                  )}
+                <ComposerMeta
+                  colors={colors}
+                  chains={chains}
+                  selectedChainId={selectedChainId}
+                  setSelectedChainId={setSelectedChainId}
+                  selectedTime={selectedTime}
+                  setSelectedTime={setSelectedTime}
+                  openTimePicker={() => setShowTimePicker(true)}
+                  selectedReminder={selectedReminder}
+                  setSelectedReminder={setSelectedReminder}
                 />
+                {!!reminderNotice && <Text style={[styles.reminderNotice, { color: colors.mutedForeground }]}>{reminderNotice}</Text>}
                 <View style={styles.addActions}>
-                  <Pressable
-                    onPress={() => { setShowInput(false); setInputText(''); setSelectedTime(''); }}
-                    style={styles.cancelBtn}
-                  >
-                    <Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Cancel</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={handleAdd}
-                    style={({ pressed }) => [
-                      styles.addConfirmBtn,
-                      { backgroundColor: colors.primary, opacity: pressed ? 0.85 : 1 },
-                    ]}
-                  >
-                    <Text style={styles.addConfirmText}>Add</Text>
+                  <Pressable onPress={resetComposer} style={styles.cancelBtn}><Text style={[styles.cancelText, { color: colors.mutedForeground }]}>Cancel</Text></Pressable>
+                  <Pressable onPress={handleAdd} style={({ pressed }) => [styles.addConfirmBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.85 : 1 }]}>
+                    <Text style={styles.addConfirmText}>Add to plan</Text>
                   </Pressable>
                 </View>
               </>
             ) : (
               <Pressable onPress={() => setShowInput(true)} style={styles.addTrigger}>
-                <Ionicons name="add-circle" size={22} color={colors.primary} />
-                <Text style={[styles.addTriggerText, { color: colors.mutedForeground }]}>
-                  Add task for tomorrow
-                </Text>
+                <View style={[styles.addIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="add" size={20} color={colors.primary} /></View>
+                <View style={styles.addCopy}><Text style={[styles.addTriggerText, { color: colors.foreground }]}>Add task</Text><Text style={[styles.addTriggerSub, { color: colors.mutedForeground }]}>Set a time or link a chain</Text></View>
+                <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
               </Pressable>
             )}
           </View>
-        )}
       </KeyboardAwareScrollViewCompat>
+
+      <TimePickerModal
+        visible={showTimePicker}
+        hour={pickerHour}
+        minute={pickerMinute}
+        setHour={setPickerHour}
+        setMinute={setPickerMinute}
+        onClose={() => setShowTimePicker(false)}
+        onConfirm={chooseCustomTime}
+      />
     </View>
   );
 }
 
-function PlanItemRow({
-  item,
-  index,
-  onToggle,
-  onRemove,
-}: {
-  item: PlanItem;
-  index: number;
-  onToggle: () => void;
-  onRemove: () => void;
-}) {
-  const colors      = useColors();
-  const accentColor = CHAIN_COLORS[index % CHAIN_COLORS.length];
-
-  return (
-    <View
-      style={[
-        styles.planItem,
-        { backgroundColor: colors.card, borderColor: colors.border },
-      ]}
-    >
-      {/* Left accent bar */}
-      <View style={[styles.planBar, { backgroundColor: item.completed ? colors.border : accentColor }]} />
-
-      <Pressable onPress={onToggle} style={styles.planCheck}>
-        <View
-          style={[
-            styles.planCheckCircle,
-            {
-              backgroundColor: item.completed ? colors.primary : 'transparent',
-              borderColor:     item.completed ? colors.primary : colors.border,
-            },
-          ]}
-        >
-          {item.completed && <Ionicons name="checkmark" size={13} color="#fff" />}
-        </View>
-      </Pressable>
-
-      <View style={styles.planTextBlock}>
-        {item.timeSlot ? (
-          <Text style={[styles.planTime, { color: accentColor }]}>{item.timeSlot}</Text>
-        ) : null}
-        <Text
-          style={[
-            styles.planText,
-            {
-              color:               item.completed ? colors.mutedForeground : colors.foreground,
-              textDecorationLine:  item.completed ? 'line-through' : 'none',
-            },
-          ]}
-          numberOfLines={2}
-        >
-          {item.text}
-        </Text>
-      </View>
-
-      <Pressable onPress={onRemove} hitSlop={12}>
-        <Ionicons name="close" size={18} color={colors.mutedForeground} />
-      </Pressable>
+function ChainReflection({ chain, done, isLast }: { chain: Chain; done: boolean; isLast: boolean }) {
+  const colors = useColors();
+  return <View>
+    <View style={styles.reflectRow}>
+      <View style={[styles.reflectDot, { backgroundColor: chain.color }]} />
+      <Text style={[styles.reflectName, { color: colors.foreground }]} numberOfLines={1}>{chain.name}</Text>
+      {done ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '20' }]}><Ionicons name="checkmark" size={12} color={chain.color} /><Text style={[styles.doneBadgeText, { color: chain.color }]}>{getStreak(chain)}d</Text></View> : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>pending</Text>}
     </View>
-  );
+    {!isLast && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
+  </View>;
+}
+
+function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, selectedTime, setSelectedTime, openTimePicker, selectedReminder, setSelectedReminder }: any) {
+  return <View style={styles.composerMeta}>
+    <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>TIME</Text>
+    <FlatList data={QUICK_TIMES} horizontal showsHorizontalScrollIndicator={false} keyExtractor={(time) => time} contentContainerStyle={styles.timeSlots} renderItem={({ item: time }) => <Pressable onPress={() => setSelectedTime(time === selectedTime ? '' : time)} style={[styles.timeChip, { backgroundColor: time === selectedTime ? colors.primary : colors.background, borderColor: time === selectedTime ? colors.primary : colors.border }]}><Text style={[styles.timeChipText, { color: time === selectedTime ? '#fff' : colors.mutedForeground }]}>{time}</Text></Pressable>} ListFooterComponent={<Pressable onPress={openTimePicker} style={[styles.timeChip, { backgroundColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.background, borderColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.border }]}><Ionicons name="time-outline" size={14} color={selectedTime && !QUICK_TIMES.includes(selectedTime) ? '#fff' : colors.mutedForeground} /><Text style={[styles.timeChipText, { color: selectedTime && !QUICK_TIMES.includes(selectedTime) ? '#fff' : colors.mutedForeground }]}>{selectedTime && !QUICK_TIMES.includes(selectedTime) ? selectedTime : 'Custom'}</Text></Pressable>} />
+    <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>LINK TO A CHAIN</Text>
+    <FlatList data={[{ id: '', name: 'None', color: colors.mutedForeground }, ...chains]} horizontal showsHorizontalScrollIndicator={false} keyExtractor={(chain) => chain.id} contentContainerStyle={styles.chainChoices} renderItem={({ item: chain }) => { const selected = (chain.id || undefined) === selectedChainId; return <Pressable onPress={() => setSelectedChainId(chain.id || undefined)} style={[styles.chainChip, { borderColor: selected ? chain.color : colors.border, backgroundColor: selected ? chain.color + '1F' : colors.background }]}><View style={[styles.chainChipDot, { backgroundColor: chain.color }]} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{chain.name}</Text></Pressable>; }} />
+    {!!selectedTime && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>REMIND ME</Text><FlatList data={REMINDER_OPTIONS} horizontal showsHorizontalScrollIndicator={false} keyExtractor={(minutes) => String(minutes)} contentContainerStyle={styles.chainChoices} renderItem={({ item: minutes }) => { const selected = selectedReminder === minutes; return <Pressable onPress={() => setSelectedReminder(selected ? undefined : minutes)} style={[styles.chainChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Ionicons name="notifications-outline" size={13} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{minutes} min before</Text></Pressable>; }} /></>}
+  </View>;
+}
+
+function PlanItemRow({ item, fallbackColor, onToggle, onRemove }: { item: PlanItem; fallbackColor: string; onToggle: () => void; onRemove: () => void }) {
+  const colors = useColors();
+  const accentColor = item.color || fallbackColor;
+  return <View style={[styles.planItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
+    <View style={[styles.planBar, { backgroundColor: item.completed ? colors.border : accentColor }]} />
+    <Pressable onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? accentColor : 'transparent', borderColor: item.completed ? accentColor : colors.border }]}>{item.completed && <Ionicons name="checkmark" size={13} color="#fff" />}</View></Pressable>
+    <View style={styles.planTextBlock}>
+      <View style={styles.planMeta}>{item.timeSlot ? <Text style={[styles.planTime, { color: accentColor }]}>{item.timeSlot}{item.reminderMinutes ? `  ·  ${item.reminderMinutes} MIN REMINDER` : ''}</Text> : <Text style={[styles.planTime, { color: colors.mutedForeground }]}>ANYTIME</Text>}</View>
+      <Text style={[styles.planText, { color: item.completed ? colors.mutedForeground : colors.foreground, textDecorationLine: item.completed ? 'line-through' : 'none' }]} numberOfLines={2}>{item.text}</Text>
+    </View>
+    <Pressable onPress={onRemove} hitSlop={12}><Ionicons name="close" size={18} color={colors.mutedForeground} /></Pressable>
+  </View>;
+}
+
+function TimePickerModal({ visible, hour, minute, setHour, setMinute, onClose, onConfirm }: any) {
+  const colors = useColors();
+  return <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
+    <View style={styles.modalShade}><Pressable style={StyleSheet.absoluteFill} onPress={onClose} /><View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={styles.modalHeader}><Text style={[styles.modalTitle, { color: colors.foreground }]}>Choose a time</Text><Pressable onPress={onClose} hitSlop={12}><Ionicons name="close" size={22} color={colors.mutedForeground} /></Pressable></View>
+      <Text style={[styles.timePreview, { color: colors.primary }]}>{formatTime(hour, minute)}</Text>
+      <View style={styles.pickerColumns}><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>HOUR</Text><FlatList data={HOURS} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable onPress={() => setHour(item)} style={[styles.pickerValue, { backgroundColor: item === hour ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === hour ? colors.primary : colors.foreground }]}>{item % 12 || 12} {item >= 12 ? 'PM' : 'AM'}</Text></Pressable>} /></View><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={MINUTES} keyExtractor={(value) => value} style={styles.pickerList} renderItem={({ item }) => <Pressable onPress={() => setMinute(item)} style={[styles.pickerValue, { backgroundColor: item === minute ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === minute ? colors.primary : colors.foreground }]}>{item}</Text></Pressable>} /></View></View>
+      <Pressable onPress={onConfirm} style={[styles.modalConfirm, { backgroundColor: colors.primary }]}><Text style={styles.modalConfirmText}>Use this time</Text></Pressable>
+    </View></View>
+  </Modal>;
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  header: {
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    gap: 3,
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontFamily: 'Inter_700Bold',
-  },
-  headerSub: {
-    fontSize: 13,
-    fontFamily: 'Inter_400Regular',
-  },
-  scroll: {
-    paddingHorizontal: 20,
-  },
-  sectionLabel: {
-    fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 1.2,
-    marginBottom: 8,
-    marginTop: 4,
-  },
-  tomorrowHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  itemCount: {
-    fontSize: 12,
-    fontFamily: 'Inter_500Medium',
-  },
-  progressWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 12,
-  },
-  progressTrack: {
-    flex: 1,
-    height: 4,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 2,
-  },
-  progressLabel: {
-    fontSize: 11,
-    fontFamily: 'Inter_500Medium',
-    minWidth: 44,
-    textAlign: 'right',
-  },
-  reflectCard: {
-    borderRadius: 18,
-    borderWidth: 1,
-    overflow: 'hidden',
-    marginBottom: 4,
-  },
-  reflectRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingRight: 16,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  reflectBar: {
-    width: 4,
-    height: '100%',
-    minHeight: 36,
-    borderRadius: 2,
-    marginLeft: 0,
-  },
-  reflectTexts: {
-    flex: 1,
-  },
-  reflectName: {
-    fontSize: 15,
-    fontFamily: 'Inter_500Medium',
-  },
-  reflectRight: {
-    alignItems: 'flex-end',
-  },
-  doneBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  doneBadgeText: {
-    fontSize: 12,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  pendingText: {
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-  },
-  divider: {
-    height: 1,
-    marginLeft: 16,
-  },
-  emptySection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 4,
-  },
-  emptyText: {
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-  },
-  emptyFocus: {
-    alignItems: 'center',
-    padding: 32,
-    borderRadius: 18,
-    borderWidth: 1,
-    marginBottom: 12,
-    gap: 8,
-  },
-  emptyFocusTitle: {
-    fontSize: 17,
-    fontFamily: 'Inter_600SemiBold',
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  emptyFocusBody: {
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-    textAlign: 'center',
-    lineHeight: 21,
-  },
-  planItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 1,
-    paddingRight: 14,
-    paddingVertical: 14,
-    marginBottom: 8,
-    gap: 12,
-    overflow: 'hidden',
-  },
-  planBar: {
-    width: 4,
-    height: '100%',
-    minHeight: 44,
-    borderRadius: 2,
-  },
-  planCheck: {
-    padding: 2,
-  },
-  planCheckCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  planTextBlock: {
-    flex: 1,
-    gap: 2,
-  },
-  planTime: {
-    fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  planText: {
-    fontSize: 15,
-    fontFamily: 'Inter_500Medium',
-  },
-  addCard: {
-    borderRadius: 18,
-    borderWidth: 1,
-    marginTop: 4,
-    overflow: 'hidden',
-  },
-  addTrigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 16,
-  },
-  addTriggerText: {
-    fontSize: 15,
-    fontFamily: 'Inter_500Medium',
-  },
-  input: {
-    fontSize: 16,
-    fontFamily: 'Inter_400Regular',
-    padding: 16,
-    paddingBottom: 8,
-  },
-  timeSlots: {
-    paddingHorizontal: 12,
-    paddingBottom: 12,
-    gap: 8,
-  },
-  timeChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  timeChipText: {
-    fontSize: 12,
-    fontFamily: 'Inter_500Medium',
-  },
-  addActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingBottom: 14,
-  },
-  cancelBtn: {
-    padding: 8,
-  },
-  cancelText: {
-    fontSize: 14,
-    fontFamily: 'Inter_500Medium',
-  },
-  addConfirmBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 20,
-  },
-  addConfirmText: {
-    color: '#fff',
-    fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
-  },
+  root: { flex: 1 }, header: { paddingHorizontal: 20, paddingBottom: 18 }, headerEyebrow: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.3, marginBottom: 6 }, headerTitle: { fontSize: 32, fontFamily: 'Inter_700Bold', letterSpacing: -0.8 }, headerSub: { fontSize: 14, fontFamily: 'Inter_400Regular', marginTop: 3 }, scroll: { paddingHorizontal: 20 }, sectionLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.2, marginBottom: 8 }, emptySection: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16, borderRadius: 18, borderWidth: 1 }, emptyText: { fontSize: 13, fontFamily: 'Inter_400Regular', flex: 1, lineHeight: 19 }, reflectCard: { borderRadius: 18, borderWidth: 1, overflow: 'hidden' }, reflectRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, gap: 10 }, reflectDot: { width: 8, height: 8, borderRadius: 4 }, reflectName: { flex: 1, fontSize: 15, fontFamily: 'Inter_500Medium' }, doneBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 }, doneBadgeText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' }, pendingText: { fontSize: 12, fontFamily: 'Inter_400Regular' }, divider: { height: 1, marginLeft: 16 }, focusHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, marginBottom: 10 }, focusCaption: { fontSize: 16, fontFamily: 'Inter_600SemiBold' }, countPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1 }, itemCount: { fontSize: 12, fontFamily: 'Inter_600SemiBold' }, progressWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }, progressTrack: { flex: 1, height: 5, borderRadius: 3, overflow: 'hidden' }, progressFill: { height: '100%', borderRadius: 3 }, progressLabel: { fontSize: 11, fontFamily: 'Inter_500Medium', minWidth: 68, textAlign: 'right' }, emptyFocus: { alignItems: 'center', paddingHorizontal: 28, paddingVertical: 26, borderRadius: 20, borderWidth: 1, marginBottom: 12, gap: 8 }, moonCircle: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginBottom: 2 }, emptyFocusTitle: { fontSize: 18, fontFamily: 'Inter_600SemiBold', textAlign: 'center' }, emptyFocusBody: { fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center', lineHeight: 21 }, planItem: { flexDirection: 'row', alignItems: 'center', borderRadius: 17, borderWidth: 1, paddingRight: 14, paddingVertical: 14, marginBottom: 8, gap: 12, overflow: 'hidden' }, planBar: { width: 4, alignSelf: 'stretch' }, planCheck: { padding: 2 }, planCheckCircle: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, alignItems: 'center', justifyContent: 'center' }, planTextBlock: { flex: 1, gap: 3 }, planMeta: { flexDirection: 'row' }, planTime: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 0.8 }, planText: { fontSize: 15, fontFamily: 'Inter_500Medium' }, addCard: { borderRadius: 19, borderWidth: 1, marginTop: 4, overflow: 'hidden' }, addTrigger: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15 }, addIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }, addCopy: { flex: 1 }, addTriggerText: { fontSize: 16, fontFamily: 'Inter_600SemiBold' }, addTriggerSub: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2 }, input: { fontSize: 16, fontFamily: 'Inter_400Regular', padding: 16, paddingBottom: 10 }, composerMeta: { gap: 7, paddingBottom: 4 }, metaLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1, paddingHorizontal: 16, marginTop: 2 }, timeSlots: { paddingHorizontal: 16, gap: 7, paddingBottom: 8 }, timeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 18, borderWidth: 1 }, timeChipText: { fontSize: 12, fontFamily: 'Inter_500Medium' }, chainChoices: { paddingHorizontal: 16, gap: 7, paddingBottom: 8 }, chainChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 17, borderWidth: 1 }, chainChipDot: { width: 7, height: 7, borderRadius: 4 }, chainChipText: { fontSize: 12, fontFamily: 'Inter_500Medium' }, addActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, paddingHorizontal: 14, paddingBottom: 14, paddingTop: 4 }, cancelBtn: { padding: 8 }, cancelText: { fontSize: 14, fontFamily: 'Inter_500Medium' }, addConfirmBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 }, addConfirmText: { color: '#fff', fontSize: 14, fontFamily: 'Inter_600SemiBold' }, modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000088' }, modalCard: { borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, padding: 20, paddingBottom: 30, maxHeight: '78%' }, modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, modalTitle: { fontSize: 20, fontFamily: 'Inter_700Bold' }, timePreview: { fontSize: 34, fontFamily: 'Inter_700Bold', textAlign: 'center', marginVertical: 18 }, pickerColumns: { flexDirection: 'row', gap: 12, height: 220 }, pickerColumn: { flex: 1 }, pickerLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1, textAlign: 'center', marginBottom: 7 }, pickerList: { flex: 1 }, pickerValue: { borderRadius: 12, paddingVertical: 9, alignItems: 'center', marginBottom: 4 }, pickerValueText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' }, modalConfirm: { borderRadius: 18, alignItems: 'center', paddingVertical: 14, marginTop: 18 }, modalConfirmText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold' }, reminderNotice: { fontSize: 11, fontFamily: 'Inter_400Regular', lineHeight: 16, paddingHorizontal: 16, paddingBottom: 3 },
 });
