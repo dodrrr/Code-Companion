@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface PlanItem {
@@ -80,9 +81,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<PlanItem[]>([]);
   const [activeDate, setActiveDate] = useState(getPlanTodayKey());
   const [tomorrowItemCount, setTomorrowItemCount] = useState(0);
+  const lastTodayKey = useRef(getPlanTodayKey());
 
   useEffect(() => {
     let cancelled = false;
+    let dayTimer: ReturnType<typeof setTimeout>;
     async function refreshPlan(date = getPlanTodayKey()) {
       const [raw, tomorrowRaw] = await Promise.all([
         AsyncStorage.getItem(KEY_PREFIX + date),
@@ -96,7 +99,34 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       }
     }
     void refreshPlan();
-    return () => { cancelled = true; };
+
+    const refreshAfterDayChange = () => {
+      const today = getPlanTodayKey();
+      if (today === lastTodayKey.current) return;
+      lastTodayKey.current = today;
+      void refreshPlan(today);
+    };
+
+    const scheduleDayRollover = () => {
+      const now = new Date();
+      const nextDay = new Date(now);
+      nextDay.setHours(24, 0, 1, 0);
+      dayTimer = setTimeout(() => {
+        refreshAfterDayChange();
+        scheduleDayRollover();
+      }, nextDay.getTime() - now.getTime());
+    };
+
+    scheduleDayRollover();
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') refreshAfterDayChange();
+    });
+
+    return () => {
+      cancelled = true;
+      clearTimeout(dayTimer);
+      appStateSubscription.remove();
+    };
   }, []);
 
   const isToday = activeDate === getPlanTodayKey();
