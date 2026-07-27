@@ -77,7 +77,7 @@ function CalendarGrid({
           : frozen
             ? { backgroundColor: FROZEN_COLOR + '33', borderColor: FROZEN_COLOR }
             : !isFuture && !isBeforeChain
-              ? { backgroundColor: 'transparent', borderColor: colors.border }
+              ? { backgroundColor: colors.background, borderColor: colors.mutedForeground + '99' }
               : { backgroundColor: 'transparent', borderColor: 'transparent' };
 
         return (
@@ -91,7 +91,7 @@ function CalendarGrid({
               { opacity: isEditable && pressed ? 0.7 : isFuture || isBeforeChain ? 0.34 : 1 },
             ]}
           >
-            <View style={[styles.monthDay, stateStyle, isToday && !done && !frozen && { borderColor: chain.color, borderWidth: 1.5 }]}>
+            <View style={[styles.monthDay, stateStyle, isToday && !done && !frozen && { borderColor: chain.color, borderWidth: 2 }]}>
               {frozen ? <Ionicons name="snow" size={12} color={FROZEN_COLOR} /> : <Text style={[styles.monthDayText, { color: done ? '#fff' : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
             </View>
           </Pressable>
@@ -361,15 +361,30 @@ export default function ChainDetailScreen() {
             style={styles.calendarInner}
           >
             <View style={styles.monthHeader}>
-              <Pressable onPress={() => changeMonth(-1)} hitSlop={10} style={styles.monthNavButton}>
+              <Pressable
+                onPress={() => changeMonth(-1)}
+                hitSlop={10}
+                style={({ pressed }) => [
+                  styles.monthNavButton,
+                  { backgroundColor: colors.secondary, borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+                ]}
+              >
                 <Ionicons name="chevron-back" size={18} color={colors.foreground} />
               </Pressable>
               <Text style={[styles.monthTitle, { color: colors.foreground }]}>{formatMonth(month)}</Text>
-              <Pressable onPress={() => changeMonth(1)} hitSlop={10} style={styles.monthNavButton}>
+              <Pressable
+                onPress={() => changeMonth(1)}
+                hitSlop={10}
+                style={({ pressed }) => [
+                  styles.monthNavButton,
+                  { backgroundColor: colors.secondary, borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+                ]}
+              >
                 <Ionicons name="chevron-forward" size={18} color={colors.foreground} />
               </Pressable>
             </View>
             <CalendarGrid chain={chain} month={month} onSelectDay={handleSelectDay} />
+            <Text style={[styles.calendarHint, { color: colors.mutedForeground }]}>Tap today or the previous 3 days to update</Text>
           </View>
           {/* Legend */}
           <View style={styles.legend}>
@@ -535,7 +550,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   calendarInner: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 12,
   },
   monthHeader: {
     flexDirection: 'row',
@@ -544,14 +561,15 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   monthNavButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   monthTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontFamily: 'Inter_600SemiBold',
   },
   monthGrid: {
@@ -561,34 +579,40 @@ const styles = StyleSheet.create({
   monthDayLabel: {
     width: '14.2857%',
     textAlign: 'center',
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: 'Inter_500Medium',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   monthCell: {
     width: '14.2857%',
     aspectRatio: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 3,
+    marginBottom: 5,
   },
   monthDay: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   monthDayText: {
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: 'Inter_600SemiBold',
+  },
+  calendarHint: {
+    marginTop: 8,
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
   },
   legend: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 20,
-    paddingBottom: 14,
+    gap: 16,
+    paddingBottom: 16,
   },
   legendItem: {
     flexDirection: 'row',
@@ -596,12 +620,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   legendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 3,
+    width: 12,
+    height: 12,
+    borderRadius: 4,
   },
   legendLabel: {
-    fontSize: 11,
+    fontSize: 12,
     fontFamily: 'Inter_400Regular',
   },
   startedText: {
