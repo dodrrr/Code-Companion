@@ -20,7 +20,10 @@ const KEY_PREFIX = '@chain_plan_';
 function getTomorrowStr(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
-  return d.toISOString().split('T')[0];
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 const PlanContext = createContext<PlanContextValue | null>(null);
@@ -31,7 +34,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     AsyncStorage.getItem(KEY_PREFIX + dateKey).then((raw) => {
-      if (raw) setItems(JSON.parse(raw));
+      setItems(raw ? JSON.parse(raw) : []);
     });
   }, [dateKey]);
 

@@ -14,9 +14,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import {
+  CHAIN_COLORS,
+} from '@/constants/colors';
+import {
   Chain,
   getStreak,
   getTodayStr,
+  toLocalDateString,
   useChains,
 } from '@/context/ChainsContext';
 
@@ -42,7 +46,7 @@ function CalendarGrid({ chain }: { chain: Chain }) {
     for (let d = 0; d < 7; d++) {
       const dt = new Date(firstSunday);
       dt.setDate(firstSunday.getDate() + w * 7 + d);
-      week.push(dt.toISOString().split('T')[0]);
+      week.push(toLocalDateString(dt));
     }
     weeks.push(week);
   }
@@ -114,7 +118,17 @@ export default function ChainDetailScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { chains, deleteChain, toggleToday, useFreeze, isCompletedToday, isFrozenToday, getRemainingFreezeTokens } = useChains();
+  const {
+    chains,
+    deleteChain,
+    updateChainColor,
+    toggleToday,
+    useFreeze,
+    isCompletedToday,
+    isFrozenToday,
+    getRemainingFreezeTokens,
+    isReady,
+  } = useChains();
 
   const chain = chains.find((c) => c.id === id);
 
@@ -132,7 +146,7 @@ export default function ChainDetailScreen() {
         </Pressable>
         <View style={styles.notFound}>
           <Text style={[styles.notFoundText, { color: colors.mutedForeground }]}>
-            Chain not found
+            {isReady ? 'Chain not found' : 'Loading chain…'}
           </Text>
         </View>
       </View>
@@ -180,6 +194,12 @@ export default function ChainDetailScreen() {
     useFreeze(chain.id);
   }
 
+  function handleColorChange(color: string) {
+    if (!chain || color === chain.color) return;
+    Haptics.selectionAsync();
+    updateChainColor(chain.id, color);
+  }
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       {/* Nav bar */}
@@ -202,6 +222,33 @@ export default function ChainDetailScreen() {
           <Text style={[styles.chainName, { color: colors.foreground }]}>
             {chain.name}
           </Text>
+        </View>
+
+        <View style={styles.accentSection}>
+          <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>CHAIN ACCENT</Text>
+          <View style={styles.colorRow}>
+            {CHAIN_COLORS.map((color) => {
+              const selected = color === chain.color;
+              return (
+                <Pressable
+                  key={color}
+                  accessibilityLabel={`Use ${color} for ${chain.name}`}
+                  onPress={() => handleColorChange(color)}
+                  style={({ pressed }) => [
+                    styles.colorRing,
+                    {
+                      borderColor: selected ? color : 'transparent',
+                      opacity: pressed ? 0.7 : 1,
+                    },
+                  ]}
+                >
+                  <View style={[styles.colorSwatch, { backgroundColor: color }]}>
+                    {selected && <Ionicons name="checkmark" size={16} color="#fff" />}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
 
         {/* Streak hero */}
@@ -352,6 +399,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  accentSection: {
+    gap: 8,
+  },
+  colorRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  colorRing: {
+    borderRadius: 22,
+    borderWidth: 2,
+    padding: 3,
+  },
+  colorSwatch: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   colorDot: {
     width: 16,

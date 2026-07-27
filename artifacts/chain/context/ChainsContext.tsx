@@ -12,8 +12,10 @@ export interface Chain {
 
 interface ChainsContextValue {
   chains: Chain[];
+  isReady: boolean;
   addChain: (name: string, color: string) => void;
   deleteChain: (id: string) => void;
+  updateChainColor: (id: string, color: string) => void;
   toggleToday: (id: string) => void;
   useFreeze: (id: string) => void;
   isCompletedToday: (chain: Chain) => boolean;
@@ -21,10 +23,66 @@ interface ChainsContextValue {
   getRemainingFreezeTokens: (chain: Chain) => number;
 }
 
-const STORAGE_KEY = '@chain_v1';
+const STORAGE_KEY = '@chain_v2';
+const LEGACY_STORAGE_KEY = '@chain_v1';
 
 export function getTodayStr(): string {
-  return new Date().toISOString().split('T')[0];
+  return toLocalDateString(new Date());
+}
+
+export function toLocalDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getLocalDateFromString(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
+function isDateKey(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function uniqueDateKeys(values: unknown): string[] {
+  return Array.from(new Set(Array.isArray(values) ? values.filter(isDateKey) : []));
+}
+
+function normalizeChain(value: unknown): Chain | null {
+  if (!value || typeof value !== 'object') return null;
+  const raw = value as Partial<Chain>;
+  if (!raw.id || !raw.name || !raw.color || !isDateKey(raw.createdAt)) return null;
+
+  const completedDates = uniqueDateKeys(raw.completedDates);
+  const frozenDates = uniqueDateKeys(raw.frozenDates).filter(
+    (date) => !completedDates.includes(date),
+  );
+
+  return {
+    id: raw.id,
+    name: raw.name.trim(),
+    color: raw.color,
+    createdAt: raw.createdAt,
+    completedDates,
+    frozenDates,
+  };
+}
+
+function parseChains(raw: string | null): Chain[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const source = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === 'object' && Array.isArray((parsed as { chains?: unknown }).chains)
+        ? (parsed as { chains: unknown[] }).chains
+        : [];
+    return source.map(normalizeChain).filter((chain): chain is Chain => chain !== null);
+  } catch {
+    return [];
+  }
 }
 
 export function getStreak(chain: Chain): number {
@@ -32,7 +90,7 @@ export function getStreak(chain: Chain): number {
   const all = new Set([...chain.completedDates, ...chain.frozenDates]);
 
   let streak = 0;
-  const d = new Date();
+  const d = getLocalDateFromString(today);
 
   // If today isn't completed/frozen, start counting from yesterday
   if (!all.has(today)) {
@@ -40,7 +98,7 @@ export function getStreak(chain: Chain): number {
   }
 
   while (streak < 3650) {
-    const s = d.toISOString().split('T')[0];
+    const s = toLocalDateString(d);
     if (all.has(s)) {
       streak++;
       d.setDate(d.getDate() - 1);
@@ -56,16 +114,35 @@ const ChainsContext = createContext<ChainsContextValue | null>(null);
 
 export function ChainsProvider({ children }: { children: React.ReactNode }) {
   const [chains, setChains] = useState<Chain[]>([]);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY).then((raw) => {
-      if (raw) setChains(JSON.parse(raw));
-    });
+    let cancelled = false;
+
+    async function hydrate() {
+      const current = parseChains(await AsyncStorage.getItem(STORAGE_KEY));
+      const legacy = current.length > 0 ? [] : parseChains(await AsyncStorage.getItem(LEGACY_STORAGE_KEY));
+      const next = current.length > 0 ? current : legacy;
+
+      if (legacy.length > 0) {
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, chains: legacy }));
+      }
+
+      if (!cancelled) {
+        setChains(next);
+        setIsReady(true);
+      }
+    }
+
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function persist(next: Chain[]) {
     setChains(next);
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+    void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, chains: next }));
   }
 
   function addChain(name: string, color: string) {
@@ -84,6 +161,10 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
     persist(chains.filter((c) => c.id !== id));
   }
 
+  function updateChainColor(id: string, color: string) {
+    persist(chains.map((chain) => (chain.id === id ? { ...chain, color } : chain)));
+  }
+
   function toggleToday(id: string) {
     const today = getTodayStr();
     persist(
@@ -95,6 +176,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
           completedDates: done
             ? c.completedDates.filter((d) => d !== today)
             : [...c.completedDates, today],
+          frozenDates: c.frozenDates.filter((d) => d !== today),
         };
       }),
     );
@@ -106,7 +188,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
     persist(
       chains.map((c) => {
         if (c.id !== id) return c;
-        if (c.frozenDates.includes(today)) return c;
+        if (c.frozenDates.includes(today) || c.completedDates.includes(today)) return c;
         const usedThisMonth = c.frozenDates.filter((d) =>
           d.startsWith(monthPrefix),
         ).length;
@@ -129,8 +211,10 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
     <ChainsContext.Provider
       value={{
         chains,
+        isReady,
         addChain,
         deleteChain,
+        updateChainColor,
         toggleToday,
         useFreeze,
         isCompletedToday,
