@@ -23,6 +23,7 @@ const QUICK_TIMES = ['7 AM', '9 AM', '12 PM', '3 PM', '6 PM', '8 PM'];
 const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
 const MINUTES = ['00', '05', '10', '15', '20', '30', '40', '45', '50', '55'];
 const REMINDER_OPTIONS = [5, 15, 30, 60];
+const UNLINKED_TASK_COLOR = '#8FA2B3';
 
 function getPlanLabel(dateKey: string): string {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -303,7 +304,7 @@ function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, sel
 
 function PlanItemRow({ item, chainName, onToggle, onRemove, onEdit }: { item: PlanItem; chainName?: string; onToggle: () => void; onRemove: () => void; onEdit: () => void }) {
   const colors = useColors();
-  const accentColor = item.color || colors.mutedForeground;
+  const accentColor = item.color || UNLINKED_TASK_COLOR;
   return <View style={[styles.planItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
     <View style={[styles.planBar, { backgroundColor: item.completed ? colors.border : accentColor }]} />
     <Pressable onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? accentColor : 'transparent', borderColor: item.completed ? accentColor : colors.border }]}>{item.completed && <Ionicons name="checkmark" size={13} color="#fff" />}</View></Pressable>
