@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   FlatList,
   Platform,
@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
-import { Chain, useChains } from '@/context/ChainsContext';
+import { Chain, getTodayStr, useChains } from '@/context/ChainsContext';
 import ChainCard from '@/components/ChainCard';
 import { getDailyQuote } from '@/constants/quotes';
 
@@ -35,14 +35,30 @@ const quote = getDailyQuote();
 export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { chains } = useChains();
+  const { chains, isReady } = useChains();
+  const [localDay, setLocalDay] = useState(getTodayStr());
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleNextDay = () => {
+      const now = new Date();
+      const nextDay = new Date(now);
+      nextDay.setHours(24, 0, 1, 0);
+      timer = setTimeout(() => {
+        setLocalDay(getTodayStr());
+        scheduleNextDay();
+      }, nextDay.getTime() - now.getTime());
+    };
+    scheduleNextDay();
+    return () => clearTimeout(timer);
+  }, []);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
 
   const renderChain = useCallback(
     ({ item }: { item: Chain }) => <ChainCard chain={item} />,
-    [],
+    [localDay],
   );
 
   const ListHeader = (
@@ -88,7 +104,11 @@ export default function TodayScreen() {
       </View>
 
       {/* Chain list or empty state */}
-      {chains.length === 0 ? (
+      {!isReady ? (
+        <View style={styles.loading}>
+          <Text style={[styles.loadingText, { color: colors.mutedForeground }]}>Loading your chains…</Text>
+        </View>
+      ) : chains.length === 0 ? (
         <View style={styles.empty}>
           <View
             style={[
@@ -129,6 +149,7 @@ export default function TodayScreen() {
       ) : (
         <FlatList
           data={chains}
+          extraData={localDay}
           keyExtractor={(c) => c.id}
           renderItem={renderChain}
           ListHeaderComponent={ListHeader}
@@ -199,6 +220,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 40,
     gap: 14,
+  },
+  loading: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingText: {
+    fontSize: 15,
+    fontFamily: 'Inter_500Medium',
   },
   emptyIconWrap: {
     width: 88,
