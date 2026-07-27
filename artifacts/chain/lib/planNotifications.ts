@@ -15,15 +15,16 @@ type ReminderResult =
   | { status: 'scheduled'; notificationId: string }
   | { status: 'denied' | 'unavailable' | 'past' };
 
-function getScheduledDate(timeSlot: string, minutesBefore: number): Date | null {
+function getScheduledDate(timeSlot: string, planDate: string, minutesBefore: number): Date | null {
   const match = /^(\d{1,2})(?::(\d{2}))?\s(AM|PM)$/.exec(timeSlot);
   if (!match) return null;
   const [, hourValue, minuteValue = '00', suffix] = match;
   let hour = Number(hourValue);
   if (suffix === 'PM' && hour !== 12) hour += 12;
   if (suffix === 'AM' && hour === 12) hour = 0;
-  const date = new Date();
-  date.setDate(date.getDate() + 1);
+  const [year, month, day] = planDate.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  const date = new Date(year, month - 1, day);
   date.setHours(hour, Number(minuteValue), 0, 0);
   date.setMinutes(date.getMinutes() - minutesBefore);
   return date;
@@ -31,7 +32,7 @@ function getScheduledDate(timeSlot: string, minutesBefore: number): Date | null 
 
 export async function schedulePlanReminder(item: PlanItem, minutesBefore: number): Promise<ReminderResult> {
   if (Platform.OS === 'web') return { status: 'unavailable' };
-  const date = getScheduledDate(item.timeSlot, minutesBefore);
+  const date = getScheduledDate(item.timeSlot, item.planDate, minutesBefore);
   if (!date || date.getTime() <= Date.now()) return { status: 'past' };
   const permissions = await Notifications.getPermissionsAsync();
   const status = permissions.status === 'granted'
