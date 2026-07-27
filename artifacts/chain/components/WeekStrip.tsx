@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
-import { Chain } from '@/context/ChainsContext';
+import { Chain, toLocalDateString } from '@/context/ChainsContext';
 
 interface Props {
   chain: Chain;
@@ -16,7 +16,7 @@ function getRecentDates(count: number): string[] {
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().split('T')[0]);
+    dates.push(toLocalDateString(d));
   }
   return dates;
 }
