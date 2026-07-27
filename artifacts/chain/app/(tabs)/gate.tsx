@@ -100,7 +100,7 @@ function TutorialModal({ onDone }: { onDone: () => void }) {
               onPress={() => (isLast ? onDone() : setStep(step + 1))}
               style={({ pressed }) => [
                 tStyles.nextBtn,
-                { backgroundColor: colors.primary, opacity: pressed ? 0.85 : 1, flex: step > 0 ? 1 : undefined },
+                { backgroundColor: colors.primary, opacity: pressed ? 0.85 : 1 },
               ]}
             >
               <Text style={tStyles.nextText}>{isLast ? "Got it" : "Next"}</Text>
