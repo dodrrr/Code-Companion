@@ -10,12 +10,15 @@ export interface Chain {
   frozenDates: string[];
 }
 
+export type DayStatus = 'done' | 'frozen' | 'missed';
+
 interface ChainsContextValue {
   chains: Chain[];
   isReady: boolean;
   addChain: (name: string, color: string) => void;
   deleteChain: (id: string) => void;
   updateChainColor: (id: string, color: string) => void;
+  setDayStatus: (id: string, date: string, status: DayStatus) => boolean;
   toggleToday: (id: string) => void;
   useFreeze: (id: string) => void;
   isCompletedToday: (chain: Chain) => boolean;
@@ -87,20 +90,24 @@ function parseChains(raw: string | null): Chain[] {
 
 export function getStreak(chain: Chain): number {
   const today = getTodayStr();
-  const all = new Set([...chain.completedDates, ...chain.frozenDates]);
+  const completed = new Set(chain.completedDates);
+  const frozen = new Set(chain.frozenDates);
+  const coveredDays = new Set([...completed, ...frozen]);
 
   let streak = 0;
   const d = getLocalDateFromString(today);
 
   // If today isn't completed/frozen, start counting from yesterday
-  if (!all.has(today)) {
+  if (!coveredDays.has(today)) {
     d.setDate(d.getDate() - 1);
   }
 
   while (streak < 3650) {
     const s = toLocalDateString(d);
-    if (all.has(s)) {
+    if (completed.has(s)) {
       streak++;
+      d.setDate(d.getDate() - 1);
+    } else if (frozen.has(s)) {
       d.setDate(d.getDate() - 1);
     } else {
       break;
@@ -165,37 +172,40 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
     persist(chains.map((chain) => (chain.id === id ? { ...chain, color } : chain)));
   }
 
-  function toggleToday(id: string) {
-    const today = getTodayStr();
+  function setDayStatus(id: string, date: string, status: DayStatus): boolean {
+    const target = chains.find((chain) => chain.id === id);
+    if (!target || !isDateKey(date)) return false;
+
+    if (status === 'frozen' && !target.frozenDates.includes(date)) {
+      const usedThisMonth = target.frozenDates.filter((day) => day.startsWith(date.slice(0, 7))).length;
+      if (usedThisMonth >= 2) return false;
+    }
+
     persist(
-      chains.map((c) => {
-        if (c.id !== id) return c;
-        const done = c.completedDates.includes(today);
-        return {
-          ...c,
-          completedDates: done
-            ? c.completedDates.filter((d) => d !== today)
-            : [...c.completedDates, today],
-          frozenDates: c.frozenDates.filter((d) => d !== today),
-        };
+      chains.map((chain) => {
+        if (chain.id !== id) return chain;
+        const completedDates = chain.completedDates.filter((day) => day !== date);
+        const frozenDates = chain.frozenDates.filter((day) => day !== date);
+
+        if (status === 'done') completedDates.push(date);
+        if (status === 'frozen') frozenDates.push(date);
+
+        return { ...chain, completedDates, frozenDates };
       }),
     );
+    return true;
+  }
+
+  function toggleToday(id: string) {
+    const today = getTodayStr();
+    const chain = chains.find((item) => item.id === id);
+    if (!chain) return;
+    setDayStatus(id, today, chain.completedDates.includes(today) ? 'missed' : 'done');
   }
 
   function useFreeze(id: string) {
     const today = getTodayStr();
-    const monthPrefix = today.slice(0, 7);
-    persist(
-      chains.map((c) => {
-        if (c.id !== id) return c;
-        if (c.frozenDates.includes(today) || c.completedDates.includes(today)) return c;
-        const usedThisMonth = c.frozenDates.filter((d) =>
-          d.startsWith(monthPrefix),
-        ).length;
-        if (usedThisMonth >= 2) return c;
-        return { ...c, frozenDates: [...c.frozenDates, today] };
-      }),
-    );
+    setDayStatus(id, today, 'frozen');
   }
 
   const isCompletedToday = (c: Chain) =>
@@ -215,6 +225,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
         addChain,
         deleteChain,
         updateChainColor,
+        setDayStatus,
         toggleToday,
         useFreeze,
         isCompletedToday,

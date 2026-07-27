@@ -35,7 +35,7 @@ const quote = getDailyQuote();
 export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { chains, isReady } = useChains();
+  const { chains } = useChains();
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
@@ -88,11 +88,7 @@ export default function TodayScreen() {
       </View>
 
       {/* Chain list or empty state */}
-      {!isReady ? (
-        <View style={styles.loading}>
-          <Text style={[styles.loadingText, { color: colors.mutedForeground }]}>Loading your chains…</Text>
-        </View>
-      ) : chains.length === 0 ? (
+      {chains.length === 0 ? (
         <View style={styles.empty}>
           <View
             style={[
@@ -203,15 +199,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 40,
     gap: 14,
-  },
-  loading: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    fontSize: 15,
-    fontFamily: 'Inter_500Medium',
   },
   emptyIconWrap: {
     width: 88,

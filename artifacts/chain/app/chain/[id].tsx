@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Alert,
   Platform,
@@ -18,98 +18,85 @@ import {
 } from '@/constants/colors';
 import {
   Chain,
+  DayStatus,
   getStreak,
   getTodayStr,
   toLocalDateString,
   useChains,
 } from '@/context/ChainsContext';
 
-function CalendarGrid({ chain }: { chain: Chain }) {
+const FROZEN_COLOR = '#5B8CFF';
+const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+function startOfMonth(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1, 12);
+}
+
+function formatMonth(date: Date) {
+  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+function CalendarGrid({
+  chain,
+  month,
+  onSelectDay,
+}: {
+  chain: Chain;
+  month: Date;
+  onSelectDay: (date: string) => void;
+}) {
   const colors = useColors();
   const today = getTodayStr();
-
-  // Build 90 days arranged in weeks (Sunday-first)
-  const NUM_WEEKS = 13;
-  const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-
-  const todayDate = new Date();
-  const todayDow = todayDate.getDay();
-
-  // Find the Sunday of the first week to show
-  const firstSunday = new Date(todayDate);
-  firstSunday.setDate(todayDate.getDate() - todayDow - (NUM_WEEKS - 1) * 7);
-
-  // Build columns (each column = 1 week)
-  const weeks: string[][] = [];
-  for (let w = 0; w < NUM_WEEKS; w++) {
-    const week: string[] = [];
-    for (let d = 0; d < 7; d++) {
-      const dt = new Date(firstSunday);
-      dt.setDate(firstSunday.getDate() + w * 7 + d);
-      week.push(toLocalDateString(dt));
-    }
-    weeks.push(week);
-  }
+  const editableFrom = new Date();
+  editableFrom.setDate(editableFrom.getDate() - 3);
+  const editableFromKey = toLocalDateString(editableFrom);
+  const monthStart = startOfMonth(month);
+  const firstDayOffset = monthStart.getDay();
+  const daysInMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate();
+  const cells = Array.from({ length: 42 }, (_, index) => {
+    const day = index - firstDayOffset + 1;
+    if (day < 1 || day > daysInMonth) return null;
+    return toLocalDateString(new Date(monthStart.getFullYear(), monthStart.getMonth(), day, 12));
+  });
 
   return (
-    <View>
-      {/* Day labels */}
-      <View style={styles.calRow}>
-        <View style={styles.calLabelCol} />
-        {weeks.map((_, wi) => {
-          const d = new Date(firstSunday);
-          d.setDate(firstSunday.getDate() + wi * 7 + 1); // use Mon for month label
-          const isFirstOfMonth = wi === 0 || d.getDate() <= 7;
-          return (
-            <View key={wi} style={styles.calWeekCol}>
-              {isFirstOfMonth ? (
-                <Text style={[styles.calMonthLabel, { color: colors.mutedForeground }]}>
-                  {d.toLocaleDateString('en-US', { month: 'short' })}
-                </Text>
-              ) : (
-                <View style={styles.calMonthLabel} />
-              )}
-            </View>
-          );
-        })}
-      </View>
-
-      {dayLabels.map((dl, di) => (
-        <View key={di} style={styles.calRow}>
-          <Text style={[styles.calDayLabel, { color: colors.mutedForeground }]}>
-            {di % 2 === 1 ? dl : ''}
-          </Text>
-          {weeks.map((week, wi) => {
-            const date = week[di];
-            const completed = chain.completedDates.includes(date);
-            const frozen = chain.frozenDates.includes(date);
-            const isToday = date === today;
-            const isFuture = date > today;
-
-            return (
-              <View key={wi} style={styles.calWeekCol}>
-                <View
-                  style={[
-                    styles.calDot,
-                    isFuture
-                      ? { backgroundColor: 'transparent' }
-                      : completed
-                      ? { backgroundColor: chain.color }
-                      : frozen
-                      ? { backgroundColor: '#4488ff44' }
-                      : { backgroundColor: colors.border },
-                    isToday && !completed && !frozen && {
-                      borderWidth: 1.5,
-                      borderColor: chain.color,
-                      backgroundColor: 'transparent',
-                    },
-                  ]}
-                />
-              </View>
-            );
-          })}
-        </View>
+    <View style={styles.monthGrid}>
+      {DAY_LABELS.map((label, index) => (
+        <Text key={`${label}-${index}`} style={[styles.monthDayLabel, { color: colors.mutedForeground }]}>{label}</Text>
       ))}
+      {cells.map((date, index) => {
+        if (!date) return <View key={`empty-${index}`} style={styles.monthCell} />;
+        const done = chain.completedDates.includes(date);
+        const frozen = chain.frozenDates.includes(date);
+        const isToday = date === today;
+        const isEditable = date >= editableFromKey && date <= today;
+        const isFuture = date > today;
+        const isBeforeChain = date < chain.createdAt;
+        const stateStyle = done
+          ? { backgroundColor: chain.color, borderColor: chain.color }
+          : frozen
+            ? { backgroundColor: FROZEN_COLOR + '33', borderColor: FROZEN_COLOR }
+            : !isFuture && !isBeforeChain
+              ? { backgroundColor: 'transparent', borderColor: colors.border }
+              : { backgroundColor: 'transparent', borderColor: 'transparent' };
+
+        return (
+          <Pressable
+            key={date}
+            disabled={!isEditable}
+            accessibilityLabel={`${date}${done ? ', done' : frozen ? ', frozen' : ', missed'}`}
+            onPress={() => onSelectDay(date)}
+            style={({ pressed }) => [
+              styles.monthCell,
+              { opacity: isEditable && pressed ? 0.7 : isFuture || isBeforeChain ? 0.34 : 1 },
+            ]}
+          >
+            <View style={[styles.monthDay, stateStyle, isToday && !done && !frozen && { borderColor: chain.color, borderWidth: 1.5 }]}>
+              {frozen ? <Ionicons name="snow" size={12} color={FROZEN_COLOR} /> : <Text style={[styles.monthDayText, { color: done ? '#fff' : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
+            </View>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
@@ -122,6 +109,7 @@ export default function ChainDetailScreen() {
     chains,
     deleteChain,
     updateChainColor,
+    setDayStatus,
     toggleToday,
     useFreeze,
     isCompletedToday,
@@ -129,6 +117,8 @@ export default function ChainDetailScreen() {
     getRemainingFreezeTokens,
     isReady,
   } = useChains();
+  const [month, setMonth] = useState(() => startOfMonth(new Date()));
+  const touchStartX = useRef<number | null>(null);
 
   const chain = chains.find((c) => c.id === id);
 
@@ -198,6 +188,33 @@ export default function ChainDetailScreen() {
     if (!chain || color === chain.color) return;
     Haptics.selectionAsync();
     updateChainColor(chain.id, color);
+  }
+
+  function changeMonth(amount: number) {
+    setMonth((current) => new Date(current.getFullYear(), current.getMonth() + amount, 1, 12));
+  }
+
+  function applyDayStatus(date: string, status: DayStatus) {
+    if (!chain) return;
+    const updated = setDayStatus(chain.id, date, status);
+    if (!updated) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('No freezes left', 'Each month includes up to two freeze days.');
+      return;
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }
+
+  function handleSelectDay(date: string) {
+    const prettyDate = new Date(`${date}T12:00:00`).toLocaleDateString('en-US', {
+      weekday: 'long', month: 'long', day: 'numeric',
+    });
+    Alert.alert('Update day', prettyDate, [
+      { text: 'Done', onPress: () => applyDayStatus(date, 'done') },
+      { text: 'Freeze', onPress: () => applyDayStatus(date, 'frozen') },
+      { text: 'Missed', style: 'destructive', onPress: () => applyDayStatus(date, 'missed') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   }
 
   return (
@@ -322,15 +339,38 @@ export default function ChainDetailScreen() {
         )}
 
         {/* Calendar */}
-        <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
-          LAST 90 DAYS
+        <Text
+          style={[styles.sectionLabel, { color: colors.mutedForeground }]}
+        >
+          MONTHLY HISTORY
         </Text>
-        <View style={[styles.calendarCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.calendarInner}>
-              <CalendarGrid chain={chain} />
+        <View
+          style={[
+            styles.calendarCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <View
+            onTouchStart={(event) => { touchStartX.current = event.nativeEvent.pageX; }}
+            onTouchEnd={(event) => {
+              if (touchStartX.current === null) return;
+              const distance = event.nativeEvent.pageX - touchStartX.current;
+              touchStartX.current = null;
+              if (Math.abs(distance) > 48) changeMonth(distance > 0 ? -1 : 1);
+            }}
+            style={styles.calendarInner}
+          >
+            <View style={styles.monthHeader}>
+              <Pressable onPress={() => changeMonth(-1)} hitSlop={10} style={styles.monthNavButton}>
+                <Ionicons name="chevron-back" size={18} color={colors.foreground} />
+              </Pressable>
+              <Text style={[styles.monthTitle, { color: colors.foreground }]}>{formatMonth(month)}</Text>
+              <Pressable onPress={() => changeMonth(1)} hitSlop={10} style={styles.monthNavButton}>
+                <Ionicons name="chevron-forward" size={18} color={colors.foreground} />
+              </Pressable>
             </View>
-          </ScrollView>
+            <CalendarGrid chain={chain} month={month} onSelectDay={handleSelectDay} />
+          </View>
           {/* Legend */}
           <View style={styles.legend}>
             <View style={styles.legendItem}>
@@ -338,11 +378,11 @@ export default function ChainDetailScreen() {
               <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Done</Text>
             </View>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: '#4488ff44' }]} />
+              <View style={[styles.legendDot, { backgroundColor: FROZEN_COLOR + '55', borderColor: FROZEN_COLOR, borderWidth: 1 }]} />
               <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Frozen</Text>
             </View>
             <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: colors.border }]} />
+              <View style={[styles.legendDot, { backgroundColor: 'transparent', borderColor: colors.border, borderWidth: 1 }]} />
               <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Missed</Text>
             </View>
           </View>
@@ -497,34 +537,52 @@ const styles = StyleSheet.create({
   calendarInner: {
     padding: 16,
   },
-  calRow: {
+  monthHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  monthNavButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  monthTitle: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  monthGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  monthDayLabel: {
+    width: '14.2857%',
+    textAlign: 'center',
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    marginBottom: 8,
+  },
+  monthCell: {
+    width: '14.2857%',
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 3,
   },
-  calLabelCol: {
-    width: 16,
-  },
-  calDayLabel: {
-    width: 16,
-    fontSize: 9,
-    fontFamily: 'Inter_400Regular',
-    textAlign: 'center',
-  },
-  calWeekCol: {
-    width: 14,
+  monthDay: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
     alignItems: 'center',
-    marginHorizontal: 1,
+    justifyContent: 'center',
   },
-  calMonthLabel: {
-    height: 14,
-    fontSize: 8,
-    fontFamily: 'Inter_500Medium',
-  },
-  calDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 3,
+  monthDayText: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
   },
   legend: {
     flexDirection: 'row',
