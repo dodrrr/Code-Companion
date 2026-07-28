@@ -301,6 +301,7 @@ export default function PlanScreen() {
             chainName={chains.find((chain) => chain.id === item.chainId)?.name}
             highlighted={item.id === highlightedItemId}
             newlyAdded={item.id === newlyAddedItemId}
+            isLast={index === orderedItems.length - 1}
             locked={!canEditActivePlan}
             completionLocked={!isToday || isActiveDayClosed}
             onToggle={() => handleToggle(item)}
@@ -434,7 +435,7 @@ function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, sel
   </View>;
 }
 
-function PlanItemRow({ item, chainName, highlighted, newlyAdded, locked, completionLocked, onToggle, onRemove, onEdit, onMore }: { item: PlanItem; chainName?: string; highlighted: boolean; newlyAdded: boolean; locked: boolean; completionLocked: boolean; onToggle: () => void; onRemove: () => void; onEdit: () => void; onMore: () => void }) {
+function PlanItemRow({ item, chainName, highlighted, newlyAdded, isLast, locked, completionLocked, onToggle, onRemove, onEdit, onMore }: { item: PlanItem; chainName?: string; highlighted: boolean; newlyAdded: boolean; isLast: boolean; locked: boolean; completionLocked: boolean; onToggle: () => void; onRemove: () => void; onEdit: () => void; onMore: () => void }) {
   const colors = useColors();
   const accentColor = item.color || UNLINKED_TASK_COLOR;
   const borderColor = highlighted ? accentColor : item.isPriority ? colors.primary : item.completed ? accentColor + '48' : colors.border;
@@ -445,7 +446,7 @@ function PlanItemRow({ item, chainName, highlighted, newlyAdded, locked, complet
     arrival.setValue(0);
     Animated.spring(arrival, { toValue: 1, useNativeDriver: true, friction: 8, tension: 90 }).start();
   }, [arrival, newlyAdded]);
-  return <Animated.View style={[styles.planItem, { backgroundColor, borderColor, opacity: arrival, transform: [{ translateY: arrival.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }, { scale: arrival.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }]}>
+  return <Animated.View style={[styles.planItem, { backgroundColor, borderColor, marginBottom: isLast ? 14 : 8, opacity: arrival, transform: [{ translateY: arrival.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }, { scale: arrival.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }]}> 
     <View style={[styles.planBar, { backgroundColor: item.completed ? accentColor + 'A8' : item.isPriority ? colors.primary : accentColor }]} />
     <Pressable disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? accentColor : 'transparent', borderColor: item.completed ? accentColor : completionLocked ? colors.mutedForeground : colors.border, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <Ionicons name="checkmark" size={13} color="#fff" /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
     <Pressable disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
