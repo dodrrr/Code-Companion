@@ -55,7 +55,7 @@ export default function WeekStrip({ chain, days = 7 }: Props) {
                   : frozen
                   ? { backgroundColor: 'transparent', borderColor: '#4488ff', borderWidth: 1.5 }
                   : rest
-                  ? { backgroundColor: colors.secondary, borderColor: colors.border, borderWidth: 1 }
+                  ? { backgroundColor: colors.mutedForeground + '26', borderColor: colors.mutedForeground + '66', borderWidth: 1 }
                   : isToday
                   ? { backgroundColor: 'transparent', borderColor: colors.primary, borderWidth: 1.5 }
                   : { backgroundColor: 'transparent', borderColor: colors.border, borderWidth: 1 },
@@ -64,7 +64,7 @@ export default function WeekStrip({ chain, days = 7 }: Props) {
               {frozen && !completed && (
                 <Ionicons name="snow-outline" size={9} color="#4488ff" />
               )}
-              {rest && !completed && !frozen && <Ionicons name="remove" size={10} color={colors.mutedForeground} />}
+              {rest && !completed && !frozen && <Ionicons name="moon" size={13} color={colors.foreground} />}
             </View>
           </View>
         );
