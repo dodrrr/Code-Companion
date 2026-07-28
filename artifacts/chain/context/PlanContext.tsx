@@ -23,6 +23,7 @@ interface PlanContextValue {
   tomorrowItemCount: number;
   showToday: () => void;
   showTomorrow: () => void;
+  showDate: (date: string) => Promise<PlanItem[]>;
   addItem: (options: PlanItemOptions) => PlanItem;
   updateItem: (id: string, options: PlanItemOptions) => PlanItem | undefined;
   updateReminderMetadata: (id: string, reminderMinutes?: number, notificationId?: string) => void;
@@ -153,6 +154,16 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     });
   }
 
+  function showDate(date: string): Promise<PlanItem[]> {
+    return AsyncStorage.getItem(KEY_PREFIX + date).then((raw) => {
+      const nextItems = normalizeItems(raw, date);
+      setActiveDate(date);
+      setItems(nextItems);
+      if (date === getPlanTomorrowKey()) setTomorrowItemCount(nextItems.length);
+      return nextItems;
+    });
+  }
+
   function persist(next: PlanItem[]) {
     setItems(next);
     void AsyncStorage.setItem(KEY_PREFIX + activeDate, JSON.stringify(next));
@@ -198,7 +209,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     persist(items.map((item) => item.id === id ? { ...item, completed: !item.completed } : item));
   }
 
-  const value = useMemo(() => ({ items, activeDate, isToday, tomorrowItemCount, showToday, showTomorrow, addItem, updateItem, updateReminderMetadata, removeItem, toggleItem }), [items, activeDate, isToday, tomorrowItemCount]);
+  const value = useMemo(() => ({ items, activeDate, isToday, tomorrowItemCount, showToday, showTomorrow, showDate, addItem, updateItem, updateReminderMetadata, removeItem, toggleItem }), [items, activeDate, isToday, tomorrowItemCount]);
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 
