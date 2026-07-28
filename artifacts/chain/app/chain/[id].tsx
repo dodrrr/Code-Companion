@@ -28,7 +28,15 @@ import {
 
 const FROZEN_COLOR = '#5B8CFF';
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
-const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SCHEDULE_DAYS = [
+  { value: 1, label: 'Mon' },
+  { value: 2, label: 'Tue' },
+  { value: 3, label: 'Wed' },
+  { value: 4, label: 'Thu' },
+  { value: 5, label: 'Fri' },
+  { value: 6, label: 'Sat' },
+  { value: 0, label: 'Sun' },
+];
 
 function startOfMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), 1, 12);
@@ -285,10 +293,10 @@ export default function ChainDetailScreen() {
         <View style={[styles.scheduleCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Pressable onPress={() => setScheduleOpen((open) => !open)} style={styles.scheduleHeader}>
             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="calendar-outline" size={17} color={chain.color} /></View>
-            <View style={styles.scheduleCopy}><Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Weekly schedule</Text><Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{chain.restDays.length ? `${chain.restDays.map((day) => WEEK_DAYS[day]).join(', ')} off` : 'Every day counts'}</Text></View>
+            <View style={styles.scheduleCopy}><Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Weekly schedule</Text><Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{chain.restDays.length ? `${SCHEDULE_DAYS.filter(({ value }) => chain.restDays.includes(value)).map(({ label }) => label).join(', ')} off` : 'Every day counts'}</Text></View>
             <Ionicons name={scheduleOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
           </Pressable>
-          {scheduleOpen && <View style={styles.scheduleExpanded}><Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>Choose rest days. They never break your streak.</Text><View style={styles.weekDays}>{WEEK_DAYS.map((label, day) => { const isRest = chain.restDays.includes(day); return <Pressable key={label} onPress={() => toggleRestDay(day)} style={[styles.weekDay, { backgroundColor: isRest ? chain.color : colors.background, borderColor: isRest ? chain.color : colors.border }]}><Text style={[styles.weekDayText, { color: isRest ? '#fff' : colors.mutedForeground }]}>{label.slice(0, 1)}</Text></Pressable>; })}</View></View>}
+          {scheduleOpen && <View style={styles.scheduleExpanded}><Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>Choose rest days. They never break your streak.</Text><View style={styles.weekDays}>{SCHEDULE_DAYS.map(({ label, value }) => { const isRest = chain.restDays.includes(value); return <Pressable key={label} onPress={() => toggleRestDay(value)} style={[styles.weekDay, { backgroundColor: isRest ? chain.color : colors.background, borderColor: isRest ? chain.color : colors.border }]}><Text style={[styles.weekDayText, { color: isRest ? '#fff' : colors.mutedForeground }]}>{label.slice(0, 1)}</Text></Pressable>; })}</View></View>}
         </View>
 
         {/* Streak hero */}
