@@ -27,6 +27,9 @@ interface PlanContextValue {
   addItem: (options: PlanItemOptions) => PlanItem;
   updateItem: (id: string, options: PlanItemOptions) => PlanItem | undefined;
   updateReminderMetadata: (id: string, reminderMinutes?: number, notificationId?: string) => void;
+  completeItemForDate: (id: string, date: string) => Promise<PlanItem | undefined>;
+  updateReminderForDate: (id: string, date: string, reminderMinutes?: number, notificationId?: string) => Promise<void>;
+  moveItemToTomorrow: (id: string) => Promise<PlanItem | undefined>;
   removeItem: (id: string) => void;
   toggleItem: (id: string) => void;
 }
@@ -201,6 +204,49 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     });
   }
 
+  async function completeItemForDate(id: string, date: string): Promise<PlanItem | undefined> {
+    const raw = await AsyncStorage.getItem(KEY_PREFIX + date);
+    const current = normalizeItems(raw, date);
+    const item = current.find((entry) => entry.id === id);
+    if (!item) return undefined;
+    const next = current.map((entry) => entry.id === id ? { ...entry, completed: true } : entry);
+    await AsyncStorage.setItem(KEY_PREFIX + date, JSON.stringify(next));
+    if (date === activeDate) setItems(next);
+    return { ...item, completed: true };
+  }
+
+  async function updateReminderForDate(id: string, date: string, reminderMinutes?: number, notificationId?: string) {
+    const raw = await AsyncStorage.getItem(KEY_PREFIX + date);
+    const current = normalizeItems(raw, date);
+    const next = current.map((entry) => entry.id === id ? { ...entry, reminderMinutes, notificationId } : entry);
+    await AsyncStorage.setItem(KEY_PREFIX + date, JSON.stringify(next));
+    if (date === activeDate) setItems(next);
+  }
+
+  async function moveItemToTomorrow(id: string): Promise<PlanItem | undefined> {
+    const item = items.find((entry) => entry.id === id);
+    if (!item || item.completed) return undefined;
+    const tomorrow = getPlanTomorrowKey();
+    const moved: PlanItem = {
+      ...item,
+      id: `${Date.now()}${Math.random().toString(36).substring(2, 8)}`,
+      completed: false,
+      planDate: tomorrow,
+      reminderMinutes: undefined,
+      notificationId: undefined,
+    };
+    const remaining = items.filter((entry) => entry.id !== id);
+    const tomorrowRaw = await AsyncStorage.getItem(KEY_PREFIX + tomorrow);
+    const nextTomorrow = [...normalizeItems(tomorrowRaw, tomorrow), moved];
+    await Promise.all([
+      AsyncStorage.setItem(KEY_PREFIX + activeDate, JSON.stringify(remaining)),
+      AsyncStorage.setItem(KEY_PREFIX + tomorrow, JSON.stringify(nextTomorrow)),
+    ]);
+    setItems(remaining);
+    setTomorrowItemCount(nextTomorrow.length);
+    return moved;
+  }
+
   function removeItem(id: string) {
     persist(items.filter((item) => item.id !== id));
   }
@@ -209,7 +255,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     persist(items.map((item) => item.id === id ? { ...item, completed: !item.completed } : item));
   }
 
-  const value = useMemo(() => ({ items, activeDate, isToday, tomorrowItemCount, showToday, showTomorrow, showDate, addItem, updateItem, updateReminderMetadata, removeItem, toggleItem }), [items, activeDate, isToday, tomorrowItemCount]);
+  const value = useMemo(() => ({ items, activeDate, isToday, tomorrowItemCount, showToday, showTomorrow, showDate, addItem, updateItem, updateReminderMetadata, completeItemForDate, updateReminderForDate, moveItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, tomorrowItemCount]);
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 
