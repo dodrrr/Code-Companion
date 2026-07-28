@@ -17,6 +17,21 @@ type ReminderResult =
 
 export type PlanNotificationPermission = 'granted' | 'undetermined' | 'denied' | 'unavailable';
 
+export const PLAN_TASK_CATEGORY = 'chain_task_actions';
+export const PLAN_TASK_DONE_ACTION = 'chain_task_done';
+export const PLAN_TASK_SNOOZE_ACTION = 'chain_task_snooze';
+
+export async function configurePlanNotificationActions() {
+  if (Platform.OS === 'web') return;
+  await Notifications.setNotificationCategoryAsync(
+    PLAN_TASK_CATEGORY,
+    [
+      { identifier: PLAN_TASK_DONE_ACTION, buttonTitle: 'Done', options: { opensAppToForeground: true } },
+      { identifier: PLAN_TASK_SNOOZE_ACTION, buttonTitle: 'Remind in 15 min', options: { opensAppToForeground: true } },
+    ],
+  );
+}
+
 export async function getPlanNotificationPermission(): Promise<PlanNotificationPermission> {
   if (Platform.OS === 'web') return 'unavailable';
   const permissions = await Notifications.getPermissionsAsync();
@@ -52,14 +67,34 @@ export async function schedulePlanReminder(item: PlanItem, minutesBefore: number
   if (!date || date.getTime() <= Date.now()) return { status: 'past' };
   const permission = await getPlanNotificationPermission();
   if (permission !== 'granted') return { status: 'denied' };
+  await configurePlanNotificationActions();
   const notificationId = await Notifications.scheduleNotificationAsync({
     content: {
       title: item.text,
       body: `Starting in ${minutesBefore} minutes.`,
       sound: 'default',
+      categoryIdentifier: PLAN_TASK_CATEGORY,
       data: { planItemId: item.id, planDate: item.planDate },
     },
     trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date },
+  });
+  return { status: 'scheduled', notificationId };
+}
+
+export async function schedulePlanSnooze(item: PlanItem, minutes = 15): Promise<ReminderResult> {
+  if (Platform.OS === 'web') return { status: 'unavailable' };
+  const permission = await getPlanNotificationPermission();
+  if (permission !== 'granted') return { status: 'denied' };
+  await configurePlanNotificationActions();
+  const notificationId = await Notifications.scheduleNotificationAsync({
+    content: {
+      title: item.text,
+      body: `A gentle reminder for right now.`,
+      sound: 'default',
+      categoryIdentifier: PLAN_TASK_CATEGORY,
+      data: { planItemId: item.id, planDate: item.planDate },
+    },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds: minutes * 60 },
   });
   return { status: 'scheduled', notificationId };
 }
