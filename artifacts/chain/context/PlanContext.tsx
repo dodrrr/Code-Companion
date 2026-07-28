@@ -21,10 +21,13 @@ interface PlanContextValue {
   items: PlanItem[];
   activeDate: string;
   isToday: boolean;
+  isActiveDayClosed: boolean;
   tomorrowItemCount: number;
   showToday: () => void;
   showTomorrow: () => void;
   showDate: (date: string) => Promise<PlanItem[]>;
+  closeToday: () => Promise<void>;
+  reopenToday: () => Promise<void>;
   addItem: (options: PlanItemOptions) => PlanItem;
   updateItem: (id: string, options: PlanItemOptions) => PlanItem | undefined;
   updateReminderMetadata: (id: string, reminderMinutes?: number, notificationId?: string) => void;
@@ -36,6 +39,7 @@ interface PlanContextValue {
 }
 
 const KEY_PREFIX = '@chain_plan_';
+const CLOSED_DATES_KEY = '@chain_plan_closed_dates';
 
 function toDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -81,27 +85,42 @@ function normalizeItems(raw: string | null, fallbackDate: string): PlanItem[] {
   }
 }
 
+function normalizeClosedDates(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 const PlanContext = createContext<PlanContextValue | null>(null);
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<PlanItem[]>([]);
   const [activeDate, setActiveDate] = useState(getPlanTodayKey());
   const [tomorrowItemCount, setTomorrowItemCount] = useState(0);
+  const [closedDateKeys, setClosedDateKeys] = useState<string[]>([]);
   const lastTodayKey = useRef(getPlanTodayKey());
 
   useEffect(() => {
     let cancelled = false;
     let dayTimer: ReturnType<typeof setTimeout>;
     async function refreshPlan(date = getPlanTodayKey()) {
-      const [raw, tomorrowRaw] = await Promise.all([
+      const [raw, tomorrowRaw, closedRaw] = await Promise.all([
         AsyncStorage.getItem(KEY_PREFIX + date),
         AsyncStorage.getItem(KEY_PREFIX + getPlanTomorrowKey()),
+        AsyncStorage.getItem(CLOSED_DATES_KEY),
       ]);
       const nextItems = normalizeItems(raw, date);
       if (!cancelled) {
         setActiveDate(date);
         setItems(nextItems);
         setTomorrowItemCount(normalizeItems(tomorrowRaw, getPlanTomorrowKey()).length);
+        setClosedDateKeys(normalizeClosedDates(closedRaw));
       }
     }
     void refreshPlan();
@@ -136,6 +155,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const isToday = activeDate === getPlanTodayKey();
+  const isActiveDayClosed = isToday && closedDateKeys.includes(activeDate);
 
   function showToday() {
     const date = getPlanTodayKey();
@@ -167,6 +187,20 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       if (date === getPlanTomorrowKey()) setTomorrowItemCount(nextItems.length);
       return nextItems;
     });
+  }
+
+  async function closeToday() {
+    const today = getPlanTodayKey();
+    const next = closedDateKeys.includes(today) ? closedDateKeys : [...closedDateKeys, today];
+    await AsyncStorage.setItem(CLOSED_DATES_KEY, JSON.stringify(next));
+    setClosedDateKeys(next);
+  }
+
+  async function reopenToday() {
+    const today = getPlanTodayKey();
+    const next = closedDateKeys.filter((date) => date !== today);
+    await AsyncStorage.setItem(CLOSED_DATES_KEY, JSON.stringify(next));
+    setClosedDateKeys(next);
   }
 
   function persist(next: PlanItem[]) {
@@ -258,7 +292,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     persist(items.map((item) => item.id === id ? { ...item, completed: !item.completed } : item));
   }
 
-  const value = useMemo(() => ({ items, activeDate, isToday, tomorrowItemCount, showToday, showTomorrow, showDate, addItem, updateItem, updateReminderMetadata, completeItemForDate, updateReminderForDate, moveItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, tomorrowItemCount]);
+  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, updateReminderForDate, moveItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys]);
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 
