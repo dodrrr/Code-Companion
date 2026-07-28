@@ -13,6 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { Chain, getTodayStr, useChains } from '@/context/ChainsContext';
 import { PlanItem, usePlan } from '@/context/PlanContext';
@@ -41,7 +42,8 @@ export default function PlanScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { chains } = useChains();
-  const { items, activeDate, isToday, tomorrowItemCount, showToday, showTomorrow, addItem, updateItem, updateReminderMetadata, removeItem, toggleItem } = usePlan();
+  const { items, activeDate, isToday, tomorrowItemCount, showToday, showTomorrow, showDate, addItem, updateItem, updateReminderMetadata, removeItem, toggleItem } = usePlan();
+  const { taskId, planDate } = useLocalSearchParams<{ taskId?: string; planDate?: string }>();
   const [inputText, setInputText] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
   const [selectedChainId, setSelectedChainId] = useState<string | undefined>();
@@ -52,6 +54,7 @@ export default function PlanScreen() {
   const [editingItem, setEditingItem] = useState<PlanItem | null>(null);
   const [showCompletion, setShowCompletion] = useState(false);
   const [showReminderPermission, setShowReminderPermission] = useState(false);
+  const [highlightedItemId, setHighlightedItemId] = useState<string | undefined>();
   const [pickerHour, setPickerHour] = useState(9);
   const [pickerMinute, setPickerMinute] = useState('00');
   const inputRef = useRef<TextInput>(null);
@@ -62,6 +65,17 @@ export default function PlanScreen() {
   const progressFill = items.length ? completedCount / items.length : 0;
   const selectedChain = chains.find((chain) => chain.id === selectedChainId);
   const orderedItems = [...items].sort((a, b) => timeSortValue(a.timeSlot) - timeSortValue(b.timeSlot));
+
+  useEffect(() => {
+    if (!taskId || !planDate) return;
+    let cancelled = false;
+    void showDate(planDate).then((nextItems) => {
+      if (cancelled || !nextItems.some((item) => item.id === taskId)) return;
+      setHighlightedItemId(taskId);
+      setTimeout(() => !cancelled && setHighlightedItemId(undefined), 5000);
+    });
+    return () => { cancelled = true; };
+  }, [taskId, planDate]);
 
   function resetComposer() {
     setInputText('');
@@ -198,6 +212,7 @@ export default function PlanScreen() {
             key={item.id}
             item={item}
             chainName={chains.find((chain) => chain.id === item.chainId)?.name}
+            highlighted={item.id === highlightedItemId}
             onToggle={() => handleToggle(item)}
             onRemove={() => { void cancelPlanReminder(item.notificationId); removeItem(item.id); }}
             onEdit={() => startEditing(item)}
@@ -302,10 +317,10 @@ function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, sel
   </View>;
 }
 
-function PlanItemRow({ item, chainName, onToggle, onRemove, onEdit }: { item: PlanItem; chainName?: string; onToggle: () => void; onRemove: () => void; onEdit: () => void }) {
+function PlanItemRow({ item, chainName, highlighted, onToggle, onRemove, onEdit }: { item: PlanItem; chainName?: string; highlighted: boolean; onToggle: () => void; onRemove: () => void; onEdit: () => void }) {
   const colors = useColors();
   const accentColor = item.color || UNLINKED_TASK_COLOR;
-  return <View style={[styles.planItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
+  return <View style={[styles.planItem, { backgroundColor: highlighted ? accentColor + '14' : colors.card, borderColor: highlighted ? accentColor : colors.border }]}>
     <View style={[styles.planBar, { backgroundColor: item.completed ? colors.border : accentColor }]} />
     <Pressable onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? accentColor : 'transparent', borderColor: item.completed ? accentColor : colors.border }]}>{item.completed && <Ionicons name="checkmark" size={13} color="#fff" />}</View></Pressable>
     <Pressable onPress={onEdit} style={styles.planTextBlock}>
