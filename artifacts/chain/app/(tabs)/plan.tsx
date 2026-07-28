@@ -163,6 +163,8 @@ export default function PlanScreen() {
   }
 
   function handleToggle(item: PlanItem) {
+    // Tomorrow is for planning. Tasks only become actionable once their day starts.
+    if (!isToday || isActiveDayClosed) return;
     const isLastTask = !item.completed && items.length > 0 && completedCount + 1 === items.length;
     Haptics.impactAsync(isLastTask ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
     toggleItem(item.id);
@@ -285,6 +287,7 @@ export default function PlanScreen() {
             highlighted={item.id === highlightedItemId}
             newlyAdded={item.id === newlyAddedItemId}
             locked={!canEditActivePlan}
+            completionLocked={!isToday || isActiveDayClosed}
             onToggle={() => handleToggle(item)}
             onRemove={() => { void cancelPlanReminder(item.notificationId); removeItem(item.id); }}
             onEdit={() => startEditing(item)}
@@ -407,20 +410,22 @@ function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, sel
   </View>;
 }
 
-function PlanItemRow({ item, chainName, highlighted, newlyAdded, locked, onToggle, onRemove, onEdit }: { item: PlanItem; chainName?: string; highlighted: boolean; newlyAdded: boolean; locked: boolean; onToggle: () => void; onRemove: () => void; onEdit: () => void }) {
+function PlanItemRow({ item, chainName, highlighted, newlyAdded, locked, completionLocked, onToggle, onRemove, onEdit }: { item: PlanItem; chainName?: string; highlighted: boolean; newlyAdded: boolean; locked: boolean; completionLocked: boolean; onToggle: () => void; onRemove: () => void; onEdit: () => void }) {
   const colors = useColors();
   const accentColor = item.color || UNLINKED_TASK_COLOR;
+  const borderColor = highlighted ? accentColor : item.isPriority ? colors.primary : colors.border;
+  const backgroundColor = highlighted ? accentColor + '14' : item.isPriority ? colors.primary + '0D' : colors.card;
   const arrival = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!newlyAdded) return;
     arrival.setValue(0);
     Animated.spring(arrival, { toValue: 1, useNativeDriver: true, friction: 8, tension: 90 }).start();
   }, [arrival, newlyAdded]);
-  return <Animated.View style={[styles.planItem, { backgroundColor: highlighted ? accentColor + '14' : colors.card, borderColor: highlighted ? accentColor : colors.border, opacity: arrival, transform: [{ translateY: arrival.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }, { scale: arrival.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }]}>
-    <View style={[styles.planBar, { backgroundColor: item.completed ? colors.border : accentColor }]} />
-    <Pressable disabled={locked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? accentColor : 'transparent', borderColor: item.completed ? accentColor : colors.border }]}>{item.completed && <Ionicons name="checkmark" size={13} color="#fff" />}</View></Pressable>
+  return <Animated.View style={[styles.planItem, { backgroundColor, borderColor, opacity: arrival, transform: [{ translateY: arrival.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }, { scale: arrival.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }]}>
+    <View style={[styles.planBar, { backgroundColor: item.completed ? colors.border : item.isPriority ? colors.primary : accentColor }]} />
+    <Pressable disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? accentColor : 'transparent', borderColor: item.completed ? accentColor : completionLocked ? colors.mutedForeground : colors.border, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <Ionicons name="checkmark" size={13} color="#fff" /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
     <Pressable disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
-      <View style={styles.planMeta}>{item.isPriority && <View style={[styles.priorityBadge, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="sparkles" size={10} color={colors.primary} /><Text style={[styles.priorityBadgeText, { color: colors.primary }]}>ONE THING</Text></View>}{item.timeSlot ? <Text style={[styles.planTime, { color: accentColor }]}>{item.timeSlot}{item.reminderMinutes ? `  ·  ${item.reminderMinutes} MIN REMINDER` : ''}</Text> : <Text style={[styles.planTime, { color: colors.mutedForeground }]}>ANYTIME</Text>}{chainName && <View style={[styles.linkBadge, { backgroundColor: accentColor + '1A' }]}><Ionicons name="link-outline" size={10} color={accentColor} /><Text style={[styles.linkBadgeText, { color: accentColor }]}>{chainName}</Text></View>}</View>
+      <View style={styles.planMeta}>{item.isPriority && <View style={[styles.priorityBadge, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="sparkles" size={10} color={colors.primary} /><Text style={[styles.priorityBadgeText, { color: colors.primary }]}>ONE THING</Text></View>}{completionLocked && !locked && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 8, backgroundColor: colors.mutedForeground + '18' }}><Ionicons name="lock-closed-outline" size={9} color={colors.mutedForeground} /><Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.6 }}>TOMORROW</Text></View>}{item.timeSlot ? <Text style={[styles.planTime, { color: accentColor }]}>{item.timeSlot}{item.reminderMinutes ? `  ·  ${item.reminderMinutes} MIN REMINDER` : ''}</Text> : <Text style={[styles.planTime, { color: colors.mutedForeground }]}>ANYTIME</Text>}{chainName && <View style={[styles.linkBadge, { backgroundColor: accentColor + '1A' }]}><Ionicons name="link-outline" size={10} color={accentColor} /><Text style={[styles.linkBadgeText, { color: accentColor }]}>{chainName}</Text></View>}</View>
       <Text style={[styles.planText, { color: item.completed ? colors.mutedForeground : colors.foreground, textDecorationLine: item.completed ? 'line-through' : 'none' }]} numberOfLines={2}>{item.text}</Text>
     </Pressable>
     {locked ? <Ionicons name="lock-closed-outline" size={16} color={colors.mutedForeground} /> : <Pressable onPress={onRemove} hitSlop={12}><Ionicons name="close" size={18} color={colors.mutedForeground} /></Pressable>}
