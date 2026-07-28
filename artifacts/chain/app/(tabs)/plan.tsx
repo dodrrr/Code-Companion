@@ -16,7 +16,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
-import { Chain, getTodayStr, useChains } from '@/context/ChainsContext';
+import { Chain, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
 import { PlanItem, usePlan } from '@/context/PlanContext';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { cancelPlanReminder, getPlanNotificationPermission, requestPlanNotificationPermission, schedulePlanReminder } from '@/lib/planNotifications';
@@ -43,7 +43,7 @@ export default function PlanScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { chains, setDayStatus } = useChains();
-  const { items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, moveItemToTomorrow, removeItem, toggleItem } = usePlan();
+  const { items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem } = usePlan();
   const { taskId, planDate } = useLocalSearchParams<{ taskId?: string; planDate?: string }>();
   const [inputText, setInputText] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
@@ -60,6 +60,7 @@ export default function PlanScreen() {
   const [chainCompletion, setChainCompletion] = useState<{ item: PlanItem; chain: Chain; finishesAgenda: boolean } | null>(null);
   const [highlightedItemId, setHighlightedItemId] = useState<string | undefined>();
   const [newlyAddedItemId, setNewlyAddedItemId] = useState<string | undefined>();
+  const [taskMenuItem, setTaskMenuItem] = useState<PlanItem | null>(null);
   const [pickerHour, setPickerHour] = useState(9);
   const [pickerMinute, setPickerMinute] = useState('00');
   const inputRef = useRef<TextInput>(null);
@@ -189,12 +190,25 @@ export default function PlanScreen() {
     removeItem(item.id);
   }
 
+  async function copyToTomorrow(item: PlanItem) {
+    setTaskMenuItem(null);
+    const copied = await copyItemToTomorrow(item.id);
+    if (!copied) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (copied.timeSlot && copied.reminderMinutes) {
+      const result = await schedulePlanReminder(copied, copied.reminderMinutes);
+      if (result.status === 'scheduled') {
+        await updateReminderForDate(copied.id, copied.planDate, copied.reminderMinutes, result.notificationId);
+      }
+    }
+  }
+
   function completeLinkedChain() {
     if (!chainCompletion) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const remainingChainsAreDone = chains
       .filter((chain) => chain.id !== chainCompletion.chain.id)
-      .every((chain) => chain.completedDates.includes(today));
+      .every((chain) => isRestDay(chain, today) || chain.completedDates.includes(today));
     const shouldCelebrate = chainCompletion.finishesAgenda && remainingChainsAreDone;
     setDayStatus(chainCompletion.chain.id, today, 'done');
     setChainCompletion(null);
@@ -248,7 +262,7 @@ export default function PlanScreen() {
           <View style={[styles.reflectCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {chains.map((chain, index) => {
               const done = chain.completedDates.includes(today);
-              return <ChainReflection key={chain.id} chain={chain} done={done} isLast={index === chains.length - 1} />;
+              return <ChainReflection key={chain.id} chain={chain} done={done} resting={isRestDay(chain, today)} isLast={index === chains.length - 1} />;
             })}
           </View>
         )}
@@ -291,6 +305,7 @@ export default function PlanScreen() {
             onToggle={() => handleToggle(item)}
             onRemove={() => { void cancelPlanReminder(item.notificationId); removeItem(item.id); }}
             onEdit={() => startEditing(item)}
+            onMore={() => setTaskMenuItem(item)}
           />
         ))}
 
@@ -382,17 +397,25 @@ export default function PlanScreen() {
       <ReminderPermissionMoment visible={showReminderPermission} minutes={selectedReminder} onSkip={() => { setShowReminderPermission(false); savePlanItem(false); }} onAllow={() => { void enableRemindersAndSave(); }} />
       <DayReviewMoment visible={showDayReview} completedCount={completedCount} totalCount={items.length} pendingItems={items.filter((item) => !item.completed)} onMove={(item) => { void moveToTomorrow(item); }} onLetGo={letGo} onClose={() => setShowDayReview(false)} onPrepareTomorrow={finishDayAndPrepareTomorrow} />
       <ChainCompletionMoment visible={!!chainCompletion} item={chainCompletion?.item} chain={chainCompletion?.chain} onConfirm={completeLinkedChain} onClose={() => setChainCompletion(null)} />
+      <TaskMenuMoment
+        item={taskMenuItem}
+        showCopy={isToday}
+        onClose={() => setTaskMenuItem(null)}
+        onCopy={() => { if (taskMenuItem) void copyToTomorrow(taskMenuItem); }}
+        onEdit={() => { if (taskMenuItem) startEditing(taskMenuItem); setTaskMenuItem(null); }}
+        onDelete={() => { if (taskMenuItem) { void cancelPlanReminder(taskMenuItem.notificationId); removeItem(taskMenuItem.id); } setTaskMenuItem(null); }}
+      />
     </View>
   );
 }
 
-function ChainReflection({ chain, done, isLast }: { chain: Chain; done: boolean; isLast: boolean }) {
+function ChainReflection({ chain, done, resting, isLast }: { chain: Chain; done: boolean; resting: boolean; isLast: boolean }) {
   const colors = useColors();
   return <View>
     <View style={styles.reflectRow}>
       <View style={[styles.reflectDot, { backgroundColor: chain.color }]} />
       <Text style={[styles.reflectName, { color: colors.foreground }]} numberOfLines={1}>{chain.name}</Text>
-      {done ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '20' }]}><Ionicons name="checkmark" size={12} color={chain.color} /><Text style={[styles.doneBadgeText, { color: chain.color }]}>done today</Text></View> : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>pending</Text>}
+      {done ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '20' }]}><Ionicons name="checkmark" size={12} color={chain.color} /><Text style={[styles.doneBadgeText, { color: chain.color }]}>done today</Text></View> : resting ? <View style={[styles.doneBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="moon-outline" size={12} color={colors.mutedForeground} /><Text style={[styles.doneBadgeText, { color: colors.mutedForeground }]}>rest day</Text></View> : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>pending</Text>}
     </View>
     {!isLast && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
   </View>;
@@ -410,7 +433,7 @@ function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, sel
   </View>;
 }
 
-function PlanItemRow({ item, chainName, highlighted, newlyAdded, locked, completionLocked, onToggle, onRemove, onEdit }: { item: PlanItem; chainName?: string; highlighted: boolean; newlyAdded: boolean; locked: boolean; completionLocked: boolean; onToggle: () => void; onRemove: () => void; onEdit: () => void }) {
+function PlanItemRow({ item, chainName, highlighted, newlyAdded, locked, completionLocked, onToggle, onRemove, onEdit, onMore }: { item: PlanItem; chainName?: string; highlighted: boolean; newlyAdded: boolean; locked: boolean; completionLocked: boolean; onToggle: () => void; onRemove: () => void; onEdit: () => void; onMore: () => void }) {
   const colors = useColors();
   const accentColor = item.color || UNLINKED_TASK_COLOR;
   const borderColor = highlighted ? accentColor : item.isPriority ? colors.primary : colors.border;
@@ -428,8 +451,17 @@ function PlanItemRow({ item, chainName, highlighted, newlyAdded, locked, complet
       <View style={styles.planMeta}>{item.isPriority && <View style={[styles.priorityBadge, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="sparkles" size={10} color={colors.primary} /><Text style={[styles.priorityBadgeText, { color: colors.primary }]}>ONE THING</Text></View>}{completionLocked && !locked && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 8, backgroundColor: colors.mutedForeground + '18' }}><Ionicons name="lock-closed-outline" size={9} color={colors.mutedForeground} /><Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.6 }}>TOMORROW</Text></View>}{item.timeSlot ? <Text style={[styles.planTime, { color: accentColor }]}>{item.timeSlot}{item.reminderMinutes ? `  ·  ${item.reminderMinutes} MIN REMINDER` : ''}</Text> : <Text style={[styles.planTime, { color: colors.mutedForeground }]}>ANYTIME</Text>}{chainName && <View style={[styles.linkBadge, { backgroundColor: accentColor + '1A' }]}><Ionicons name="link-outline" size={10} color={accentColor} /><Text style={[styles.linkBadgeText, { color: accentColor }]}>{chainName}</Text></View>}</View>
       <Text style={[styles.planText, { color: item.completed ? colors.mutedForeground : colors.foreground, textDecorationLine: item.completed ? 'line-through' : 'none' }]} numberOfLines={2}>{item.text}</Text>
     </Pressable>
-    {locked ? <Ionicons name="lock-closed-outline" size={16} color={colors.mutedForeground} /> : <Pressable onPress={onRemove} hitSlop={12}><Ionicons name="close" size={18} color={colors.mutedForeground} /></Pressable>}
+    {locked ? <Ionicons name="lock-closed-outline" size={16} color={colors.mutedForeground} /> : <Pressable onPress={onMore} hitSlop={12}><Ionicons name="ellipsis-horizontal" size={20} color={colors.mutedForeground} /></Pressable>}
   </Animated.View>;
+}
+
+function TaskMenuMoment({ item, showCopy, onClose, onCopy, onEdit, onDelete }: { item: PlanItem | null; showCopy: boolean; onClose: () => void; onCopy: () => void; onEdit: () => void; onDelete: () => void }) {
+  const colors = useColors();
+  if (!item) return null;
+  const titleStyle = { color: colors.foreground, fontSize: 17, fontFamily: 'Inter_600SemiBold', marginBottom: 16 } as const;
+  const actionStyle = { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 15, padding: 14, marginBottom: 8 } as const;
+  const actionTextStyle = { fontSize: 14, fontFamily: 'Inter_600SemiBold' } as const;
+  return <Modal transparent visible animationType="fade" onRequestClose={onClose}><View style={completionStyles.shade}><View style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch', padding: 22 }]}><Text style={titleStyle} numberOfLines={1}>{item.text}</Text>{showCopy && <Pressable onPress={onCopy} style={[actionStyle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="copy-outline" size={18} color={colors.primary} /><Text style={[actionTextStyle, { color: colors.primary }]}>Copy to tomorrow</Text></Pressable>}<Pressable onPress={onEdit} style={[actionStyle, { backgroundColor: colors.background }]}><Ionicons name="create-outline" size={18} color={colors.foreground} /><Text style={[actionTextStyle, { color: colors.foreground }]}>Edit task</Text></Pressable><Pressable onPress={onDelete} style={[actionStyle, { backgroundColor: colors.destructive + '16' }]}><Ionicons name="trash-outline" size={18} color={colors.destructive} /><Text style={[actionTextStyle, { color: colors.destructive }]}>Delete task</Text></Pressable><Pressable onPress={onClose} style={{ alignItems: 'center', paddingTop: 8 }}><Text style={{ color: colors.mutedForeground, fontSize: 14, fontFamily: 'Inter_500Medium' }}>Cancel</Text></Pressable></View></View></Modal>;
 }
 
 function CompletionMoment({ visible, onClose, onPrepareTomorrow }: { visible: boolean; onClose: () => void; onPrepareTomorrow: () => void }) {
