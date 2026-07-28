@@ -36,7 +36,14 @@ const APPS: AppEntry[] = [
 ];
 
 const GATE_KEY     = '@chain_gate_apps';
+const GATE_RULES_KEY = '@chain_gate_rules';
 const TUTORIAL_KEY = '@chain_gate_tutorial_seen';
+const DAILY_LIMIT_OPTIONS = [15, 30, 45, 60, 90, 120];
+
+type GateMode = 'every_open' | 'daily_limit';
+type GateRule = { mode: GateMode; dailyLimitMinutes: number };
+
+const DEFAULT_RULE: GateRule = { mode: 'every_open', dailyLimitMinutes: 30 };
 
 // ─── Tutorial modal ──────────────────────────────────────────────────────────
 
@@ -119,6 +126,22 @@ function TutorialModal({ onDone }: { onDone: () => void }) {
   );
 }
 
+function GateRuleModal({ app, initialRule, onSave, onClose }: { app: AppEntry; initialRule: GateRule; onSave: (rule: GateRule) => void; onClose: () => void }) {
+  const colors = useColors();
+  const [rule, setRule] = useState<GateRule>(initialRule);
+  return <Modal transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}><View style={ruleStyles.backdrop}><View style={[ruleStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+    <View style={[ruleStyles.appIcon, { backgroundColor: app.iconColor + '22' }]}>{app.iconText ? <Text style={[styles.appIconText, { color: app.iconColor }]}>{app.iconText}</Text> : <Ionicons name={app.icon} size={21} color={app.iconColor} />}</View>
+    <Text style={[ruleStyles.eyebrow, { color: colors.primary }]}>PROTECT {app.name.toUpperCase()}</Text>
+    <Text style={[ruleStyles.title, { color: colors.foreground }]}>When should Gate step in?</Text>
+    <Pressable onPress={() => setRule((current) => ({ ...current, mode: 'every_open' }))} style={[ruleStyles.mode, { backgroundColor: rule.mode === 'every_open' ? colors.primary + '16' : colors.background, borderColor: rule.mode === 'every_open' ? colors.primary : colors.border }]}><View style={[ruleStyles.modeIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="shield-outline" size={19} color={colors.primary} /></View><View style={ruleStyles.modeCopy}><Text style={[ruleStyles.modeTitle, { color: colors.foreground }]}>Every opening</Text><Text style={[ruleStyles.modeBody, { color: colors.mutedForeground }]}>Show a pause before every open.</Text></View>{rule.mode === 'every_open' && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}</Pressable>
+    <Pressable onPress={() => setRule((current) => ({ ...current, mode: 'daily_limit' }))} style={[ruleStyles.mode, { backgroundColor: rule.mode === 'daily_limit' ? colors.primary + '16' : colors.background, borderColor: rule.mode === 'daily_limit' ? colors.primary : colors.border }]}><View style={[ruleStyles.modeIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="timer-outline" size={19} color={colors.primary} /></View><View style={ruleStyles.modeCopy}><Text style={[ruleStyles.modeTitle, { color: colors.foreground }]}>Daily limit</Text><Text style={[ruleStyles.modeBody, { color: colors.mutedForeground }]}>Pause once you reach your chosen time.</Text></View>{rule.mode === 'daily_limit' && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}</Pressable>
+    {rule.mode === 'daily_limit' && <><Text style={[ruleStyles.limitLabel, { color: colors.mutedForeground }]}>DAILY TIME</Text><View style={ruleStyles.limitRow}>{DAILY_LIMIT_OPTIONS.map((minutes) => <Pressable key={minutes} onPress={() => setRule((current) => ({ ...current, dailyLimitMinutes: minutes }))} style={[ruleStyles.limitPill, { backgroundColor: rule.dailyLimitMinutes === minutes ? colors.primary : colors.background, borderColor: rule.dailyLimitMinutes === minutes ? colors.primary : colors.border }]}><Text style={[ruleStyles.limitText, { color: rule.dailyLimitMinutes === minutes ? '#fff' : colors.mutedForeground }]}>{minutes >= 60 ? `${minutes / 60}h` : `${minutes}m`}</Text></Pressable>)}</View></>}
+    <Text style={[ruleStyles.note, { color: colors.mutedForeground }]}>This saves your Gate rule. Native enforcement comes with the full iOS Gate integration.</Text>
+    <Pressable onPress={() => onSave(rule)} style={[ruleStyles.save, { backgroundColor: colors.primary }]}><Text style={ruleStyles.saveText}>Save protection</Text></Pressable>
+    <Pressable onPress={onClose} style={ruleStyles.cancel}><Text style={[ruleStyles.cancelText, { color: colors.mutedForeground }]}>Cancel</Text></Pressable>
+  </View></View></Modal>;
+}
+
 // ─── Main screen ─────────────────────────────────────────────────────────────
 
 export default function GateScreen() {
@@ -126,6 +149,8 @@ export default function GateScreen() {
   const insets = useSafeAreaInsets();
   const { chains } = useChains();
   const [enabled,         setEnabled]         = useState<Record<string, boolean>>({});
+  const [rules,           setRules]           = useState<Record<string, GateRule>>({});
+  const [configuringApp,  setConfiguringApp]  = useState<AppEntry | null>(null);
   const [showTutorial,    setShowTutorial]     = useState(false);
   const [tutorialChecked, setTutorialChecked]  = useState(false);
 
@@ -135,9 +160,11 @@ export default function GateScreen() {
   useEffect(() => {
     Promise.all([
       AsyncStorage.getItem(GATE_KEY),
+      AsyncStorage.getItem(GATE_RULES_KEY),
       AsyncStorage.getItem(TUTORIAL_KEY),
-    ]).then(([gateRaw, tutorialSeen]) => {
+    ]).then(([gateRaw, rulesRaw, tutorialSeen]) => {
       if (gateRaw) setEnabled(JSON.parse(gateRaw));
+      if (rulesRaw) setRules(JSON.parse(rulesRaw));
       if (!tutorialSeen) setShowTutorial(true);
       setTutorialChecked(true);
     });
@@ -149,9 +176,25 @@ export default function GateScreen() {
   }
 
   function toggle(id: string) {
-    const next = { ...enabled, [id]: !enabled[id] };
+    const nextValue = !enabled[id];
+    if (nextValue) {
+      const app = APPS.find((entry) => entry.id === id);
+      if (app) setConfiguringApp(app);
+      return;
+    }
+    const next = { ...enabled, [id]: false };
     setEnabled(next);
     AsyncStorage.setItem(GATE_KEY, JSON.stringify(next));
+  }
+
+  function saveRule(app: AppEntry, rule: GateRule) {
+    const nextEnabled = { ...enabled, [app.id]: true };
+    const nextRules = { ...rules, [app.id]: rule };
+    setEnabled(nextEnabled);
+    setRules(nextRules);
+    AsyncStorage.setItem(GATE_KEY, JSON.stringify(nextEnabled));
+    AsyncStorage.setItem(GATE_RULES_KEY, JSON.stringify(nextRules));
+    setConfiguringApp(null);
   }
 
   function openDemo() {
@@ -163,6 +206,8 @@ export default function GateScreen() {
         chainName:  firstChain?.name ?? 'Write Daily',
         streak:     firstChain ? String(firstChain.completedDates.length) : '14',
         chainColor: firstChain?.color ?? '#FF6B35',
+        gateMode: rules.instagram?.mode ?? 'every_open',
+        dailyLimit: String(rules.instagram?.dailyLimitMinutes ?? 30),
       },
     });
   }
@@ -173,6 +218,7 @@ export default function GateScreen() {
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       {/* Tutorial modal */}
       {tutorialChecked && showTutorial && <TutorialModal onDone={dismissTutorial} />}
+      {configuringApp && <GateRuleModal app={configuringApp} initialRule={rules[configuringApp.id] ?? DEFAULT_RULE} onSave={(rule) => saveRule(configuringApp, rule)} onClose={() => setConfiguringApp(null)} />}
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
@@ -238,7 +284,7 @@ export default function GateScreen() {
                     <Ionicons name={app.icon} size={20} color={app.iconColor} />
                   )}
                 </View>
-                <Text style={[styles.appName, { color: colors.foreground }]}>{app.name}</Text>
+                <Pressable onPress={() => enabled[app.id] && setConfiguringApp(app)} style={styles.appCopy}><Text style={[styles.appName, { color: colors.foreground }]}>{app.name}</Text>{enabled[app.id] && <Text style={[styles.appRule, { color: colors.mutedForeground }]}>{rules[app.id]?.mode === 'daily_limit' ? `${rules[app.id]?.dailyLimitMinutes ?? 30} min daily limit` : 'Pause every opening'}</Text>}</Pressable>
                 <Switch
                   value={!!enabled[app.id]}
                   onValueChange={() => toggle(app.id)}
@@ -449,10 +495,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   appName: {
-    flex: 1,
     fontSize: 15,
     fontFamily: 'Inter_500Medium',
   },
+  appCopy: { flex: 1 },
+  appRule: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
   divider: {
     height: 1,
     marginLeft: 70,
@@ -472,4 +519,26 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     lineHeight: 20,
   },
+});
+
+const ruleStyles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: '#00000088', justifyContent: 'center', padding: 22 },
+  card: { borderRadius: 26, borderWidth: 1, padding: 22, alignItems: 'center' },
+  appIcon: { width: 46, height: 46, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  eyebrow: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.2, marginBottom: 8 },
+  title: { fontSize: 24, lineHeight: 29, fontFamily: 'Inter_700Bold', letterSpacing: -0.5, textAlign: 'center', marginBottom: 18 },
+  mode: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 11, borderWidth: 1, borderRadius: 17, padding: 13, marginBottom: 9 },
+  modeIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  modeCopy: { flex: 1 },
+  modeTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  modeBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2, lineHeight: 16 },
+  limitLabel: { alignSelf: 'flex-start', fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1, marginTop: 8, marginBottom: 8 },
+  limitRow: { width: '100%', flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  limitPill: { minWidth: 52, alignItems: 'center', borderWidth: 1, borderRadius: 14, paddingVertical: 9, paddingHorizontal: 10 },
+  limitText: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  note: { fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 16, marginBottom: 16 },
+  save: { width: '100%', borderRadius: 18, paddingVertical: 14, alignItems: 'center' },
+  saveText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold' },
+  cancel: { paddingTop: 13, paddingBottom: 2 },
+  cancelText: { fontSize: 14, fontFamily: 'Inter_500Medium' },
 });
