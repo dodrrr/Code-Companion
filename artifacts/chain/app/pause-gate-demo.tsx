@@ -22,7 +22,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { getGateSaves24h, recordGateSave } from '@/lib/gateStats';
 
-const COUNTDOWN_SECONDS = 5;
+const COUNTDOWN_SECONDS = 8;
 
 export default function PauseGateDemoScreen() {
   const colors = useColors();
@@ -114,6 +114,7 @@ export default function PauseGateDemoScreen() {
     inputRange: [0, 1],
     outputRange: ['0%', '100%'],
   });
+  const breathPhase = countdown > 5 ? 'INHALE' : countdown > 2 ? 'HOLD' : 'EXHALE';
 
   async function handleNotNow() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -184,9 +185,7 @@ export default function PauseGateDemoScreen() {
           <Text style={styles.questionLine}>
             Is this worth breaking it?
           </Text>
-          <Text style={styles.breathInstruction}>
-            Breathe in… breathe out…
-          </Text>
+          <View style={[styles.breathPhase, { borderColor: chainColor + '55', backgroundColor: chainColor + '14' }]}><View style={[styles.phaseDot, { backgroundColor: chainColor }]} /><Text style={[styles.breathInstruction, { color: chainColor }]}>{breathPhase} · follow the circle</Text></View>
           <Text style={styles.saveCount}>{savedCount ? `You’ve stepped back ${savedCount} time${savedCount === 1 ? '' : 's'} in the last 24h.` : 'Choose the pause, not the scroll.'}</Text>
         </View>
 
@@ -318,6 +317,8 @@ const styles = StyleSheet.create({
     color: '#555',
     marginTop: 4,
   },
+  breathPhase: { flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, marginTop: 4 },
+  phaseDot: { width: 6, height: 6, borderRadius: 3 },
   saveCount: { fontSize: 12, fontFamily: 'Inter_500Medium', color: '#777', textAlign: 'center', marginTop: 8 },
   progressWrap: {
     width: '100%',
