@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
-import { Chain, toLocalDateString } from '@/context/ChainsContext';
+import { Chain, isRestDay, toLocalDateString } from '@/context/ChainsContext';
 
 interface Props {
   chain: Chain;
@@ -31,6 +31,7 @@ export default function WeekStrip({ chain, days = 7 }: Props) {
         const dow = new Date(date + 'T12:00:00').getDay();
         const completed = chain.completedDates.includes(date);
         const frozen = chain.frozenDates.includes(date);
+        const rest = isRestDay(chain, date);
         const isToday = i === dates.length - 1;
 
         return (
@@ -53,6 +54,8 @@ export default function WeekStrip({ chain, days = 7 }: Props) {
                   ? { backgroundColor: chain.color, borderWidth: 0 }
                   : frozen
                   ? { backgroundColor: 'transparent', borderColor: '#4488ff', borderWidth: 1.5 }
+                  : rest
+                  ? { backgroundColor: colors.secondary, borderColor: colors.border, borderWidth: 1 }
                   : isToday
                   ? { backgroundColor: 'transparent', borderColor: colors.primary, borderWidth: 1.5 }
                   : { backgroundColor: 'transparent', borderColor: colors.border, borderWidth: 1 },
@@ -61,6 +64,7 @@ export default function WeekStrip({ chain, days = 7 }: Props) {
               {frozen && !completed && (
                 <Ionicons name="snow-outline" size={9} color="#4488ff" />
               )}
+              {rest && !completed && !frozen && <Ionicons name="remove" size={10} color={colors.mutedForeground} />}
             </View>
           </View>
         );
