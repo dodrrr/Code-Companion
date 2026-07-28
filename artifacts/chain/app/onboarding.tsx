@@ -49,7 +49,7 @@ const SLIDES: Slide[] = [
     iconColor: '#3B82F6',
     title: 'Plan tonight, win tomorrow',
     body:
-      'Spend 60 seconds each evening reflecting on today and blocking out 3–5 priorities for tomorrow. The day starts before it starts.',
+      'Spend 60 seconds each evening reflecting on today and making space for what matters tomorrow. The day starts before it starts.',
   },
 ];
 
