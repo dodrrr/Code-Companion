@@ -31,11 +31,15 @@ export default function PauseGateDemoScreen() {
     chainName = 'Write Daily',
     streak = '14',
     chainColor = '#FF6B35',
+    gateMode = 'every_open',
+    dailyLimit = '30',
   } = useLocalSearchParams<{
     appName: string;
     chainName: string;
     streak: string;
     chainColor: string;
+    gateMode: string;
+    dailyLimit: string;
   }>();
 
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
@@ -128,6 +132,7 @@ export default function PauseGateDemoScreen() {
           <Text style={[styles.appName, { color: '#888' }]}>
             Opening {appName}…
           </Text>
+          <Text style={styles.ruleLabel}>{gateMode === 'daily_limit' ? `${dailyLimit} min daily limit reached` : 'Pause on every opening'}</Text>
         </View>
 
         {/* Breathing circle */}
@@ -250,6 +255,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
   },
+  ruleLabel: { fontSize: 11, fontFamily: 'Inter_500Medium', color: '#555' },
   breathWrap: {
     width: 200,
     height: 200,
