@@ -1,4 +1,5 @@
 import React, { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
@@ -13,6 +14,7 @@ import {
 } from '@expo-google-fonts/inter';
 import { router, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ChainsProvider } from '@/context/ChainsContext';
 import { PlanProvider } from '@/context/PlanContext';
@@ -51,6 +53,21 @@ export default function RootLayout() {
       }
     });
   }, [fontsLoaded, fontError]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const openPlanTask = (response: Notifications.NotificationResponse) => {
+      const data = response.notification.request.content.data as { planItemId?: string; planDate?: string };
+      if (!data.planItemId || !data.planDate) return;
+      router.push({ pathname: '/(tabs)/plan', params: { taskId: data.planItemId, planDate: data.planDate } });
+    };
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(openPlanTask);
+    void Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (response) openPlanTask(response);
+    });
+    return () => subscription.remove();
+  }, []);
 
   if (!fontsLoaded && !fontError) return null;
 
