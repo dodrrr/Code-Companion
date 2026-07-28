@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   FlatList,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -248,7 +249,7 @@ export default function PlanScreen() {
 
       <KeyboardAwareScrollViewCompat
         bottomOffset={24}
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps="always"
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[styles.scroll, { paddingBottom: botPad + 100 }]}
       >
@@ -352,12 +353,12 @@ export default function PlanScreen() {
                   colors={colors}
                   chains={chains}
                   selectedChainId={selectedChainId}
-                  setSelectedChainId={setSelectedChainId}
+                  setSelectedChainId={(chainId: string | undefined) => { setSelectedChainId(chainId); Keyboard.dismiss(); }}
                   selectedTime={selectedTime}
-                  setSelectedTime={setSelectedTime}
-                  openTimePicker={() => setShowTimePicker(true)}
+                  setSelectedTime={(time: string) => { setSelectedTime(time); Keyboard.dismiss(); }}
+                  openTimePicker={() => { Keyboard.dismiss(); setShowTimePicker(true); }}
                   selectedReminder={selectedReminder}
-                  setSelectedReminder={setSelectedReminder}
+                  setSelectedReminder={(minutes: number | undefined) => { setSelectedReminder(minutes); Keyboard.dismiss(); }}
                   allowPriority={!isToday}
                   isPriority={isPriority}
                   setIsPriority={setIsPriority}
@@ -424,12 +425,12 @@ function ChainReflection({ chain, done, resting, isLast }: { chain: Chain; done:
 function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, selectedTime, setSelectedTime, openTimePicker, selectedReminder, setSelectedReminder, allowPriority, isPriority, setIsPriority }: any) {
   return <View style={styles.composerMeta}>
     <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>TIME</Text>
-    <FlatList data={QUICK_TIMES} horizontal showsHorizontalScrollIndicator={false} keyExtractor={(time) => time} contentContainerStyle={styles.timeSlots} renderItem={({ item: time }) => <Pressable onPress={() => setSelectedTime(time === selectedTime ? '' : time)} style={[styles.timeChip, { backgroundColor: time === selectedTime ? colors.primary : colors.background, borderColor: time === selectedTime ? colors.primary : colors.border }]}><Text style={[styles.timeChipText, { color: time === selectedTime ? '#fff' : colors.mutedForeground }]}>{time}</Text></Pressable>} ListFooterComponent={<Pressable onPress={openTimePicker} style={[styles.timeChip, { backgroundColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.background, borderColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.border }]}><Ionicons name="time-outline" size={14} color={selectedTime && !QUICK_TIMES.includes(selectedTime) ? '#fff' : colors.mutedForeground} /><Text style={[styles.timeChipText, { color: selectedTime && !QUICK_TIMES.includes(selectedTime) ? '#fff' : colors.mutedForeground }]}>{selectedTime && !QUICK_TIMES.includes(selectedTime) ? selectedTime : 'Custom'}</Text></Pressable>} />
+    <FlatList data={QUICK_TIMES} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(time) => time} contentContainerStyle={styles.timeSlots} renderItem={({ item: time }) => <Pressable onPress={() => setSelectedTime(time === selectedTime ? '' : time)} style={[styles.timeChip, { backgroundColor: time === selectedTime ? colors.primary : colors.background, borderColor: time === selectedTime ? colors.primary : colors.border }]}><Text style={[styles.timeChipText, { color: time === selectedTime ? '#fff' : colors.mutedForeground }]}>{time}</Text></Pressable>} ListFooterComponent={<Pressable onPress={openTimePicker} style={[styles.timeChip, { backgroundColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.background, borderColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.border }]}><Ionicons name="time-outline" size={14} color={selectedTime && !QUICK_TIMES.includes(selectedTime) ? '#fff' : colors.mutedForeground} /><Text style={[styles.timeChipText, { color: selectedTime && !QUICK_TIMES.includes(selectedTime) ? '#fff' : colors.mutedForeground }]}>{selectedTime && !QUICK_TIMES.includes(selectedTime) ? selectedTime : 'Custom'}</Text></Pressable>} />
     <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>ADD TO A CHAIN · OPTIONAL</Text>
     <Text style={[styles.chainHelper, { color: colors.mutedForeground }]}>Only link tasks that move that chain forward. Unlinked tasks stay neutral.</Text>
-    <FlatList data={[{ id: '', name: 'No chain', color: colors.mutedForeground }, ...chains]} horizontal showsHorizontalScrollIndicator={false} keyExtractor={(chain) => chain.id} contentContainerStyle={styles.chainChoices} renderItem={({ item: chain }) => { const selected = (chain.id || undefined) === selectedChainId; return <Pressable onPress={() => setSelectedChainId(chain.id || undefined)} style={[styles.chainChip, { borderColor: selected ? chain.color : colors.border, backgroundColor: selected ? chain.color + '1F' : colors.background }]}><View style={[styles.chainChipDot, { backgroundColor: chain.color }]} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{chain.name}</Text></Pressable>; }} />
+    <FlatList data={[{ id: '', name: 'No chain', color: colors.mutedForeground }, ...chains]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(chain) => chain.id} contentContainerStyle={styles.chainChoices} renderItem={({ item: chain }) => { const selected = (chain.id || undefined) === selectedChainId; return <Pressable onPress={() => setSelectedChainId(chain.id || undefined)} style={[styles.chainChip, { borderColor: selected ? chain.color : colors.border, backgroundColor: selected ? chain.color + '1F' : colors.background }]}><View style={[styles.chainChipDot, { backgroundColor: chain.color }]} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{chain.name}</Text></Pressable>; }} />
     {allowPriority && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>TOMORROW'S ONE THING · OPTIONAL</Text><Pressable onPress={() => setIsPriority(!isPriority)} style={[styles.priorityPick, { borderColor: isPriority ? colors.primary : colors.border, backgroundColor: isPriority ? colors.primary + '1A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sparkles-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Make this your one thing</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>The task that matters most tomorrow.</Text></View>{isPriority && <Ionicons name="checkmark-circle" size={19} color={colors.primary} />}</Pressable></>}
-    {!!selectedTime && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>REMIND ME</Text><FlatList data={REMINDER_OPTIONS} horizontal showsHorizontalScrollIndicator={false} keyExtractor={(minutes) => String(minutes)} contentContainerStyle={styles.chainChoices} renderItem={({ item: minutes }) => { const selected = selectedReminder === minutes; return <Pressable onPress={() => setSelectedReminder(selected ? undefined : minutes)} style={[styles.chainChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Ionicons name="notifications-outline" size={13} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{minutes} min before</Text></Pressable>; }} /></>}
+    {!!selectedTime && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>REMIND ME</Text><FlatList data={REMINDER_OPTIONS} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(minutes) => String(minutes)} contentContainerStyle={styles.chainChoices} renderItem={({ item: minutes }) => { const selected = selectedReminder === minutes; return <Pressable onPress={() => setSelectedReminder(selected ? undefined : minutes)} style={[styles.chainChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Ionicons name="notifications-outline" size={13} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{minutes} min before</Text></Pressable>; }} /></>}
   </View>;
 }
 
