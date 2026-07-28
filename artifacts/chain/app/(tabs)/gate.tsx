@@ -1,20 +1,21 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Alert,
   Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { useChains } from '@/context/ChainsContext';
+import { GateSaveEvent, getGateSaves24h } from '@/lib/gateStats';
 
 interface AppEntry {
   id: string;
@@ -142,6 +143,11 @@ function GateRuleModal({ app, initialRule, onSave, onClose }: { app: AppEntry; i
   </View></View></Modal>;
 }
 
+function AppPickerModal({ apps, onPick, onClose }: { apps: AppEntry[]; onPick: (app: AppEntry) => void; onClose: () => void }) {
+  const colors = useColors();
+  return <Modal transparent animationType="slide" statusBarTranslucent onRequestClose={onClose}><View style={ruleStyles.backdrop}><View style={[ruleStyles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch' }]}><Text style={[ruleStyles.title, { color: colors.foreground, textAlign: 'left', marginBottom: 6 }]}>Choose an app</Text><Text style={[ruleStyles.note, { color: colors.mutedForeground, textAlign: 'left', marginTop: 0, marginBottom: 14 }]}>Add only the apps where you want a moment of friction.</Text>{apps.map((app) => <Pressable key={app.id} onPress={() => onPick(app)} style={[styles.pickerRow, { backgroundColor: colors.background, borderColor: colors.border }]}><View style={[styles.appIcon, { backgroundColor: app.iconColor + '22' }]}>{app.iconText ? <Text style={[styles.appIconText, { color: app.iconColor }]}>{app.iconText}</Text> : <Ionicons name={app.icon} size={20} color={app.iconColor} />}</View><Text style={[styles.appName, { color: colors.foreground, flex: 1 }]}>{app.name}</Text><Ionicons name="add-circle-outline" size={21} color={colors.primary} /></Pressable>)}<Pressable onPress={onClose} style={ruleStyles.cancel}><Text style={[ruleStyles.cancelText, { color: colors.mutedForeground }]}>Cancel</Text></Pressable></View></View></Modal>;
+}
+
 // ─── Main screen ─────────────────────────────────────────────────────────────
 
 export default function GateScreen() {
@@ -151,6 +157,8 @@ export default function GateScreen() {
   const [enabled,         setEnabled]         = useState<Record<string, boolean>>({});
   const [rules,           setRules]           = useState<Record<string, GateRule>>({});
   const [configuringApp,  setConfiguringApp]  = useState<AppEntry | null>(null);
+  const [showAppPicker,   setShowAppPicker]   = useState(false);
+  const [saveEvents,      setSaveEvents]      = useState<GateSaveEvent[]>([]);
   const [showTutorial,    setShowTutorial]     = useState(false);
   const [tutorialChecked, setTutorialChecked]  = useState(false);
 
@@ -170,21 +178,12 @@ export default function GateScreen() {
     });
   }, []);
 
+  const refreshSaveEvents = useCallback(() => { void getGateSaves24h().then(setSaveEvents); }, []);
+  useFocusEffect(useCallback(() => { refreshSaveEvents(); }, [refreshSaveEvents]));
+
   function dismissTutorial() {
     AsyncStorage.setItem(TUTORIAL_KEY, '1');
     setShowTutorial(false);
-  }
-
-  function toggle(id: string) {
-    const nextValue = !enabled[id];
-    if (nextValue) {
-      const app = APPS.find((entry) => entry.id === id);
-      if (app) setConfiguringApp(app);
-      return;
-    }
-    const next = { ...enabled, [id]: false };
-    setEnabled(next);
-    AsyncStorage.setItem(GATE_KEY, JSON.stringify(next));
   }
 
   function saveRule(app: AppEntry, rule: GateRule) {
@@ -198,27 +197,46 @@ export default function GateScreen() {
   }
 
   function openDemo() {
+    const firstProtectedApp = APPS.find((app) => enabled[app.id]);
+    if (!firstProtectedApp) {
+      setShowAppPicker(true);
+      return;
+    }
     const firstChain = chains[0];
     router.push({
       pathname: '/pause-gate-demo',
       params: {
-        appName:    'Instagram',
+        appId:      firstProtectedApp.id,
+        appName:    firstProtectedApp.name,
+        appIcon:    firstProtectedApp.icon,
+        appColor:   firstProtectedApp.iconColor,
         chainName:  firstChain?.name ?? 'Write Daily',
         streak:     firstChain ? String(firstChain.completedDates.length) : '14',
         chainColor: firstChain?.color ?? '#FF6B35',
-        gateMode: rules.instagram?.mode ?? 'every_open',
-        dailyLimit: String(rules.instagram?.dailyLimitMinutes ?? 30),
+        gateMode: rules[firstProtectedApp.id]?.mode ?? 'every_open',
+        dailyLimit: String(rules[firstProtectedApp.id]?.dailyLimitMinutes ?? 30),
       },
     });
   }
 
   const enabledCount = Object.values(enabled).filter(Boolean).length;
+  const protectedApps = APPS.filter((app) => enabled[app.id]);
+  const availableApps = APPS.filter((app) => !enabled[app.id]);
+  const savesForApp = (id: string) => saveEvents.filter((event) => event.appId === id).length;
+
+  function removeProtection(app: AppEntry) {
+    Alert.alert('Remove protection?', `${app.name} will no longer appear in your Pause Gate.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Remove', style: 'destructive', onPress: () => { const nextEnabled = { ...enabled }; const nextRules = { ...rules }; delete nextEnabled[app.id]; delete nextRules[app.id]; setEnabled(nextEnabled); setRules(nextRules); void AsyncStorage.setItem(GATE_KEY, JSON.stringify(nextEnabled)); void AsyncStorage.setItem(GATE_RULES_KEY, JSON.stringify(nextRules)); } },
+    ]);
+  }
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       {/* Tutorial modal */}
       {tutorialChecked && showTutorial && <TutorialModal onDone={dismissTutorial} />}
       {configuringApp && <GateRuleModal app={configuringApp} initialRule={rules[configuringApp.id] ?? DEFAULT_RULE} onSave={(rule) => saveRule(configuringApp, rule)} onClose={() => setConfiguringApp(null)} />}
+      {showAppPicker && <AppPickerModal apps={availableApps} onPick={(app) => { setShowAppPicker(false); setConfiguringApp(app); }} onClose={() => setShowAppPicker(false)} />}
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
@@ -227,7 +245,7 @@ export default function GateScreen() {
             Pause Gate
           </Text>
           <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
-            {enabledCount} app{enabledCount !== 1 ? 's' : ''} protected
+            {enabledCount} app{enabledCount !== 1 ? 's' : ''} protected · {saveEvents.length} pauses chosen
           </Text>
         </View>
         <View style={styles.headerRight}>
@@ -273,8 +291,8 @@ export default function GateScreen() {
           PROTECTED APPS
         </Text>
 
-        <View style={[styles.appsList, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          {APPS.map((app, i) => (
+        {protectedApps.length > 0 && <View style={[styles.appsList, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {protectedApps.map((app, i) => (
             <View key={app.id}>
               <View style={styles.appRow}>
                 <View style={[styles.appIcon, { backgroundColor: app.iconColor + '22' }]}>
@@ -284,21 +302,21 @@ export default function GateScreen() {
                     <Ionicons name={app.icon} size={20} color={app.iconColor} />
                   )}
                 </View>
-                <Pressable onPress={() => enabled[app.id] && setConfiguringApp(app)} style={styles.appCopy}><Text style={[styles.appName, { color: colors.foreground }]}>{app.name}</Text>{enabled[app.id] && <Text style={[styles.appRule, { color: colors.mutedForeground }]}>{rules[app.id]?.mode === 'daily_limit' ? `Preview rule · ${rules[app.id]?.dailyLimitMinutes ?? 30} min daily limit` : 'Preview rule · pause every opening'}</Text>}</Pressable>
-                <Switch
-                  value={!!enabled[app.id]}
-                  onValueChange={() => toggle(app.id)}
-                  trackColor={{ false: colors.border, true: colors.primary + 'aa' }}
-                  thumbColor={enabled[app.id] ? colors.primary : colors.mutedForeground}
-                  ios_backgroundColor={colors.border}
-                />
+                <Pressable onPress={() => setConfiguringApp(app)} style={styles.appCopy}><Text style={[styles.appName, { color: colors.foreground }]}>{app.name}</Text><Text style={[styles.appRule, { color: colors.mutedForeground }]}>{rules[app.id]?.mode === 'daily_limit' ? `Preview rule · ${rules[app.id]?.dailyLimitMinutes ?? 30} min daily limit` : 'Preview rule · pause every opening'} · {savesForApp(app.id)} stepped back</Text></Pressable>
+                <Pressable onPress={() => removeProtection(app)} hitSlop={12}><Ionicons name="ellipsis-horizontal" size={20} color={colors.mutedForeground} /></Pressable>
               </View>
               {i < APPS.length - 1 && (
                 <View style={[styles.divider, { backgroundColor: colors.border }]} />
               )}
             </View>
           ))}
-        </View>
+        </View>}
+
+        <Pressable onPress={() => setShowAppPicker(true)} style={({ pressed }) => [styles.addAppCard, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.78 : 1 }]}>
+          <View style={[styles.addAppIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="add" size={21} color={colors.primary} /></View>
+          <View style={{ flex: 1 }}><Text style={[styles.addAppTitle, { color: colors.foreground }]}>Add an app</Text><Text style={[styles.addAppBody, { color: colors.mutedForeground }]}>{protectedApps.length ? 'Choose another place to create friction.' : 'Choose where you want a pause before scrolling.'}</Text></View>
+          <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+        </Pressable>
 
         {/* iOS note */}
         <View style={[styles.noteCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -485,6 +503,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     gap: 14,
   },
+  pickerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 16, padding: 12, marginBottom: 8 },
   appIcon: {
     width: 40,
     height: 40,
@@ -502,6 +521,10 @@ const styles = StyleSheet.create({
   },
   appCopy: { flex: 1 },
   appRule: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
+  addAppCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 18, padding: 15 },
+  addAppIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  addAppTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+  addAppBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2 },
   divider: {
     height: 1,
     marginLeft: 70,
