@@ -20,6 +20,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
+import { getGateSaves24h, recordGateSave } from '@/lib/gateStats';
 
 const COUNTDOWN_SECONDS = 5;
 
@@ -28,6 +29,9 @@ export default function PauseGateDemoScreen() {
   const insets = useSafeAreaInsets();
   const {
     appName = 'Instagram',
+    appId = 'instagram',
+    appIcon = 'logo-instagram',
+    appColor = '#E1306C',
     chainName = 'Write Daily',
     streak = '14',
     chainColor = '#FF6B35',
@@ -35,6 +39,9 @@ export default function PauseGateDemoScreen() {
     dailyLimit = '30',
   } = useLocalSearchParams<{
     appName: string;
+    appId: string;
+    appIcon: string;
+    appColor: string;
     chainName: string;
     streak: string;
     chainColor: string;
@@ -44,6 +51,7 @@ export default function PauseGateDemoScreen() {
 
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
   const [ready, setReady] = useState(false);
+  const [savedCount, setSavedCount] = useState(0);
   const progressAnim = useRef(new RNAnimated.Value(0)).current;
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
@@ -75,6 +83,10 @@ export default function PauseGateDemoScreen() {
     );
   }, []);
 
+  useEffect(() => {
+    void getGateSaves24h().then((events) => setSavedCount(events.filter((event) => event.appId === appId).length));
+  }, [appId]);
+
   // Countdown timer
   useEffect(() => {
     RNAnimated.timing(progressAnim, {
@@ -103,8 +115,9 @@ export default function PauseGateDemoScreen() {
     outputRange: ['0%', '100%'],
   });
 
-  function handleNotNow() {
+  async function handleNotNow() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    await recordGateSave(appId);
     router.back();
   }
 
@@ -126,8 +139,8 @@ export default function PauseGateDemoScreen() {
       <View style={[styles.inner, { paddingTop: topPad + 60, paddingBottom: botPad + 32 }]}>
         {/* App being blocked */}
         <View style={styles.appBlock}>
-          <View style={[styles.appIconWrap, { backgroundColor: '#E1306C22' }]}>
-            <Ionicons name="logo-instagram" size={32} color="#E1306C" />
+          <View style={[styles.appIconWrap, { backgroundColor: appColor + '22' }]}>
+            <Ionicons name={appIcon as keyof typeof Ionicons.glyphMap} size={32} color={appColor} />
           </View>
           <Text style={[styles.appName, { color: '#888' }]}>
             Opening {appName}…
@@ -174,6 +187,7 @@ export default function PauseGateDemoScreen() {
           <Text style={styles.breathInstruction}>
             Breathe in… breathe out…
           </Text>
+          <Text style={styles.saveCount}>{savedCount ? `You’ve stepped back ${savedCount} time${savedCount === 1 ? '' : 's'} in the last 24h.` : 'Choose the pause, not the scroll.'}</Text>
         </View>
 
         {/* Countdown bar */}
@@ -304,6 +318,7 @@ const styles = StyleSheet.create({
     color: '#555',
     marginTop: 4,
   },
+  saveCount: { fontSize: 12, fontFamily: 'Inter_500Medium', color: '#777', textAlign: 'center', marginTop: 8 },
   progressWrap: {
     width: '100%',
     alignItems: 'center',
