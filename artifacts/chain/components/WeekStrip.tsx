@@ -57,7 +57,7 @@ export default function WeekStrip({ chain, days = 7 }: Props) {
                   : rest
                   ? { backgroundColor: colors.mutedForeground + '26', borderColor: colors.mutedForeground + '66', borderWidth: 1 }
                   : isToday
-                  ? { backgroundColor: 'transparent', borderColor: colors.primary, borderWidth: 1.5 }
+                  ? { backgroundColor: 'transparent', borderColor: chain.color, borderWidth: 2 }
                   : { backgroundColor: 'transparent', borderColor: colors.border, borderWidth: 1 },
               ]}
             >
