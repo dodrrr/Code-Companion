@@ -43,7 +43,7 @@ export default function PlanScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { chains, setDayStatus } = useChains();
-  const { items, activeDate, isToday, tomorrowItemCount, showToday, showTomorrow, showDate, addItem, updateItem, updateReminderMetadata, moveItemToTomorrow, removeItem, toggleItem } = usePlan();
+  const { items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, moveItemToTomorrow, removeItem, toggleItem } = usePlan();
   const { taskId, planDate } = useLocalSearchParams<{ taskId?: string; planDate?: string }>();
   const [inputText, setInputText] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
@@ -71,6 +71,8 @@ export default function PlanScreen() {
   const selectedChain = chains.find((chain) => chain.id === selectedChainId);
   const priorityItem = items.find((item) => item.isPriority);
   const orderedItems = [...items].sort((a, b) => timeSortValue(a.timeSlot) - timeSortValue(b.timeSlot));
+  const hasPendingItems = items.some((item) => !item.completed);
+  const canEditActivePlan = !isToday || !isActiveDayClosed;
 
   useEffect(() => {
     if (!taskId || !planDate) return;
@@ -203,6 +205,23 @@ export default function PlanScreen() {
     Haptics.selectionAsync();
   }
 
+  function continueToTomorrow() {
+    if (!isToday || isActiveDayClosed) {
+      showTomorrow();
+      return;
+    }
+    if (hasPendingItems) {
+      setShowDayReview(true);
+      return;
+    }
+    void closeToday().then(showTomorrow);
+  }
+
+  function finishDayAndPrepareTomorrow() {
+    setShowDayReview(false);
+    void closeToday().then(showTomorrow);
+  }
+
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
@@ -265,6 +284,7 @@ export default function PlanScreen() {
             chainName={chains.find((chain) => chain.id === item.chainId)?.name}
             highlighted={item.id === highlightedItemId}
             newlyAdded={item.id === newlyAddedItemId}
+            locked={!canEditActivePlan}
             onToggle={() => handleToggle(item)}
             onRemove={() => { void cancelPlanReminder(item.notificationId); removeItem(item.id); }}
             onEdit={() => startEditing(item)}
@@ -279,16 +299,16 @@ export default function PlanScreen() {
           </View>
         )}
 
-        <Pressable
-          onPress={isToday ? showTomorrow : showToday}
+        {(!isToday || isActiveDayClosed || !hasPendingItems) && <Pressable
+          onPress={isToday ? continueToTomorrow : showToday}
           style={({ pressed }) => [modeStyles.card, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.8 : 1 }]}
         >
           <View style={[modeStyles.icon, { backgroundColor: colors.primary + '18' }]}><Ionicons name={isToday ? 'arrow-forward' : 'arrow-back'} size={17} color={colors.primary} /></View>
           <View style={modeStyles.copy}><Text style={[modeStyles.title, { color: colors.foreground }]}>{isToday ? (tomorrowItemCount > 0 ? `Tomorrow ready · ${tomorrowItemCount} task${tomorrowItemCount === 1 ? '' : 's'}` : 'Prepare tomorrow') : 'Back to today'}</Text><Text style={[modeStyles.subtitle, { color: colors.mutedForeground }]}>{isToday ? (tomorrowItemCount > 0 ? 'Review it or make space for one more thing.' : 'Set up tomorrow in a minute.') : 'Return to your active agenda.'}</Text></View>
           <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
-        </Pressable>
+        </Pressable>}
 
-        {isToday && items.some((item) => !item.completed) && (
+        {isToday && !isActiveDayClosed && hasPendingItems && (
           <Pressable onPress={() => setShowDayReview(true)} style={({ pressed }) => [styles.reviewTrigger, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.8 : 1 }]}>
             <View style={[styles.reviewIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="moon-outline" size={18} color={colors.primary} /></View>
             <View style={styles.reviewCopy}><Text style={[styles.reviewTitle, { color: colors.foreground }]}>Nightly reset</Text><Text style={[styles.reviewSubtitle, { color: colors.mutedForeground }]}>Close today, then prepare tomorrow.</Text></View>
@@ -296,7 +316,7 @@ export default function PlanScreen() {
           </Pressable>
         )}
 
-        <View style={[styles.addCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        {canEditActivePlan ? <View style={[styles.addCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {showInput ? (
               <>
                 <TextInput
@@ -339,7 +359,11 @@ export default function PlanScreen() {
                 <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
               </Pressable>
             )}
-          </View>
+          </View> : <Pressable onPress={() => { void reopenToday(); Haptics.selectionAsync(); }} style={({ pressed }) => [modeStyles.card, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.8 : 1 }]}>
+            <View style={[modeStyles.icon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="lock-closed-outline" size={18} color={colors.primary} /></View>
+            <View style={styles.addCopy}><Text style={[styles.addTriggerText, { color: colors.foreground }]}>Today is closed</Text><Text style={[styles.addTriggerSub, { color: colors.mutedForeground }]}>Reopen today to make a change.</Text></View>
+            <Text style={{ color: colors.primary, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Reopen</Text>
+          </Pressable>}
       </KeyboardAwareScrollViewCompat>
 
       <TimePickerModal
@@ -351,9 +375,9 @@ export default function PlanScreen() {
         onClose={() => setShowTimePicker(false)}
         onConfirm={chooseCustomTime}
       />
-      <CompletionMoment visible={showCompletion} onClose={() => setShowCompletion(false)} onPrepareTomorrow={() => { setShowCompletion(false); showTomorrow(); }} />
+      <CompletionMoment visible={showCompletion} onClose={() => setShowCompletion(false)} onPrepareTomorrow={() => { setShowCompletion(false); void closeToday().then(showTomorrow); }} />
       <ReminderPermissionMoment visible={showReminderPermission} minutes={selectedReminder} onSkip={() => { setShowReminderPermission(false); savePlanItem(false); }} onAllow={() => { void enableRemindersAndSave(); }} />
-      <DayReviewMoment visible={showDayReview} completedCount={completedCount} totalCount={items.length} pendingItems={items.filter((item) => !item.completed)} onMove={(item) => { void moveToTomorrow(item); }} onLetGo={letGo} onClose={() => setShowDayReview(false)} onPrepareTomorrow={() => { setShowDayReview(false); showTomorrow(); }} />
+      <DayReviewMoment visible={showDayReview} completedCount={completedCount} totalCount={items.length} pendingItems={items.filter((item) => !item.completed)} onMove={(item) => { void moveToTomorrow(item); }} onLetGo={letGo} onClose={() => setShowDayReview(false)} onPrepareTomorrow={finishDayAndPrepareTomorrow} />
       <ChainCompletionMoment visible={!!chainCompletion} item={chainCompletion?.item} chain={chainCompletion?.chain} onConfirm={completeLinkedChain} onClose={() => setChainCompletion(null)} />
     </View>
   );
@@ -383,7 +407,7 @@ function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, sel
   </View>;
 }
 
-function PlanItemRow({ item, chainName, highlighted, newlyAdded, onToggle, onRemove, onEdit }: { item: PlanItem; chainName?: string; highlighted: boolean; newlyAdded: boolean; onToggle: () => void; onRemove: () => void; onEdit: () => void }) {
+function PlanItemRow({ item, chainName, highlighted, newlyAdded, locked, onToggle, onRemove, onEdit }: { item: PlanItem; chainName?: string; highlighted: boolean; newlyAdded: boolean; locked: boolean; onToggle: () => void; onRemove: () => void; onEdit: () => void }) {
   const colors = useColors();
   const accentColor = item.color || UNLINKED_TASK_COLOR;
   const arrival = useRef(new Animated.Value(1)).current;
@@ -394,12 +418,12 @@ function PlanItemRow({ item, chainName, highlighted, newlyAdded, onToggle, onRem
   }, [arrival, newlyAdded]);
   return <Animated.View style={[styles.planItem, { backgroundColor: highlighted ? accentColor + '14' : colors.card, borderColor: highlighted ? accentColor : colors.border, opacity: arrival, transform: [{ translateY: arrival.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }, { scale: arrival.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }]}>
     <View style={[styles.planBar, { backgroundColor: item.completed ? colors.border : accentColor }]} />
-    <Pressable onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? accentColor : 'transparent', borderColor: item.completed ? accentColor : colors.border }]}>{item.completed && <Ionicons name="checkmark" size={13} color="#fff" />}</View></Pressable>
-    <Pressable onPress={onEdit} style={styles.planTextBlock}>
+    <Pressable disabled={locked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? accentColor : 'transparent', borderColor: item.completed ? accentColor : colors.border }]}>{item.completed && <Ionicons name="checkmark" size={13} color="#fff" />}</View></Pressable>
+    <Pressable disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
       <View style={styles.planMeta}>{item.isPriority && <View style={[styles.priorityBadge, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="sparkles" size={10} color={colors.primary} /><Text style={[styles.priorityBadgeText, { color: colors.primary }]}>ONE THING</Text></View>}{item.timeSlot ? <Text style={[styles.planTime, { color: accentColor }]}>{item.timeSlot}{item.reminderMinutes ? `  ·  ${item.reminderMinutes} MIN REMINDER` : ''}</Text> : <Text style={[styles.planTime, { color: colors.mutedForeground }]}>ANYTIME</Text>}{chainName && <View style={[styles.linkBadge, { backgroundColor: accentColor + '1A' }]}><Ionicons name="link-outline" size={10} color={accentColor} /><Text style={[styles.linkBadgeText, { color: accentColor }]}>{chainName}</Text></View>}</View>
       <Text style={[styles.planText, { color: item.completed ? colors.mutedForeground : colors.foreground, textDecorationLine: item.completed ? 'line-through' : 'none' }]} numberOfLines={2}>{item.text}</Text>
     </Pressable>
-    <Pressable onPress={onRemove} hitSlop={12}><Ionicons name="close" size={18} color={colors.mutedForeground} /></Pressable>
+    {locked ? <Ionicons name="lock-closed-outline" size={16} color={colors.mutedForeground} /> : <Pressable onPress={onRemove} hitSlop={12}><Ionicons name="close" size={18} color={colors.mutedForeground} /></Pressable>}
   </Animated.View>;
 }
 
