@@ -57,7 +57,7 @@ export async function schedulePlanReminder(item: PlanItem, minutesBefore: number
       title: item.text,
       body: `Starting in ${minutesBefore} minutes.`,
       sound: 'default',
-      data: { planItemId: item.id },
+      data: { planItemId: item.id, planDate: item.planDate },
     },
     trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date },
   });
