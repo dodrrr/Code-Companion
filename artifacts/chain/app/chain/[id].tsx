@@ -21,12 +21,14 @@ import {
   DayStatus,
   getStreak,
   getTodayStr,
+  isRestDay,
   toLocalDateString,
   useChains,
 } from '@/context/ChainsContext';
 
 const FROZEN_COLOR = '#5B8CFF';
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const WEEK_DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function startOfMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), 1, 12);
@@ -68,6 +70,7 @@ function CalendarGrid({
         if (!date) return <View key={`empty-${index}`} style={styles.monthCell} />;
         const done = chain.completedDates.includes(date);
         const frozen = chain.frozenDates.includes(date);
+        const rest = isRestDay(chain, date);
         const isToday = date === today;
         const isEditable = date >= editableFromKey && date <= today;
         const isFuture = date > today;
@@ -76,6 +79,8 @@ function CalendarGrid({
           ? { backgroundColor: chain.color, borderColor: chain.color }
           : frozen
             ? { backgroundColor: FROZEN_COLOR + '33', borderColor: FROZEN_COLOR }
+            : rest
+              ? { backgroundColor: colors.secondary, borderColor: colors.border }
             : !isFuture && !isBeforeChain
               ? { backgroundColor: colors.background, borderColor: colors.mutedForeground + '99' }
               : { backgroundColor: 'transparent', borderColor: 'transparent' };
@@ -92,7 +97,7 @@ function CalendarGrid({
             ]}
           >
             <View style={[styles.monthDay, stateStyle, isToday && !done && !frozen && { borderColor: chain.color, borderWidth: 2 }]}>
-              {frozen ? <Ionicons name="snow" size={12} color={FROZEN_COLOR} /> : <Text style={[styles.monthDayText, { color: done ? '#fff' : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
+              {frozen ? <Ionicons name="snow" size={12} color={FROZEN_COLOR} /> : rest && !done ? <Ionicons name="remove" size={14} color={colors.mutedForeground} /> : <Text style={[styles.monthDayText, { color: done ? '#fff' : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
             </View>
           </Pressable>
         );
@@ -109,6 +114,7 @@ export default function ChainDetailScreen() {
     chains,
     deleteChain,
     updateChainColor,
+    updateChainRestDays,
     setDayStatus,
     toggleToday,
     useFreeze,
@@ -118,6 +124,7 @@ export default function ChainDetailScreen() {
     isReady,
   } = useChains();
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const touchStartX = useRef<number | null>(null);
 
   const chain = chains.find((c) => c.id === id);
@@ -148,6 +155,7 @@ export default function ChainDetailScreen() {
   const frozen = isFrozenToday(chain);
   const freezeTokens = getRemainingFreezeTokens(chain);
   const totalCompleted = chain.completedDates.length;
+  const restingToday = isRestDay(chain, getTodayStr());
 
   function handleDelete() {
     if (!chain) return;
@@ -188,6 +196,12 @@ export default function ChainDetailScreen() {
     if (!chain || color === chain.color) return;
     Haptics.selectionAsync();
     updateChainColor(chain.id, color);
+  }
+
+  function toggleRestDay(day: number) {
+    if (!chain) return;
+    Haptics.selectionAsync();
+    updateChainRestDays(chain.id, chain.restDays.includes(day) ? chain.restDays.filter((item) => item !== day) : [...chain.restDays, day]);
   }
 
   function changeMonth(amount: number) {
@@ -268,6 +282,15 @@ export default function ChainDetailScreen() {
           </View>
         </View>
 
+        <View style={[styles.scheduleCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Pressable onPress={() => setScheduleOpen((open) => !open)} style={styles.scheduleHeader}>
+            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="calendar-outline" size={17} color={chain.color} /></View>
+            <View style={styles.scheduleCopy}><Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Weekly schedule</Text><Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{chain.restDays.length ? `${chain.restDays.map((day) => WEEK_DAYS[day]).join(', ')} off` : 'Every day counts'}</Text></View>
+            <Ionicons name={scheduleOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
+          </Pressable>
+          {scheduleOpen && <View style={styles.scheduleExpanded}><Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>Choose rest days. They never break your streak.</Text><View style={styles.weekDays}>{WEEK_DAYS.map((label, day) => { const isRest = chain.restDays.includes(day); return <Pressable key={label} onPress={() => toggleRestDay(day)} style={[styles.weekDay, { backgroundColor: isRest ? chain.color : colors.background, borderColor: isRest ? chain.color : colors.border }]}><Text style={[styles.weekDayText, { color: isRest ? '#fff' : colors.mutedForeground }]}>{label.slice(0, 1)}</Text></Pressable>; })}</View></View>}
+        </View>
+
         {/* Streak hero */}
         <View style={[styles.streakHero, { backgroundColor: chain.color + '14', borderColor: chain.color + '33' }]}>
           <Text style={[styles.streakNumber, { color: chain.color }]}>{streak}</Text>
@@ -280,7 +303,7 @@ export default function ChainDetailScreen() {
         </View>
 
         {/* Today's action */}
-        <View style={styles.actionRow}>
+        {restingToday ? <View style={[styles.restBanner, { backgroundColor: colors.card, borderColor: colors.border }]}><Ionicons name="moon-outline" size={18} color={chain.color} /><View style={{ flex: 1 }}><Text style={[styles.restTitle, { color: colors.foreground }]}>Rest day</Text><Text style={[styles.restBody, { color: colors.mutedForeground }]}>Your streak is safe. Come back tomorrow.</Text></View></View> : <View style={styles.actionRow}>
           <Pressable
             onPress={handleToggle}
             style={({ pressed }) => [
@@ -326,7 +349,7 @@ export default function ChainDetailScreen() {
               Freeze ({freezeTokens})
             </Text>
           </Pressable>
-        </View>
+        </View>}
 
         {/* Frozen today indicator */}
         {frozen && !done && (
@@ -485,6 +508,32 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
     flex: 1,
   },
+  scheduleCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  scheduleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 14,
+  },
+  scheduleIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduleCopy: { flex: 1 },
+  scheduleTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  scheduleBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2 },
+  scheduleExpanded: { borderTopWidth: 1, borderTopColor: '#ffffff12', padding: 14, paddingTop: 12 },
+  scheduleHint: { fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17, marginBottom: 10 },
+  weekDays: { flexDirection: 'row', justifyContent: 'space-between' },
+  weekDay: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  weekDayText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
   streakHero: {
     alignItems: 'center',
     borderRadius: 24,
@@ -512,6 +561,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
   },
+  restBanner: { flexDirection: 'row', alignItems: 'center', gap: 11, borderWidth: 1, borderRadius: 18, padding: 15 },
+  restTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  restBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2 },
   actionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
