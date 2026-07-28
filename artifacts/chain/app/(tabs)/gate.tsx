@@ -256,20 +256,6 @@ export default function GateScreen() {
           >
             <Ionicons name="help-circle-outline" size={20} color={colors.mutedForeground} />
           </Pressable>
-          <Pressable
-            onPress={openDemo}
-            style={({ pressed }) => [
-              styles.previewBtn,
-              {
-                borderColor:     colors.primary,
-                backgroundColor: colors.primary + '18',
-                opacity:         pressed ? 0.7 : 1,
-              },
-            ]}
-          >
-            <Ionicons name="play" size={14} color={colors.primary} />
-            <Text style={[styles.previewBtnText, { color: colors.primary }]}>Preview</Text>
-          </Pressable>
         </View>
       </View>
 
@@ -277,6 +263,11 @@ export default function GateScreen() {
         contentContainerStyle={[styles.scroll, { paddingBottom: botPad + 32 }]}
         showsVerticalScrollIndicator={false}
       >
+        <View style={[styles.savesHero, { backgroundColor: colors.primary + '14', borderColor: colors.primary + '55' }]}>
+          <View style={[styles.savesIcon, { backgroundColor: colors.primary + '20' }]}><Ionicons name="shield-checkmark" size={22} color={colors.primary} /></View>
+          <View style={styles.savesCopy}><Text style={[styles.savesNumber, { color: colors.primary }]}>{saveEvents.length}</Text><Text style={[styles.savesTitle, { color: colors.foreground }]}>times you chose the pause</Text><Text style={[styles.savesBody, { color: colors.mutedForeground }]}>Your wins in the last 24 hours.</Text></View>
+        </View>
+        <Pressable onPress={openDemo} style={({ pressed }) => [styles.previewWide, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}><Ionicons name="play" size={16} color="#fff" /><Text style={styles.previewWideText}>Preview your Pause Gate</Text><Ionicons name="arrow-forward" size={17} color="#fff" /></Pressable>
         {/* Info card */}
         <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={[styles.infoIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="eye-outline" size={18} color={colors.primary} /></View>
@@ -294,7 +285,7 @@ export default function GateScreen() {
         {protectedApps.length > 0 && <View style={[styles.appsList, { backgroundColor: colors.card, borderColor: colors.border }]}>
           {protectedApps.map((app, i) => (
             <View key={app.id}>
-              <View style={styles.appRow}>
+              <View style={[styles.appRow, { backgroundColor: app.iconColor + '08' }]}>
                 <View style={[styles.appIcon, { backgroundColor: app.iconColor + '22' }]}>
                   {app.iconText ? (
                     <Text style={[styles.appIconText, { color: app.iconColor }]}>{app.iconText}</Text>
@@ -302,7 +293,8 @@ export default function GateScreen() {
                     <Ionicons name={app.icon} size={20} color={app.iconColor} />
                   )}
                 </View>
-                <Pressable onPress={() => setConfiguringApp(app)} style={styles.appCopy}><Text style={[styles.appName, { color: colors.foreground }]}>{app.name}</Text><Text style={[styles.appRule, { color: colors.mutedForeground }]}>{rules[app.id]?.mode === 'daily_limit' ? `Preview rule · ${rules[app.id]?.dailyLimitMinutes ?? 30} min daily limit` : 'Preview rule · pause every opening'} · {savesForApp(app.id)} stepped back</Text></Pressable>
+                <Pressable onPress={() => setConfiguringApp(app)} style={styles.appCopy}><Text style={[styles.appName, { color: colors.foreground }]}>{app.name}</Text><Text style={[styles.appRule, { color: colors.mutedForeground }]}>{rules[app.id]?.mode === 'daily_limit' ? `${rules[app.id]?.dailyLimitMinutes ?? 30} min daily limit` : 'Pause every opening'}</Text></Pressable>
+                <View style={[styles.appSaveBadge, { backgroundColor: app.iconColor + '20' }]}><Text style={[styles.appSaveNumber, { color: app.iconColor }]}>{savesForApp(app.id)}</Text><Text style={[styles.appSaveLabel, { color: app.iconColor }]}>SAVED</Text></View>
                 <Pressable onPress={() => removeProtection(app)} hitSlop={12}><Ionicons name="ellipsis-horizontal" size={20} color={colors.mutedForeground} /></Pressable>
               </View>
               {i < APPS.length - 1 && (
@@ -463,6 +455,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Inter_600SemiBold',
   },
+  savesHero: { flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 1, borderRadius: 22, padding: 18 },
+  savesIcon: { width: 46, height: 46, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  savesCopy: { flex: 1 },
+  savesNumber: { fontSize: 34, lineHeight: 37, fontFamily: 'Inter_700Bold' },
+  savesTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', marginTop: -1 },
+  savesBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 3 },
+  previewWide: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 18, paddingVertical: 14 },
+  previewWideText: { flex: 1, color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold', textAlign: 'center' },
   scroll: {
     paddingHorizontal: 20,
     gap: 12,
@@ -521,6 +521,9 @@ const styles = StyleSheet.create({
   },
   appCopy: { flex: 1 },
   appRule: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
+  appSaveBadge: { minWidth: 42, alignItems: 'center', borderRadius: 12, paddingHorizontal: 7, paddingVertical: 6 },
+  appSaveNumber: { fontSize: 16, lineHeight: 17, fontFamily: 'Inter_700Bold' },
+  appSaveLabel: { fontSize: 8, fontFamily: 'Inter_700Bold', letterSpacing: 0.6, marginTop: 1 },
   addAppCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 18, padding: 15 },
   addAppIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   addAppTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
