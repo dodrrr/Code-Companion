@@ -11,7 +11,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
-import { Chain, getStreak, useChains } from '@/context/ChainsContext';
+import { Chain, getStreak, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
 import WeekStrip from './WeekStrip';
 import MilestoneModal from './MilestoneModal';
 
@@ -27,6 +27,7 @@ export default function ChainCard({ chain }: Props) {
   const { toggleToday, isCompletedToday } = useChains();
   const done   = isCompletedToday(chain);
   const streak = getStreak(chain);
+  const restingToday = isRestDay(chain, getTodayStr());
 
   const cardScale  = useSharedValue(1);
   const checkScale = useSharedValue(1);
@@ -51,6 +52,7 @@ export default function ChainCard({ chain }: Props) {
   }));
 
   const handleCheck = useCallback(() => {
+    if (restingToday) return;
     if (!done) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       checkScale.value = withSequence(
@@ -65,7 +67,7 @@ export default function ChainCard({ chain }: Props) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     toggleToday(chain.id);
-  }, [done, chain.id, toggleToday, checkScale, cardScale]);
+  }, [done, chain.id, restingToday, toggleToday, checkScale, cardScale]);
 
   const handleCardPress = useCallback(() => {
     router.push({ pathname: '/chain/[id]', params: { id: chain.id } });
@@ -105,18 +107,18 @@ export default function ChainCard({ chain }: Props) {
                     {streak === 1 ? 'day' : 'days'}
                   </Text>
                 </View>
-                <Pressable onPress={handleCheck} hitSlop={14}>
+                <Pressable onPress={handleCheck} disabled={restingToday} hitSlop={14}>
                   <Animated.View style={checkStyle}>
                     <View
                       style={[
                         styles.checkBtn,
                         {
-                          backgroundColor: done ? chain.color : 'transparent',
-                          borderColor:     done ? chain.color : colors.border,
+                          backgroundColor: done ? chain.color : restingToday ? colors.secondary : 'transparent',
+                          borderColor:     done ? chain.color : restingToday ? colors.mutedForeground + '55' : colors.border,
                         },
                       ]}
                     >
-                      {done && <Ionicons name="checkmark" size={18} color="#fff" />}
+                      {done ? <Ionicons name="checkmark" size={18} color="#fff" /> : restingToday ? <Ionicons name="moon-outline" size={17} color={colors.mutedForeground} /> : null}
                     </View>
                   </Animated.View>
                 </Pressable>
