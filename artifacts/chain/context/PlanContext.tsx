@@ -34,6 +34,7 @@ interface PlanContextValue {
   completeItemForDate: (id: string, date: string) => Promise<PlanItem | undefined>;
   updateReminderForDate: (id: string, date: string, reminderMinutes?: number, notificationId?: string) => Promise<void>;
   moveItemToTomorrow: (id: string) => Promise<PlanItem | undefined>;
+  copyItemToTomorrow: (id: string) => Promise<PlanItem | undefined>;
   removeItem: (id: string) => void;
   toggleItem: (id: string) => void;
 }
@@ -286,6 +287,25 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     return moved;
   }
 
+  async function copyItemToTomorrow(id: string): Promise<PlanItem | undefined> {
+    const item = items.find((entry) => entry.id === id);
+    if (!item) return undefined;
+    const tomorrow = getPlanTomorrowKey();
+    const copied: PlanItem = {
+      ...item,
+      id: `${Date.now()}${Math.random().toString(36).substring(2, 8)}`,
+      completed: false,
+      planDate: tomorrow,
+      notificationId: undefined,
+      isPriority: false,
+    };
+    const tomorrowRaw = await AsyncStorage.getItem(KEY_PREFIX + tomorrow);
+    const nextTomorrow = [...normalizeItems(tomorrowRaw, tomorrow), copied];
+    await AsyncStorage.setItem(KEY_PREFIX + tomorrow, JSON.stringify(nextTomorrow));
+    setTomorrowItemCount(nextTomorrow.length);
+    return copied;
+  }
+
   function removeItem(id: string) {
     persist(items.filter((item) => item.id !== id));
   }
@@ -295,7 +315,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     persist(items.map((item) => item.id === id ? { ...item, completed: !item.completed } : item));
   }
 
-  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, updateReminderForDate, moveItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys]);
+  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys]);
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 
