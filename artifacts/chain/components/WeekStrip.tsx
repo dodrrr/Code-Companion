@@ -11,19 +11,20 @@ interface Props {
 
 const DOW_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-function getRecentDates(count: number): string[] {
-  const dates: string[] = [];
-  for (let i = count - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    dates.push(toLocalDateString(d));
-  }
-  return dates;
+function getCurrentWeekDates(): string[] {
+  const monday = new Date();
+  const mondayOffset = (monday.getDay() + 6) % 7;
+  monday.setDate(monday.getDate() - mondayOffset);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + index);
+    return toLocalDateString(date);
+  });
 }
 
-export default function WeekStrip({ chain, days = 7 }: Props) {
+export default function WeekStrip({ chain }: Props) {
   const colors = useColors();
-  const dates = getRecentDates(days);
+  const dates = getCurrentWeekDates();
 
   return (
     <View style={styles.row}>
@@ -32,7 +33,7 @@ export default function WeekStrip({ chain, days = 7 }: Props) {
         const completed = chain.completedDates.includes(date);
         const frozen = chain.frozenDates.includes(date);
         const rest = isRestDay(chain, date);
-        const isToday = i === dates.length - 1;
+        const isToday = date === toLocalDateString(new Date());
 
         return (
           <View key={date} style={styles.dayCol}>
