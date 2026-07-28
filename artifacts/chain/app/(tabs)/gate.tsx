@@ -261,11 +261,11 @@ export default function GateScreen() {
       >
         {/* Info card */}
         <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Ionicons name="shield-checkmark" size={20} color={colors.primary} />
-          <Text style={[styles.infoText, { color: colors.mutedForeground }]}>
-            When you open a protected app, you will see your streak and a 5-second
-            pause — a moment to decide if it is worth it.
-          </Text>
+          <View style={[styles.infoIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="eye-outline" size={18} color={colors.primary} /></View>
+          <View style={styles.infoCopy}>
+            <Text style={[styles.infoEyebrow, { color: colors.primary }]}>PREVIEW MODE</Text>
+            <Text style={[styles.infoText, { color: colors.mutedForeground }]}>Your rules are saved here. Use Preview to feel the pause; iOS blocking remains managed through Screen Time.</Text>
+          </View>
         </View>
 
         {/* Apps list */}
@@ -284,7 +284,7 @@ export default function GateScreen() {
                     <Ionicons name={app.icon} size={20} color={app.iconColor} />
                   )}
                 </View>
-                <Pressable onPress={() => enabled[app.id] && setConfiguringApp(app)} style={styles.appCopy}><Text style={[styles.appName, { color: colors.foreground }]}>{app.name}</Text>{enabled[app.id] && <Text style={[styles.appRule, { color: colors.mutedForeground }]}>{rules[app.id]?.mode === 'daily_limit' ? `${rules[app.id]?.dailyLimitMinutes ?? 30} min daily limit` : 'Pause every opening'}</Text>}</Pressable>
+                <Pressable onPress={() => enabled[app.id] && setConfiguringApp(app)} style={styles.appCopy}><Text style={[styles.appName, { color: colors.foreground }]}>{app.name}</Text>{enabled[app.id] && <Text style={[styles.appRule, { color: colors.mutedForeground }]}>{rules[app.id]?.mode === 'daily_limit' ? `Preview rule · ${rules[app.id]?.dailyLimitMinutes ?? 30} min daily limit` : 'Preview rule · pause every opening'}</Text>}</Pressable>
                 <Switch
                   value={!!enabled[app.id]}
                   onValueChange={() => toggle(app.id)}
@@ -458,8 +458,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 4,
   },
+  infoIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  infoCopy: { flex: 1, gap: 4 },
+  infoEyebrow: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.1 },
   infoText: {
-    flex: 1,
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
     lineHeight: 21,
