@@ -28,6 +28,7 @@ export default function ChainCard({ chain }: Props) {
   const done   = isCompletedToday(chain);
   const streak = getStreak(chain);
   const restingToday = isRestDay(chain, getTodayStr());
+  const compactStreak = streak >= 100;
 
   const cardScale  = useSharedValue(1);
   const checkScale = useSharedValue(1);
@@ -100,7 +101,7 @@ export default function ChainCard({ chain }: Props) {
               </Text>
               <View style={styles.rightSide}>
                 <View style={styles.streakBlock}>
-                  <Text style={[styles.streakNum, { color: chain.color }]}>
+                  <Text style={[styles.streakNum, compactStreak && styles.streakNumCompact, { color: chain.color }]}> 
                     {streak}
                   </Text>
                   <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}>
@@ -174,16 +175,22 @@ const styles = StyleSheet.create({
   rightSide: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 18,
+    flexShrink: 0,
   },
   streakBlock: {
-    alignItems: 'flex-end',
+    width: 62,
+    alignItems: 'center',
     gap: 0,
   },
   streakNum: {
     fontSize: 26,
     fontFamily: 'Inter_700Bold',
     lineHeight: 28,
+  },
+  streakNumCompact: {
+    fontSize: 23,
+    lineHeight: 26,
   },
   streakLabel: {
     fontSize: 10,
@@ -192,9 +199,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   checkBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
