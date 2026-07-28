@@ -242,6 +242,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function completeItemForDate(id: string, date: string): Promise<PlanItem | undefined> {
+    // A scheduled notification must never complete a task before its actual day.
+    if (date > getPlanTodayKey()) return undefined;
     const raw = await AsyncStorage.getItem(KEY_PREFIX + date);
     const current = normalizeItems(raw, date);
     const item = current.find((entry) => entry.id === id);
@@ -289,6 +291,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   }
 
   function toggleItem(id: string) {
+    if (activeDate !== getPlanTodayKey() || closedDateKeys.includes(activeDate)) return;
     persist(items.map((item) => item.id === id ? { ...item, completed: !item.completed } : item));
   }
 
