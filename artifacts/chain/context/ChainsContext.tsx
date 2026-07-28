@@ -8,6 +8,7 @@ export interface Chain {
   createdAt: string;
   completedDates: string[]; // 'YYYY-MM-DD'
   frozenDates: string[];
+  restDays: number[]; // 0 (Sunday) through 6 (Saturday)
 }
 
 export type DayStatus = 'done' | 'frozen' | 'missed';
@@ -18,6 +19,7 @@ interface ChainsContextValue {
   addChain: (name: string, color: string) => void;
   deleteChain: (id: string) => void;
   updateChainColor: (id: string, color: string) => void;
+  updateChainRestDays: (id: string, restDays: number[]) => void;
   setDayStatus: (id: string, date: string, status: DayStatus) => boolean;
   toggleToday: (id: string) => void;
   useFreeze: (id: string) => void;
@@ -53,6 +55,14 @@ function uniqueDateKeys(values: unknown): string[] {
   return Array.from(new Set(Array.isArray(values) ? values.filter(isDateKey) : []));
 }
 
+function normalizeRestDays(values: unknown): number[] {
+  return Array.from(new Set(Array.isArray(values) ? values.filter((day): day is number => Number.isInteger(day) && day >= 0 && day <= 6) : []));
+}
+
+export function isRestDay(chain: Chain, date: string): boolean {
+  return (chain.restDays ?? []).includes(getLocalDateFromString(date).getDay());
+}
+
 function normalizeChain(value: unknown): Chain | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Partial<Chain>;
@@ -70,6 +80,7 @@ function normalizeChain(value: unknown): Chain | null {
     createdAt: raw.createdAt,
     completedDates,
     frozenDates,
+    restDays: normalizeRestDays(raw.restDays),
   };
 }
 
@@ -104,7 +115,9 @@ export function getStreak(chain: Chain): number {
 
   while (streak < 3650) {
     const s = toLocalDateString(d);
-    if (completed.has(s)) {
+    if (isRestDay(chain, s)) {
+      d.setDate(d.getDate() - 1);
+    } else if (completed.has(s)) {
       streak++;
       d.setDate(d.getDate() - 1);
     } else if (frozen.has(s)) {
@@ -160,6 +173,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
       createdAt: getTodayStr(),
       completedDates: [],
       frozenDates: [],
+      restDays: [],
     };
     persist([...chains, chain]);
   }
@@ -170,6 +184,10 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
 
   function updateChainColor(id: string, color: string) {
     persist(chains.map((chain) => (chain.id === id ? { ...chain, color } : chain)));
+  }
+
+  function updateChainRestDays(id: string, restDays: number[]) {
+    persist(chains.map((chain) => (chain.id === id ? { ...chain, restDays: normalizeRestDays(restDays) } : chain)));
   }
 
   function setDayStatus(id: string, date: string, status: DayStatus): boolean {
@@ -225,6 +243,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
         addChain,
         deleteChain,
         updateChainColor,
+        updateChainRestDays,
         setDayStatus,
         toggleToday,
         useFreeze,
