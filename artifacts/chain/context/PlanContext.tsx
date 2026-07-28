@@ -12,9 +12,10 @@ export interface PlanItem {
   color?: string;
   reminderMinutes?: number;
   notificationId?: string;
+  isPriority?: boolean;
 }
 
-type PlanItemOptions = Pick<PlanItem, 'text' | 'timeSlot' | 'chainId' | 'color' | 'reminderMinutes'>;
+type PlanItemOptions = Pick<PlanItem, 'text' | 'timeSlot' | 'chainId' | 'color' | 'reminderMinutes' | 'isPriority'>;
 
 interface PlanContextValue {
   items: PlanItem[];
@@ -72,6 +73,7 @@ function normalizeItems(raw: string | null, fallbackDate: string): PlanItem[] {
         color: typeof item.color === 'string' ? item.color : undefined,
         reminderMinutes: typeof item.reminderMinutes === 'number' ? item.reminderMinutes : undefined,
         notificationId: typeof item.notificationId === 'string' ? item.notificationId : undefined,
+        isPriority: item.isPriority === true,
       }];
     });
   } catch {
@@ -183,8 +185,9 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       chainId: options.chainId,
       color: options.color,
       reminderMinutes: options.reminderMinutes,
+      isPriority: options.isPriority === true,
     };
-    persist([...items, item]);
+    persist([...items.map((entry) => options.isPriority ? { ...entry, isPriority: false } : entry), item]);
     return item;
   }
 
@@ -192,7 +195,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const existing = items.find((item) => item.id === id);
     if (!existing) return undefined;
     const updated: PlanItem = { ...existing, ...options, text: options.text.trim(), notificationId: undefined };
-    persist(items.map((item) => item.id === id ? updated : item));
+    persist(items.map((item) => item.id === id ? updated : options.isPriority ? { ...item, isPriority: false } : item));
     return updated;
   }
 
