@@ -1,6 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Animated as RNAnimated,
   Platform,
   Pressable,
   StyleSheet,
@@ -22,7 +21,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { getGateSaves24h, recordGateSave } from '@/lib/gateStats';
 
-const COUNTDOWN_SECONDS = 8;
+const COUNTDOWN_SECONDS = 12;
 
 export default function PauseGateDemoScreen() {
   const colors = useColors();
@@ -52,12 +51,11 @@ export default function PauseGateDemoScreen() {
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
   const [ready, setReady] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
-  const progressAnim = useRef(new RNAnimated.Value(0)).current;
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
-  // Breathing circle animation
+  // One full breath: 4s in, 2s hold, 6s out. The pause lasts exactly one cycle.
   const breathScale = useSharedValue(1);
   const breathOpacity = useSharedValue(0.5);
 
@@ -69,15 +67,17 @@ export default function PauseGateDemoScreen() {
   useEffect(() => {
     breathScale.value = withRepeat(
       withSequence(
-        withTiming(1.18, { duration: 2800, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0.92, { duration: 2800, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1.22, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1.22, { duration: 2000, easing: Easing.linear }),
+        withTiming(0.92, { duration: 6000, easing: Easing.inOut(Easing.ease) }),
       ),
       -1,
     );
     breathOpacity.value = withRepeat(
       withSequence(
-        withTiming(0.9, { duration: 2800, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0.4, { duration: 2800, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0.92, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0.92, { duration: 2000, easing: Easing.linear }),
+        withTiming(0.34, { duration: 6000, easing: Easing.inOut(Easing.ease) }),
       ),
       -1,
     );
@@ -89,12 +89,6 @@ export default function PauseGateDemoScreen() {
 
   // Countdown timer
   useEffect(() => {
-    RNAnimated.timing(progressAnim, {
-      toValue: 1,
-      duration: COUNTDOWN_SECONDS * 1000,
-      useNativeDriver: false,
-    }).start();
-
     const interval = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -110,11 +104,7 @@ export default function PauseGateDemoScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  const progressWidth = progressAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0%', '100%'],
-  });
-  const breathPhase = countdown > 5 ? 'INHALE' : countdown > 2 ? 'HOLD' : 'EXHALE';
+  const breathPhase = countdown > 8 ? 'Breathe in' : countdown > 6 ? 'Hold' : 'Let it go';
 
   async function handleNotNow() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -185,25 +175,8 @@ export default function PauseGateDemoScreen() {
           <Text style={styles.questionLine}>
             Is this worth breaking it?
           </Text>
-          <View style={[styles.breathPhase, { borderColor: chainColor + '55', backgroundColor: chainColor + '14' }]}><View style={[styles.phaseDot, { backgroundColor: chainColor }]} /><Text style={[styles.breathInstruction, { color: chainColor }]}>{breathPhase} · follow the circle</Text></View>
+          <Text style={[styles.breathInstruction, { color: chainColor }]}>{breathPhase}</Text>
           <Text style={styles.saveCount}>{savedCount ? `You’ve stepped back ${savedCount} time${savedCount === 1 ? '' : 's'} in the last 24h.` : 'Choose the pause, not the scroll.'}</Text>
-        </View>
-
-        {/* Countdown bar */}
-        <View style={styles.progressWrap}>
-          <View style={[styles.progressTrack, { backgroundColor: '#1a1a1a' }]}>
-            <RNAnimated.View
-              style={[
-                styles.progressFill,
-                { backgroundColor: chainColor, width: progressWidth },
-              ]}
-            />
-          </View>
-          {!ready && (
-            <Text style={styles.countdownText}>
-              {countdown}s
-            </Text>
-          )}
         </View>
 
         {/* Action buttons */}
@@ -311,35 +284,8 @@ const styles = StyleSheet.create({
     color: '#fff',
     textAlign: 'center',
   },
-  breathInstruction: {
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-    color: '#555',
-    marginTop: 4,
-  },
-  breathPhase: { flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, marginTop: 4 },
-  phaseDot: { width: 6, height: 6, borderRadius: 3 },
-  saveCount: { fontSize: 12, fontFamily: 'Inter_500Medium', color: '#777', textAlign: 'center', marginTop: 8 },
-  progressWrap: {
-    width: '100%',
-    alignItems: 'center',
-    gap: 8,
-  },
-  progressTrack: {
-    width: '100%',
-    height: 3,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 2,
-  },
-  countdownText: {
-    fontSize: 12,
-    fontFamily: 'Inter_500Medium',
-    color: '#555',
-  },
+  breathInstruction: { fontSize: 17, fontFamily: 'Inter_600SemiBold', marginTop: 2 },
+  saveCount: { fontSize: 12, fontFamily: 'Inter_500Medium', color: '#777', textAlign: 'center', marginTop: 5 },
   actions: {
     width: '100%',
     gap: 12,
