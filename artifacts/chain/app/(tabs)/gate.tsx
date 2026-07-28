@@ -267,7 +267,7 @@ export default function GateScreen() {
           <View style={[styles.savesIcon, { backgroundColor: colors.primary + '20' }]}><Ionicons name="shield-checkmark" size={22} color={colors.primary} /></View>
           <View style={styles.savesCopy}><Text style={[styles.savesNumber, { color: colors.primary }]}>{saveEvents.length}</Text><Text style={[styles.savesTitle, { color: colors.foreground }]}>times you chose the pause</Text><Text style={[styles.savesBody, { color: colors.mutedForeground }]}>Your wins in the last 24 hours.</Text></View>
         </View>
-        <Pressable onPress={openDemo} style={({ pressed }) => [styles.previewWide, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}><Ionicons name="play" size={16} color="#fff" /><Text style={styles.previewWideText}>Preview your Pause Gate</Text><Ionicons name="arrow-forward" size={17} color="#fff" /></Pressable>
+        <Pressable onPress={openDemo} style={({ pressed }) => [styles.previewWide, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}><Text style={styles.previewWideText}>Preview your Pause Gate</Text></Pressable>
         {/* Info card */}
         <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={[styles.infoIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="eye-outline" size={18} color={colors.primary} /></View>
@@ -461,8 +461,8 @@ const styles = StyleSheet.create({
   savesNumber: { fontSize: 34, lineHeight: 37, fontFamily: 'Inter_700Bold' },
   savesTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', marginTop: -1 },
   savesBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 3 },
-  previewWide: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 18, paddingVertical: 14 },
-  previewWideText: { flex: 1, color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  previewWide: { alignItems: 'center', justifyContent: 'center', borderRadius: 18, paddingVertical: 15 },
+  previewWideText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold', textAlign: 'center' },
   scroll: {
     paddingHorizontal: 20,
     gap: 12,
