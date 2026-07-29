@@ -271,7 +271,7 @@ export default function ChainDetailScreen() {
         <View style={styles.accentSection}>
           <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>CHAIN ACCENT</Text>
           <View style={styles.colorRow}>
-            {CHAIN_COLORS.map((color) => {
+            {[...CHAIN_COLORS, ...(showMoreColors ? EXTRA_CHAIN_COLORS : [])].map((color) => {
               const selected = color === chain.color;
               return (
                 <Pressable
@@ -294,7 +294,6 @@ export default function ChainDetailScreen() {
             })}
             <Pressable onPress={() => setShowMoreColors((open) => !open)} style={({ pressed }) => [styles.colorRing, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><View style={[styles.colorSwatch, { backgroundColor: colors.card }]}><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={15} color={colors.mutedForeground} /></View></Pressable>
           </View>
-          {showMoreColors && <View style={styles.colorRow}>{EXTRA_CHAIN_COLORS.map((color) => { const selected = color === chain.color; return <Pressable key={color} accessibilityLabel={`Use ${color} for ${chain.name}`} onPress={() => handleColorChange(color)} style={({ pressed }) => [styles.colorRing, { borderColor: selected ? color : 'transparent', opacity: pressed ? 0.7 : 1 }]}><View style={[styles.colorSwatch, { backgroundColor: color }]}>{selected && <Ionicons name="checkmark" size={16} color="#fff" />}</View></Pressable>; })}</View>}
         </View>
 
         <View style={[styles.scheduleCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
