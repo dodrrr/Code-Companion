@@ -9,6 +9,8 @@ export interface Chain {
   completedDates: string[]; // 'YYYY-MM-DD'
   frozenDates: string[];
   restDays: number[]; // 0 (Sunday) through 6 (Saturday)
+  cadence: 'daily' | 'weekly';
+  weeklyTarget: number;
 }
 
 export type DayStatus = 'done' | 'frozen' | 'missed';
@@ -16,10 +18,11 @@ export type DayStatus = 'done' | 'frozen' | 'missed';
 interface ChainsContextValue {
   chains: Chain[];
   isReady: boolean;
-  addChain: (name: string, color: string) => void;
+  addChain: (name: string, color: string, options?: { cadence?: Chain['cadence']; weeklyTarget?: number }) => void;
   deleteChain: (id: string) => void;
   updateChainColor: (id: string, color: string) => void;
   updateChainRestDays: (id: string, restDays: number[]) => void;
+  updateChainCadence: (id: string, cadence: Chain['cadence'], weeklyTarget?: number) => void;
   setDayStatus: (id: string, date: string, status: DayStatus) => boolean;
   toggleToday: (id: string) => void;
   useFreeze: (id: string) => void;
@@ -59,8 +62,29 @@ function normalizeRestDays(values: unknown): number[] {
   return Array.from(new Set(Array.isArray(values) ? values.filter((day): day is number => Number.isInteger(day) && day >= 0 && day <= 6) : []));
 }
 
+function normalizeWeeklyTarget(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 7 ? value : 3;
+}
+
 export function isRestDay(chain: Chain, date: string): boolean {
+  if (chain.cadence === 'weekly') return false;
   return (chain.restDays ?? []).includes(getLocalDateFromString(date).getDay());
+}
+
+function getWeekStart(value: Date): Date {
+  const date = new Date(value);
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7));
+  return date;
+}
+
+export function getWeeklyProgress(chain: Chain, referenceDate = getTodayStr()): number {
+  const start = getWeekStart(getLocalDateFromString(referenceDate));
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const startKey = toLocalDateString(start);
+  const endKey = toLocalDateString(end);
+  return chain.completedDates.filter((date) => date >= startKey && date <= endKey).length;
 }
 
 function normalizeChain(value: unknown): Chain | null {
@@ -81,6 +105,8 @@ function normalizeChain(value: unknown): Chain | null {
     completedDates,
     frozenDates,
     restDays: normalizeRestDays(raw.restDays),
+    cadence: raw.cadence === 'weekly' ? 'weekly' : 'daily',
+    weeklyTarget: normalizeWeeklyTarget(raw.weeklyTarget),
   };
 }
 
@@ -100,6 +126,21 @@ function parseChains(raw: string | null): Chain[] {
 }
 
 export function getStreak(chain: Chain): number {
+  if (chain.cadence === 'weekly') {
+    const today = getLocalDateFromString(getTodayStr());
+    let weekStart = getWeekStart(today);
+    if (getWeeklyProgress(chain) < chain.weeklyTarget) weekStart.setDate(weekStart.getDate() - 7);
+
+    let streak = 0;
+    while (streak < 520) {
+      const weekKey = toLocalDateString(weekStart);
+      if (getWeeklyProgress(chain, weekKey) < chain.weeklyTarget) break;
+      streak++;
+      weekStart.setDate(weekStart.getDate() - 7);
+    }
+    return streak;
+  }
+
   const today = getTodayStr();
   const completed = new Set(chain.completedDates);
   const frozen = new Set(chain.frozenDates);
@@ -165,7 +206,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
     void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 2, chains: next }));
   }
 
-  function addChain(name: string, color: string) {
+  function addChain(name: string, color: string, options?: { cadence?: Chain['cadence']; weeklyTarget?: number }) {
     const chain: Chain = {
       id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
       name: name.trim(),
@@ -174,6 +215,8 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
       completedDates: [],
       frozenDates: [],
       restDays: [],
+      cadence: options?.cadence === 'weekly' ? 'weekly' : 'daily',
+      weeklyTarget: normalizeWeeklyTarget(options?.weeklyTarget),
     };
     persist([...chains, chain]);
   }
@@ -188,6 +231,15 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
 
   function updateChainRestDays(id: string, restDays: number[]) {
     persist(chains.map((chain) => (chain.id === id ? { ...chain, restDays: normalizeRestDays(restDays) } : chain)));
+  }
+
+  function updateChainCadence(id: string, cadence: Chain['cadence'], weeklyTarget?: number) {
+    persist(chains.map((chain) => chain.id === id ? {
+      ...chain,
+      cadence,
+      weeklyTarget: normalizeWeeklyTarget(weeklyTarget ?? chain.weeklyTarget),
+      restDays: cadence === 'weekly' ? [] : chain.restDays,
+    } : chain));
   }
 
   function setDayStatus(id: string, date: string, status: DayStatus): boolean {
@@ -244,6 +296,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
         deleteChain,
         updateChainColor,
         updateChainRestDays,
+        updateChainCadence,
         setDayStatus,
         toggleToday,
         useFreeze,
