@@ -11,6 +11,7 @@ export interface Chain {
   restDays: number[]; // 0 (Sunday) through 6 (Saturday)
   cadence: 'daily' | 'weekly';
   weeklyTarget: number;
+  completionTimes: Record<string, string>; // ISO timestamps, keyed by local date
 }
 
 export type DayStatus = 'done' | 'frozen' | 'missed';
@@ -107,6 +108,7 @@ function normalizeChain(value: unknown): Chain | null {
     restDays: normalizeRestDays(raw.restDays),
     cadence: raw.cadence === 'weekly' ? 'weekly' : 'daily',
     weeklyTarget: normalizeWeeklyTarget(raw.weeklyTarget),
+    completionTimes: raw.completionTimes && typeof raw.completionTimes === 'object' ? Object.fromEntries(Object.entries(raw.completionTimes).filter(([date, value]) => isDateKey(date) && typeof value === 'string')) : {},
   };
 }
 
@@ -217,6 +219,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
       restDays: [],
       cadence: options?.cadence === 'weekly' ? 'weekly' : 'daily',
       weeklyTarget: normalizeWeeklyTarget(options?.weeklyTarget),
+      completionTimes: {},
     };
     persist([...chains, chain]);
   }
@@ -257,10 +260,16 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
         const completedDates = chain.completedDates.filter((day) => day !== date);
         const frozenDates = chain.frozenDates.filter((day) => day !== date);
 
-        if (status === 'done') completedDates.push(date);
+        const completionTimes = { ...chain.completionTimes };
+        if (status === 'done') {
+          completedDates.push(date);
+          completionTimes[date] = new Date().toISOString();
+        } else {
+          delete completionTimes[date];
+        }
         if (status === 'frozen') frozenDates.push(date);
 
-        return { ...chain, completedDates, frozenDates };
+        return { ...chain, completedDates, frozenDates, completionTimes };
       }),
     );
     return true;
