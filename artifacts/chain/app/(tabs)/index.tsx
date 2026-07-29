@@ -57,8 +57,8 @@ export default function TodayScreen() {
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
-  const focusTask = items.find((item) => item.isPriority);
-  const focusChain = chains.find((chain) => chain.id === focusTask?.chainId) || chains.find((chain) => !chain.completedDates.includes(getTodayStr())) || chains[0];
+  const focusTask = items.find((item) => item.isPriority && !item.completed);
+  const focusChain = chains.find((chain) => chain.id === focusTask?.chainId) || chains.find((chain) => !chain.completedDates.includes(getTodayStr()));
 
   const renderChain = useCallback(
     ({ item }: { item: Chain }) => <ChainCard chain={item} />,
