@@ -167,6 +167,8 @@ export default function ChainDetailScreen() {
   const frozen = isFrozenToday(chain);
   const freezeTokens = getRemainingFreezeTokens(chain);
   const totalCompleted = chain.completedDates.length;
+  const daysSinceStart = Math.max(1, Math.floor((new Date(`${getTodayStr()}T12:00:00`).getTime() - new Date(`${chain.createdAt}T12:00:00`).getTime()) / 86400000) + 1);
+  const consistency = Math.min(100, Math.round((totalCompleted / daysSinceStart) * 100));
   const restingToday = isRestDay(chain, getTodayStr());
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
 
@@ -314,6 +316,14 @@ export default function ChainDetailScreen() {
           <Text style={[styles.streakSub, { color: colors.mutedForeground }]}>
             {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : `${totalCompleted} total completed`}
           </Text>
+        </View>
+
+        <View style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.insight}><Text style={[styles.insightValue, { color: chain.color }]}>{consistency}%</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>CONSISTENCY</Text></View>
+          <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.insight}><Text style={[styles.insightValue, { color: colors.foreground }]}>{totalCompleted}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>DAYS DONE</Text></View>
+          <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.insight}><Text style={[styles.insightValue, { color: '#5B8CFF' }]}>{chain.frozenDates.length}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>PROTECTED</Text></View>
         </View>
 
         {/* Today's action */}
@@ -571,6 +581,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     marginTop: 4,
   },
+  insightsCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 18, borderWidth: 1, paddingVertical: 14 },
+  insight: { flex: 1, alignItems: 'center', gap: 3 },
+  insightValue: { fontSize: 18, fontFamily: 'Inter_700Bold' },
+  insightLabel: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.8 },
+  insightDivider: { width: 1, height: 28 },
   actionRow: {
     flexDirection: 'row',
     gap: 10,
