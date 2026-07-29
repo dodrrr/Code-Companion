@@ -8,12 +8,11 @@ export const CHAIN_COLORS = [
 ];
 
 export const EXTRA_CHAIN_COLORS = [
-  '#7C2D12', // burnt umber
-  '#334155', // slate
-  '#4D7C0F', // moss
-  '#0E7490', // deep cyan
-  '#BE123C', // crimson
-  '#6D28D9', // deep purple
+  '#A16207', // bronze
+  '#84CC16', // lime
+  '#22D3EE', // cyan
+  '#EF4444', // red
+  '#4F46E5', // indigo
 ];
 
 const palette = {
