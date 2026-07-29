@@ -15,9 +15,13 @@ export interface PlanItem {
   isPriority?: boolean;
   repeatDays?: number[];
   repeatSourceId?: string;
+  durationMinutes?: number;
+  endAlert?: boolean;
+  endNotificationId?: string;
+  completedAt?: string;
 }
 
-type PlanItemOptions = Pick<PlanItem, 'text' | 'timeSlot' | 'chainId' | 'color' | 'reminderMinutes' | 'isPriority' | 'repeatDays'>;
+type PlanItemOptions = Pick<PlanItem, 'text' | 'timeSlot' | 'chainId' | 'color' | 'reminderMinutes' | 'isPriority' | 'repeatDays' | 'durationMinutes' | 'endAlert'>;
 
 interface PlanContextValue {
   items: PlanItem[];
@@ -33,6 +37,7 @@ interface PlanContextValue {
   addItem: (options: PlanItemOptions) => PlanItem;
   updateItem: (id: string, options: PlanItemOptions) => PlanItem | undefined;
   updateReminderMetadata: (id: string, reminderMinutes?: number, notificationId?: string) => void;
+  updateEndAlertMetadata: (id: string, endAlert?: boolean, endNotificationId?: string) => void;
   completeItemForDate: (id: string, date: string) => Promise<PlanItem | undefined>;
   updateReminderForDate: (id: string, date: string, reminderMinutes?: number, notificationId?: string) => Promise<void>;
   moveItemToTomorrow: (id: string) => Promise<PlanItem | undefined>;
@@ -43,6 +48,9 @@ interface PlanContextValue {
 
 const KEY_PREFIX = '@chain_plan_';
 const CLOSED_DATES_KEY = '@chain_plan_closed_dates';
+export const FOCUS_LOG_KEY = '@chain_focus_log';
+
+export interface FocusLogEntry { itemId: string; chainId: string; date: string; minutes: number; completedAt: string; }
 
 function toDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -83,6 +91,10 @@ function normalizeItems(raw: string | null, fallbackDate: string): PlanItem[] {
         isPriority: item.isPriority === true,
         repeatDays: Array.isArray(item.repeatDays) ? item.repeatDays.filter((day): day is number => typeof day === 'number' && day >= 0 && day <= 6) : undefined,
         repeatSourceId: typeof item.repeatSourceId === 'string' ? item.repeatSourceId : undefined,
+        durationMinutes: typeof item.durationMinutes === 'number' && item.durationMinutes > 0 ? item.durationMinutes : undefined,
+        endAlert: item.endAlert === true,
+        endNotificationId: typeof item.endNotificationId === 'string' ? item.endNotificationId : undefined,
+        completedAt: typeof item.completedAt === 'string' ? item.completedAt : undefined,
       }];
     });
   } catch {
@@ -100,6 +112,13 @@ function normalizeClosedDates(raw: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+function normalizeFocusLog(raw: string | null): FocusLogEntry[] {
+  try {
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is FocusLogEntry => Boolean(entry && typeof entry.itemId === 'string' && typeof entry.chainId === 'string' && typeof entry.date === 'string' && typeof entry.minutes === 'number' && typeof entry.completedAt === 'string')) : [];
+  } catch { return []; }
 }
 
 const PlanContext = createContext<PlanContextValue | null>(null);
@@ -185,7 +204,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const tomorrowDay = new Date(`${date}T12:00:00`).getDay();
     const repeated = todayItems
       .filter((item) => item.repeatDays?.includes(tomorrowDay) && !nextItems.some((next) => next.repeatSourceId === (item.repeatSourceId || item.id)))
-      .map((item) => ({ ...item, id: `${Date.now()}${Math.random().toString(36).substring(2, 8)}`, completed: false, planDate: date, notificationId: undefined, isPriority: false, repeatSourceId: item.repeatSourceId || item.id }));
+      .map((item) => ({ ...item, id: `${Date.now()}${Math.random().toString(36).substring(2, 8)}`, completed: false, completedAt: undefined, planDate: date, notificationId: undefined, endNotificationId: undefined, isPriority: false, repeatSourceId: item.repeatSourceId || item.id }));
     const resolved = [...nextItems, ...repeated];
     if (repeated.length) await AsyncStorage.setItem(KEY_PREFIX + date, JSON.stringify(resolved));
     setActiveDate(date);
@@ -224,6 +243,15 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     if (activeDate === getPlanTomorrowKey()) setTomorrowItemCount(next.length);
   }
 
+  function recordFocus(item: PlanItem, completedAt: string) {
+    if (!item.chainId || !item.durationMinutes) return;
+    void AsyncStorage.getItem(FOCUS_LOG_KEY).then((raw) => {
+      const existing = normalizeFocusLog(raw).filter((entry) => entry.itemId !== item.id);
+      const next = [...existing, { itemId: item.id, chainId: item.chainId!, date: item.planDate, minutes: item.durationMinutes!, completedAt }];
+      return AsyncStorage.setItem(FOCUS_LOG_KEY, JSON.stringify(next.slice(-500)));
+    });
+  }
+
   function addItem(options: PlanItemOptions) {
     const item: PlanItem = {
       id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
@@ -236,6 +264,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       reminderMinutes: options.reminderMinutes,
       isPriority: options.isPriority === true,
       repeatDays: options.repeatDays?.length ? options.repeatDays : undefined,
+      durationMinutes: options.durationMinutes,
+      endAlert: options.endAlert === true,
     };
     persist([...items.map((entry) => options.isPriority ? { ...entry, isPriority: false } : entry), item]);
     return item;
@@ -244,7 +274,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   function updateItem(id: string, options: PlanItemOptions) {
     const existing = items.find((item) => item.id === id);
     if (!existing) return undefined;
-    const updated: PlanItem = { ...existing, ...options, text: options.text.trim(), notificationId: undefined, repeatDays: options.repeatDays?.length ? options.repeatDays : undefined };
+    const updated: PlanItem = { ...existing, ...options, text: options.text.trim(), notificationId: undefined, endNotificationId: undefined, repeatDays: options.repeatDays?.length ? options.repeatDays : undefined };
     persist(items.map((item) => item.id === id ? updated : options.isPriority ? { ...item, isPriority: false } : item));
     return updated;
   }
@@ -257,6 +287,14 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     });
   }
 
+  function updateEndAlertMetadata(id: string, endAlert?: boolean, endNotificationId?: string) {
+    setItems((previous) => {
+      const next = previous.map((item) => item.id === id ? { ...item, endAlert, endNotificationId } : item);
+      void AsyncStorage.setItem(KEY_PREFIX + activeDate, JSON.stringify(next));
+      return next;
+    });
+  }
+
   async function completeItemForDate(id: string, date: string): Promise<PlanItem | undefined> {
     // A scheduled notification must never complete a task before its actual day.
     if (date > getPlanTodayKey()) return undefined;
@@ -264,10 +302,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const current = normalizeItems(raw, date);
     const item = current.find((entry) => entry.id === id);
     if (!item) return undefined;
-    const next = current.map((entry) => entry.id === id ? { ...entry, completed: true } : entry);
+    const completedAt = new Date().toISOString();
+    const next = current.map((entry) => entry.id === id ? { ...entry, completed: true, completedAt } : entry);
     await AsyncStorage.setItem(KEY_PREFIX + date, JSON.stringify(next));
     if (date === activeDate) setItems(next);
-    return { ...item, completed: true };
+    const completed = { ...item, completed: true, completedAt };
+    recordFocus(completed, completedAt);
+    return completed;
   }
 
   async function updateReminderForDate(id: string, date: string, reminderMinutes?: number, notificationId?: string) {
@@ -289,6 +330,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       planDate: tomorrow,
       reminderMinutes: undefined,
       notificationId: undefined,
+      endNotificationId: undefined,
+      completedAt: undefined,
     };
     const remaining = items.filter((entry) => entry.id !== id);
     const tomorrowRaw = await AsyncStorage.getItem(KEY_PREFIX + tomorrow);
@@ -312,6 +355,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       completed: false,
       planDate: tomorrow,
       notificationId: undefined,
+      endNotificationId: undefined,
+      completedAt: undefined,
       isPriority: false,
     };
     const tomorrowRaw = await AsyncStorage.getItem(KEY_PREFIX + tomorrow);
@@ -327,10 +372,15 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   function toggleItem(id: string) {
     if (activeDate !== getPlanTodayKey() || closedDateKeys.includes(activeDate)) return;
-    persist(items.map((item) => item.id === id ? { ...item, completed: !item.completed } : item));
+    const target = items.find((item) => item.id === id);
+    const completing = Boolean(target && !target.completed);
+    const completedAt = completing ? new Date().toISOString() : undefined;
+    const next = items.map((item) => item.id === id ? { ...item, completed: !item.completed, completedAt } : item);
+    persist(next);
+    if (target && completedAt) recordFocus({ ...target, completed: true, completedAt }, completedAt);
   }
 
-  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys]);
+  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, updateEndAlertMetadata, completeItemForDate, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys]);
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 
