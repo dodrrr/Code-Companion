@@ -11,7 +11,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
-import { Chain, getTodayStr, useChains } from '@/context/ChainsContext';
+import { Chain, getStreak, getTodayStr, useChains } from '@/context/ChainsContext';
+import { usePlan } from '@/context/PlanContext';
 import ChainCard from '@/components/ChainCard';
 import { getDailyQuote } from '@/constants/quotes';
 
@@ -36,6 +37,7 @@ export default function TodayScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { chains, isReady } = useChains();
+  const { items } = usePlan();
   const [localDay, setLocalDay] = useState(getTodayStr());
 
   useEffect(() => {
@@ -55,6 +57,8 @@ export default function TodayScreen() {
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
+  const focusTask = items.find((item) => item.isPriority);
+  const focusChain = chains.find((chain) => chain.id === focusTask?.chainId) || chains.find((chain) => !chain.completedDates.includes(getTodayStr())) || chains[0];
 
   const renderChain = useCallback(
     ({ item }: { item: Chain }) => <ChainCard chain={item} />,
@@ -72,6 +76,11 @@ export default function TodayScreen() {
           — {quote.author}
         </Text>
       </View>
+      {focusChain && <Pressable onPress={() => router.push({ pathname: '/chain/[id]', params: { id: focusChain.id } })} style={({ pressed }) => [styles.focusCard, { backgroundColor: focusChain.color + '16', borderColor: focusChain.color + '55', opacity: pressed ? 0.8 : 1 }]}>
+        <View style={[styles.focusIcon, { backgroundColor: focusChain.color + '22' }]}><Ionicons name="flame-outline" size={19} color={focusChain.color} /></View>
+        <View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: focusChain.color }]}>TODAY'S FOCUS</Text><Text style={[styles.focusTitle, { color: colors.foreground }]} numberOfLines={1}>{focusTask?.text || `Protect ${focusChain.name}`}</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>Protect your {getStreak(focusChain)}-{focusChain.cadence === 'weekly' ? 'week' : 'day'} {focusChain.name} chain.</Text></View>
+        <Ionicons name="chevron-forward" size={18} color={focusChain.color} />
+      </Pressable>}
     </>
   );
 
@@ -214,6 +223,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
     letterSpacing: 0.3,
   },
+  focusCard: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 18, borderWidth: 1, padding: 13, marginBottom: 16 },
+  focusIcon: { width: 36, height: 36, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  focusEyebrow: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
+  focusTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', marginTop: 2 },
+  focusBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
   empty: {
     flex: 1,
     alignItems: 'center',
