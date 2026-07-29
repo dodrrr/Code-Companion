@@ -29,8 +29,7 @@ export default function ChainCard({ chain }: Props) {
   const streak = getStreak(chain);
   const restingToday = isRestDay(chain, getTodayStr());
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
-  const cardMetric = chain.cadence === 'weekly' ? weeklyProgress : streak;
-  const compactStreak = cardMetric >= 100;
+  const compactStreak = streak >= 100;
 
   const cardScale  = useSharedValue(1);
   const checkScale = useSharedValue(1);
@@ -104,27 +103,30 @@ export default function ChainCard({ chain }: Props) {
               <View style={styles.rightSide}>
                 <View style={styles.streakBlock}>
                   <Text style={[styles.streakNum, compactStreak && styles.streakNumCompact, { color: chain.color }]}> 
-                    {cardMetric}
+                    {streak}
                   </Text>
-                  <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}>
-                    {chain.cadence === 'weekly' ? `of ${chain.weeklyTarget} this week` : streak === 1 ? 'day' : 'days'}
+                  <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}> 
+                    {chain.cadence === 'weekly' ? (streak === 1 ? 'week' : 'weeks') : streak === 1 ? 'day' : 'days'}
                   </Text>
                 </View>
-                <Pressable onPress={handleCheck} disabled={restingToday} hitSlop={14}>
-                  <Animated.View style={checkStyle}>
-                    <View
-                      style={[
-                        styles.checkBtn,
-                        {
-                          backgroundColor: done ? chain.color : restingToday ? colors.secondary : 'transparent',
-                          borderColor:     done ? chain.color : restingToday ? colors.mutedForeground + '55' : colors.border,
-                        },
-                      ]}
-                    >
-                      {done ? <Ionicons name="checkmark" size={18} color="#fff" /> : restingToday ? <Ionicons name="moon-outline" size={17} color={colors.mutedForeground} /> : null}
-                    </View>
-                  </Animated.View>
-                </Pressable>
+                <View style={chain.cadence === 'weekly' && styles.weeklyCheckBlock}>
+                  <Pressable onPress={handleCheck} disabled={restingToday} hitSlop={14}>
+                    <Animated.View style={checkStyle}>
+                      <View
+                        style={[
+                          styles.checkBtn,
+                          {
+                            backgroundColor: done ? chain.color : restingToday ? colors.secondary : 'transparent',
+                            borderColor:     done ? chain.color : restingToday ? colors.mutedForeground + '55' : colors.border,
+                          },
+                        ]}
+                      >
+                        {done ? <Ionicons name="checkmark" size={18} color="#fff" /> : restingToday ? <Ionicons name="moon-outline" size={17} color={colors.mutedForeground} /> : null}
+                      </View>
+                    </Animated.View>
+                  </Pressable>
+                  {chain.cadence === 'weekly' && <Text style={[styles.weeklyProgress, { color: chain.color }]}>{weeklyProgress}/{chain.weeklyTarget}</Text>}
+                </View>
               </View>
             </View>
 
@@ -207,5 +209,14 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  weeklyCheckBlock: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  weeklyProgress: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.4,
   },
 });
