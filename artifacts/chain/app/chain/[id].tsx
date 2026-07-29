@@ -15,11 +15,13 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import {
   CHAIN_COLORS,
+  EXTRA_CHAIN_COLORS,
 } from '@/constants/colors';
 import {
   Chain,
   DayStatus,
   getStreak,
+  getWeeklyProgress,
   getTodayStr,
   isRestDay,
   toLocalDateString,
@@ -123,6 +125,7 @@ export default function ChainDetailScreen() {
     deleteChain,
     updateChainColor,
     updateChainRestDays,
+    updateChainCadence,
     setDayStatus,
     toggleToday,
     useFreeze,
@@ -133,6 +136,7 @@ export default function ChainDetailScreen() {
   } = useChains();
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [showMoreColors, setShowMoreColors] = useState(false);
   const touchStartX = useRef<number | null>(null);
 
   const chain = chains.find((c) => c.id === id);
@@ -164,6 +168,7 @@ export default function ChainDetailScreen() {
   const freezeTokens = getRemainingFreezeTokens(chain);
   const totalCompleted = chain.completedDates.length;
   const restingToday = isRestDay(chain, getTodayStr());
+  const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
 
   function handleDelete() {
     if (!chain) return;
@@ -288,25 +293,27 @@ export default function ChainDetailScreen() {
               );
             })}
           </View>
+          <Pressable onPress={() => setShowMoreColors((open) => !open)} style={styles.moreColors}><Text style={[styles.moreColorsText, { color: colors.mutedForeground }]}>{showMoreColors ? 'Fewer colors' : 'More colors'}</Text><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={14} color={colors.mutedForeground} /></Pressable>
+          {showMoreColors && <View style={styles.colorRow}>{EXTRA_CHAIN_COLORS.map((color) => { const selected = color === chain.color; return <Pressable key={color} accessibilityLabel={`Use ${color} for ${chain.name}`} onPress={() => handleColorChange(color)} style={({ pressed }) => [styles.colorRing, { borderColor: selected ? color : 'transparent', opacity: pressed ? 0.7 : 1 }]}><View style={[styles.colorSwatch, { backgroundColor: color }]}>{selected && <Ionicons name="checkmark" size={16} color="#fff" />}</View></Pressable>; })}</View>}
         </View>
 
         <View style={[styles.scheduleCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Pressable onPress={() => setScheduleOpen((open) => !open)} style={styles.scheduleHeader}>
             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="calendar-outline" size={17} color={chain.color} /></View>
-            <View style={styles.scheduleCopy}><Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Weekly schedule</Text><Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{chain.restDays.length ? `${SCHEDULE_DAYS.filter(({ value }) => chain.restDays.includes(value)).map(({ label }) => label).join(', ')} off` : 'Every day counts'}</Text></View>
+            <View style={styles.scheduleCopy}><Text style={[styles.scheduleTitle, { color: colors.foreground }]}>{chain.cadence === 'weekly' ? 'Weekly goal' : 'Weekly schedule'}</Text><Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : chain.restDays.length ? `${SCHEDULE_DAYS.filter(({ value }) => chain.restDays.includes(value)).map(({ label }) => label).join(', ')} off` : 'Every day counts'}</Text></View>
             <Ionicons name={scheduleOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
           </Pressable>
-          {scheduleOpen && <View style={styles.scheduleExpanded}><Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>Choose rest days. They never break your streak.</Text><View style={styles.weekDays}>{SCHEDULE_DAYS.map(({ label, value }) => { const isRest = chain.restDays.includes(value); return <Pressable key={label} onPress={() => toggleRestDay(value)} style={[styles.weekDay, { backgroundColor: isRest ? chain.color : colors.background, borderColor: isRest ? chain.color : colors.border }]}><Text style={[styles.weekDayText, { color: isRest ? '#fff' : colors.mutedForeground }]}>{label.slice(0, 1)}</Text></Pressable>; })}</View></View>}
+          {scheduleOpen && (chain.cadence === 'weekly' ? <View style={styles.scheduleExpanded}><Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>Reach your target in a week to extend your week streak.</Text><View style={styles.weekDays}>{[1, 2, 3, 4, 5, 6, 7].map((target) => { const selected = target === chain.weeklyTarget; return <Pressable key={target} onPress={() => { Haptics.selectionAsync(); updateChainCadence(chain.id, 'weekly', target); }} style={[styles.weekDay, { backgroundColor: selected ? chain.color : colors.background, borderColor: selected ? chain.color : colors.border }]}><Text style={[styles.weekDayText, { color: selected ? '#fff' : colors.mutedForeground }]}>{target}</Text></Pressable>; })}</View></View> : <View style={styles.scheduleExpanded}><Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>Choose rest days. They never break your streak.</Text><View style={styles.weekDays}>{SCHEDULE_DAYS.map(({ label, value }) => { const isRest = chain.restDays.includes(value); return <Pressable key={label} onPress={() => toggleRestDay(value)} style={[styles.weekDay, { backgroundColor: isRest ? chain.color : colors.background, borderColor: isRest ? chain.color : colors.border }]}><Text style={[styles.weekDayText, { color: isRest ? '#fff' : colors.mutedForeground }]}>{label.slice(0, 1)}</Text></Pressable>; })}</View></View>)}
         </View>
 
         {/* Streak hero */}
         <View style={[styles.streakHero, { backgroundColor: chain.color + '14', borderColor: chain.color + '33' }]}>
           <Text style={[styles.streakNumber, { color: chain.color }]}>{streak}</Text>
           <Text style={[styles.streakWord, { color: colors.mutedForeground }]}>
-            {streak === 1 ? 'day streak' : 'day streak'}
+            {chain.cadence === 'weekly' ? 'week streak' : 'day streak'}
           </Text>
           <Text style={[styles.streakSub, { color: colors.mutedForeground }]}>
-            {totalCompleted} total completed
+            {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : `${totalCompleted} total completed`}
           </Text>
         </View>
 
@@ -335,7 +342,7 @@ export default function ChainDetailScreen() {
                 { color: done ? '#fff' : colors.mutedForeground },
               ]}
             >
-              {done ? 'Done today' : 'Mark done today'}
+              {done ? 'Logged today' : chain.cadence === 'weekly' ? 'Log today' : 'Mark done today'}
             </Text>
           </Pressable>
 
@@ -494,6 +501,8 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
+  moreColors: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 3, paddingVertical: 3 },
+  moreColorsText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   colorRing: {
     borderRadius: 22,
     borderWidth: 2,
