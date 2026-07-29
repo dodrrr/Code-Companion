@@ -14,7 +14,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
-import { useChains } from '@/context/ChainsContext';
+import { getStreak, useChains } from '@/context/ChainsContext';
 import { GateSaveEvent, getGateSaves24h } from '@/lib/gateStats';
 
 interface AppEntry {
@@ -211,7 +211,7 @@ export default function GateScreen() {
         appIcon:    firstProtectedApp.icon,
         appColor:   firstProtectedApp.iconColor,
         chainName:  firstChain?.name ?? 'Write Daily',
-        streak:     firstChain ? String(firstChain.completedDates.length) : '14',
+        streak:     firstChain ? String(getStreak(firstChain)) : '14',
         chainColor: firstChain?.color ?? '#FF6B35',
         gateMode: rules[firstProtectedApp.id]?.mode ?? 'every_open',
         dailyLimit: String(rules[firstProtectedApp.id]?.dailyLimitMinutes ?? 30),
