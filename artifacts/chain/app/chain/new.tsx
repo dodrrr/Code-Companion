@@ -13,7 +13,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
-import { CHAIN_COLORS } from '@/constants/colors';
+import { CHAIN_COLORS, EXTRA_CHAIN_COLORS } from '@/constants/colors';
 import { useChains } from '@/context/ChainsContext';
 
 const SUGGESTIONS = [
@@ -28,6 +28,9 @@ export default function NewChainScreen() {
 
   const [name,          setName]          = useState('');
   const [selectedColor, setSelectedColor] = useState(CHAIN_COLORS[0]);
+  const [showMoreColors, setShowMoreColors] = useState(false);
+  const [cadence, setCadence] = useState<'daily' | 'weekly'>('daily');
+  const [weeklyTarget, setWeeklyTarget] = useState(3);
   const inputRef = useRef<TextInput>(null);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
@@ -39,7 +42,7 @@ export default function NewChainScreen() {
       return;
     }
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    addChain(name, selectedColor);
+    addChain(name, selectedColor, { cadence, weeklyTarget });
     router.back();
   }
 
@@ -78,7 +81,7 @@ export default function NewChainScreen() {
               {name || 'Your chain name'}
             </Text>
             <Text style={[styles.previewMeta, { color: colors.mutedForeground }]}>
-              0 day streak · starts today
+              {cadence === 'weekly' ? `${weeklyTarget} days a week · starts this week` : '0 day streak · starts today'}
             </Text>
           </View>
           <View style={[styles.previewCheck, { borderColor: selectedColor }]}>
@@ -126,6 +129,13 @@ export default function NewChainScreen() {
         </View>
 
         {/* Color picker */}
+        <Text style={[styles.label, { color: colors.mutedForeground }]}>RHYTHM</Text>
+        <View style={styles.cadenceRow}>
+          <Pressable onPress={() => setCadence('daily')} style={[styles.cadenceCard, { backgroundColor: cadence === 'daily' ? selectedColor + '18' : colors.card, borderColor: cadence === 'daily' ? selectedColor : colors.border }]}><Ionicons name="today-outline" size={17} color={cadence === 'daily' ? selectedColor : colors.mutedForeground} /><View style={styles.cadenceCopy}><Text style={[styles.cadenceTitle, { color: colors.foreground }]}>Daily</Text><Text style={[styles.cadenceBody, { color: colors.mutedForeground }]}>Keep a day streak.</Text></View></Pressable>
+          <Pressable onPress={() => setCadence('weekly')} style={[styles.cadenceCard, { backgroundColor: cadence === 'weekly' ? selectedColor + '18' : colors.card, borderColor: cadence === 'weekly' ? selectedColor : colors.border }]}><Ionicons name="calendar-outline" size={17} color={cadence === 'weekly' ? selectedColor : colors.mutedForeground} /><View style={styles.cadenceCopy}><Text style={[styles.cadenceTitle, { color: colors.foreground }]}>Weekly goal</Text><Text style={[styles.cadenceBody, { color: colors.mutedForeground }]}>Complete a target each week.</Text></View></Pressable>
+        </View>
+        {cadence === 'weekly' && <View style={[styles.targetCard, { backgroundColor: colors.card, borderColor: colors.border }]}><View><Text style={[styles.targetTitle, { color: colors.foreground }]}>How many days?</Text><Text style={[styles.targetBody, { color: colors.mutedForeground }]}>Your streak grows when you reach this each week.</Text></View><View style={styles.targetChoices}>{[1, 2, 3, 4, 5, 6, 7].map((target) => <Pressable key={target} onPress={() => { setWeeklyTarget(target); Haptics.selectionAsync(); }} style={[styles.targetPill, { backgroundColor: target === weeklyTarget ? selectedColor : colors.background, borderColor: target === weeklyTarget ? selectedColor : colors.border }]}><Text style={[styles.targetText, { color: target === weeklyTarget ? '#fff' : colors.mutedForeground }]}>{target}</Text></Pressable>)}</View></View>}
+
         <Text style={[styles.label, { color: colors.mutedForeground }]}>CHAIN COLOR</Text>
         <View style={styles.colorRow}>
           {CHAIN_COLORS.map((c) => {
@@ -158,6 +168,8 @@ export default function NewChainScreen() {
             );
           })}
         </View>
+        <Pressable onPress={() => setShowMoreColors((open) => !open)} style={styles.moreColors}><Text style={[styles.moreColorsText, { color: colors.mutedForeground }]}>{showMoreColors ? 'Fewer colors' : 'More colors'}</Text><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={14} color={colors.mutedForeground} /></Pressable>
+        {showMoreColors && <View style={styles.colorRow}>{EXTRA_CHAIN_COLORS.map((c) => { const isSelected = selectedColor === c; return <View key={c} style={[styles.swatchRing, isSelected ? { borderColor: c, borderWidth: 2.5 } : { borderColor: 'transparent', borderWidth: 2.5 }]}><Pressable onPress={() => { setSelectedColor(c); Haptics.selectionAsync(); }} style={[styles.colorSwatch, { backgroundColor: c }, isSelected && styles.colorSwatchSelected]}>{isSelected && <Ionicons name="checkmark" size={16} color="#fff" />}</Pressable></View>; })}</View>}
       </ScrollView>
 
       {/* Create button */}
@@ -271,6 +283,19 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     alignItems: 'center',
   },
+  moreColors: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 3, paddingVertical: 3 },
+  moreColorsText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  cadenceRow: { flexDirection: 'row', gap: 8 },
+  cadenceCard: { flex: 1, borderRadius: 16, borderWidth: 1, padding: 12, gap: 8 },
+  cadenceCopy: { gap: 2 },
+  cadenceTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  cadenceBody: { fontSize: 10, fontFamily: 'Inter_400Regular', lineHeight: 14 },
+  targetCard: { borderRadius: 16, borderWidth: 1, padding: 12, gap: 10 },
+  targetTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  targetBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
+  targetChoices: { flexDirection: 'row', gap: 6, justifyContent: 'space-between' },
+  targetPill: { width: 31, height: 31, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  targetText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
   swatchRing: {
     borderRadius: 26,
     padding: 3,
