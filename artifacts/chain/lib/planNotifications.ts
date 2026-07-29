@@ -81,6 +81,26 @@ export async function schedulePlanReminder(item: PlanItem, minutesBefore: number
   return { status: 'scheduled', notificationId };
 }
 
+export async function schedulePlanEndAlert(item: PlanItem): Promise<ReminderResult> {
+  if (Platform.OS === 'web' || !item.durationMinutes) return { status: 'unavailable' };
+  const start = getScheduledDate(item.timeSlot, item.planDate, 0);
+  if (!start) return { status: 'past' };
+  const date = new Date(start.getTime() + item.durationMinutes * 60_000);
+  if (date.getTime() <= Date.now()) return { status: 'past' };
+  if (await getPlanNotificationPermission() !== 'granted') return { status: 'denied' };
+  const notificationId = await Notifications.scheduleNotificationAsync({
+    content: { title: `${item.text} is ending`, body: `Your ${formatDuration(item.durationMinutes)} block is complete.`, sound: 'default', data: { planItemId: item.id, planDate: item.planDate } },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date },
+  });
+  return { status: 'scheduled', notificationId };
+}
+
+function formatDuration(minutes: number) {
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return hours ? `${hours}h${remainder ? ` ${remainder}m` : ''}` : `${minutes} min`;
+}
+
 export async function schedulePlanSnooze(item: PlanItem, minutes = 15): Promise<ReminderResult> {
   if (Platform.OS === 'web') return { status: 'unavailable' };
   const permission = await getPlanNotificationPermission();
