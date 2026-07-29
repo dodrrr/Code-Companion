@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -36,7 +36,9 @@ export default function ChainCard({ chain }: Props) {
 
   // Milestone celebration
   const [celebratingMilestone, setCelebratingMilestone] = useState<number | null>(null);
+  const [celebratingExtra, setCelebratingExtra] = useState<number | null>(null);
   const prevDoneRef = useRef(done);
+  const prevWeeklyProgressRef = useRef(weeklyProgress);
 
   useEffect(() => {
     if (!prevDoneRef.current && done && MILESTONES.has(streak)) {
@@ -44,6 +46,13 @@ export default function ChainCard({ chain }: Props) {
     }
     prevDoneRef.current = done;
   }, [done, streak]);
+
+  useEffect(() => {
+    if (chain.cadence === 'weekly' && weeklyProgress > chain.weeklyTarget && weeklyProgress > prevWeeklyProgressRef.current) {
+      setCelebratingExtra(weeklyProgress - chain.weeklyTarget);
+    }
+    prevWeeklyProgressRef.current = weeklyProgress;
+  }, [chain.cadence, chain.weeklyTarget, weeklyProgress]);
 
   const cardStyle = useAnimatedStyle(() => ({
     transform: [{ scale: cardScale.value }],
@@ -125,7 +134,7 @@ export default function ChainCard({ chain }: Props) {
                       </View>
                     </Animated.View>
                   </Pressable>
-                  {chain.cadence === 'weekly' && <Text style={[styles.weeklyProgress, { color: chain.color }]}>{weeklyProgress}/{chain.weeklyTarget}</Text>}
+                  {chain.cadence === 'weekly' && <Text style={[styles.weeklyProgress, { color: chain.color }]}>{weeklyProgress}/{chain.weeklyTarget}{weeklyProgress > chain.weeklyTarget ? ` · +${weeklyProgress - chain.weeklyTarget}` : ''}</Text>}
                 </View>
               </View>
             </View>
@@ -144,6 +153,7 @@ export default function ChainCard({ chain }: Props) {
           onDismiss={() => setCelebratingMilestone(null)}
         />
       )}
+      <ExtraWorkMoment extra={celebratingExtra} chain={chain} onClose={() => setCelebratingExtra(null)} />
     </>
   );
 }
@@ -219,4 +229,18 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.4,
   },
+  extraShade: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000088', padding: 28 },
+  extraCard: { width: '100%', maxWidth: 330, alignItems: 'center', borderRadius: 25, borderWidth: 1, padding: 28 },
+  extraIcon: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  extraEyebrow: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.4 },
+  extraTitle: { fontSize: 22, fontFamily: 'Inter_700Bold', letterSpacing: -0.4, marginTop: 6, textAlign: 'center' },
+  extraBody: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20, marginTop: 7, textAlign: 'center' },
+  extraButton: { alignSelf: 'stretch', alignItems: 'center', borderRadius: 17, paddingVertical: 13, marginTop: 22 },
+  extraButtonText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold' },
 });
+
+function ExtraWorkMoment({ extra, chain, onClose }: { extra: number | null; chain: Chain; onClose: () => void }) {
+  const colors = useColors();
+  if (extra === null) return null;
+  return <Modal transparent visible animationType="fade" onRequestClose={onClose}><View style={styles.extraShade}><View style={[styles.extraCard, { backgroundColor: colors.card, borderColor: chain.color + '66' }]}><View style={[styles.extraIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="sparkles" size={24} color={chain.color} /></View><Text style={[styles.extraEyebrow, { color: chain.color }]}>EXTRA WORK</Text><Text style={[styles.extraTitle, { color: colors.foreground }]}>You went beyond the goal.</Text><Text style={[styles.extraBody, { color: colors.mutedForeground }]}>+{extra} {extra === 1 ? 'extra day' : 'extra days'} for {chain.name} this week.</Text><Pressable onPress={onClose} style={[styles.extraButton, { backgroundColor: chain.color }]}><Text style={styles.extraButtonText}>Keep going</Text></Pressable></View></View></Modal>;
+}
