@@ -292,8 +292,8 @@ export default function ChainDetailScreen() {
                 </Pressable>
               );
             })}
+            <Pressable onPress={() => setShowMoreColors((open) => !open)} style={({ pressed }) => [styles.colorRing, { borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><View style={[styles.colorSwatch, { backgroundColor: colors.card }]}><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={15} color={colors.mutedForeground} /></View></Pressable>
           </View>
-          <Pressable onPress={() => setShowMoreColors((open) => !open)} style={styles.moreColors}><Text style={[styles.moreColorsText, { color: colors.mutedForeground }]}>{showMoreColors ? 'Fewer colors' : 'More colors'}</Text><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={14} color={colors.mutedForeground} /></Pressable>
           {showMoreColors && <View style={styles.colorRow}>{EXTRA_CHAIN_COLORS.map((color) => { const selected = color === chain.color; return <Pressable key={color} accessibilityLabel={`Use ${color} for ${chain.name}`} onPress={() => handleColorChange(color)} style={({ pressed }) => [styles.colorRing, { borderColor: selected ? color : 'transparent', opacity: pressed ? 0.7 : 1 }]}><View style={[styles.colorSwatch, { backgroundColor: color }]}>{selected && <Ionicons name="checkmark" size={16} color="#fff" />}</View></Pressable>; })}</View>}
         </View>
 
@@ -501,8 +501,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
-  moreColors: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 3, paddingVertical: 3 },
-  moreColorsText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   colorRing: {
     borderRadius: 22,
     borderWidth: 2,
