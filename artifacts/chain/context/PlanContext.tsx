@@ -13,9 +13,11 @@ export interface PlanItem {
   reminderMinutes?: number;
   notificationId?: string;
   isPriority?: boolean;
+  repeatDays?: number[];
+  repeatSourceId?: string;
 }
 
-type PlanItemOptions = Pick<PlanItem, 'text' | 'timeSlot' | 'chainId' | 'color' | 'reminderMinutes' | 'isPriority'>;
+type PlanItemOptions = Pick<PlanItem, 'text' | 'timeSlot' | 'chainId' | 'color' | 'reminderMinutes' | 'isPriority' | 'repeatDays'>;
 
 interface PlanContextValue {
   items: PlanItem[];
@@ -24,7 +26,7 @@ interface PlanContextValue {
   isActiveDayClosed: boolean;
   tomorrowItemCount: number;
   showToday: () => void;
-  showTomorrow: () => void;
+  showTomorrow: () => Promise<PlanItem[]>;
   showDate: (date: string) => Promise<PlanItem[]>;
   closeToday: () => Promise<void>;
   reopenToday: () => Promise<void>;
@@ -79,6 +81,8 @@ function normalizeItems(raw: string | null, fallbackDate: string): PlanItem[] {
         reminderMinutes: typeof item.reminderMinutes === 'number' ? item.reminderMinutes : undefined,
         notificationId: typeof item.notificationId === 'string' ? item.notificationId : undefined,
         isPriority: item.isPriority === true,
+        repeatDays: Array.isArray(item.repeatDays) ? item.repeatDays.filter((day): day is number => typeof day === 'number' && day >= 0 && day <= 6) : undefined,
+        repeatSourceId: typeof item.repeatSourceId === 'string' ? item.repeatSourceId : undefined,
       }];
     });
   } catch {
@@ -170,14 +174,24 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     });
   }
 
-  function showTomorrow() {
+  async function showTomorrow(): Promise<PlanItem[]> {
     const date = getPlanTomorrowKey();
-    void AsyncStorage.getItem(KEY_PREFIX + date).then((raw) => {
-      setActiveDate(date);
-      const nextItems = normalizeItems(raw, date);
-      setItems(nextItems);
-      setTomorrowItemCount(nextItems.length);
-    });
+    const [raw, todayRaw] = await Promise.all([
+      AsyncStorage.getItem(KEY_PREFIX + date),
+      AsyncStorage.getItem(KEY_PREFIX + getPlanTodayKey()),
+    ]);
+    const nextItems = normalizeItems(raw, date);
+    const todayItems = normalizeItems(todayRaw, getPlanTodayKey());
+    const tomorrowDay = new Date(`${date}T12:00:00`).getDay();
+    const repeated = todayItems
+      .filter((item) => item.repeatDays?.includes(tomorrowDay) && !nextItems.some((next) => next.repeatSourceId === (item.repeatSourceId || item.id)))
+      .map((item) => ({ ...item, id: `${Date.now()}${Math.random().toString(36).substring(2, 8)}`, completed: false, planDate: date, notificationId: undefined, isPriority: false, repeatSourceId: item.repeatSourceId || item.id }));
+    const resolved = [...nextItems, ...repeated];
+    if (repeated.length) await AsyncStorage.setItem(KEY_PREFIX + date, JSON.stringify(resolved));
+    setActiveDate(date);
+    setItems(resolved);
+    setTomorrowItemCount(resolved.length);
+    return resolved;
   }
 
   function showDate(date: string): Promise<PlanItem[]> {
@@ -221,6 +235,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       color: options.color,
       reminderMinutes: options.reminderMinutes,
       isPriority: options.isPriority === true,
+      repeatDays: options.repeatDays?.length ? options.repeatDays : undefined,
     };
     persist([...items.map((entry) => options.isPriority ? { ...entry, isPriority: false } : entry), item]);
     return item;
@@ -229,7 +244,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   function updateItem(id: string, options: PlanItemOptions) {
     const existing = items.find((item) => item.id === id);
     if (!existing) return undefined;
-    const updated: PlanItem = { ...existing, ...options, text: options.text.trim(), notificationId: undefined };
+    const updated: PlanItem = { ...existing, ...options, text: options.text.trim(), notificationId: undefined, repeatDays: options.repeatDays?.length ? options.repeatDays : undefined };
     persist(items.map((item) => item.id === id ? updated : options.isPriority ? { ...item, isPriority: false } : item));
     return updated;
   }
