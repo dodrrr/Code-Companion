@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
-import { Chain, getStreak, getTodayStr, getWeeklyProgress, isRestDay, useChains } from '@/context/ChainsContext';
+import { Chain, getStreak, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
 import { usePlan } from '@/context/PlanContext';
 import ChainCard from '@/components/ChainCard';
 import { getDailyQuote } from '@/constants/quotes';
@@ -59,8 +59,10 @@ export default function TodayScreen() {
   const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
   const focusTask = items.find((item) => item.isPriority && !item.completed);
   const focusChain = chains.find((chain) => chain.id === focusTask?.chainId) || chains.find((chain) => !chain.completedDates.includes(getTodayStr()));
-  const allProtected = chains.length > 0 && chains.every((chain) => chain.cadence === 'weekly' ? getWeeklyProgress(chain) >= chain.weeklyTarget : isRestDay(chain, localDay) || chain.completedDates.includes(localDay));
-  const protectedCount = chains.filter((chain) => chain.cadence === 'weekly' ? getWeeklyProgress(chain) >= chain.weeklyTarget : isRestDay(chain, localDay) || chain.completedDates.includes(localDay)).length;
+  // A weekly target is a weekly minimum, not a reason to hide today's win.
+  // Logging it today protects today's chain even if the weekly target is still in progress.
+  const allProtected = chains.length > 0 && chains.every((chain) => isRestDay(chain, localDay) || chain.completedDates.includes(localDay));
+  const protectedCount = chains.filter((chain) => isRestDay(chain, localDay) || chain.completedDates.includes(localDay)).length;
 
   const renderChain = useCallback(
     ({ item }: { item: Chain }) => <ChainCard chain={item} />,
