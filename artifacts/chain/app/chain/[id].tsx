@@ -1,4 +1,5 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Alert,
   Platform,
@@ -27,6 +28,7 @@ import {
   toLocalDateString,
   useChains,
 } from '@/context/ChainsContext';
+import { FOCUS_LOG_KEY, FocusLogEntry } from '@/context/PlanContext';
 
 const FROZEN_COLOR = '#5B8CFF';
 const DAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -46,6 +48,28 @@ function startOfMonth(date: Date) {
 
 function formatMonth(date: Date) {
   return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+}
+
+function rhythmFrom(chain: Chain, focusLog: FocusLogEntry[]) {
+  const stamps = chain.completedDates.map((date) => chain.completionTimes?.[date]).filter((value): value is string => Boolean(value));
+  const hourCounts = new Map<number, number>();
+  const weekdayCounts = new Map<number, number>();
+  stamps.forEach((stamp) => { const date = new Date(stamp); hourCounts.set(date.getHours(), (hourCounts.get(date.getHours()) || 0) + 1); weekdayCounts.set(date.getDay(), (weekdayCounts.get(date.getDay()) || 0) + 1); });
+  const top = <T,>(map: Map<T, number>) => Array.from(map.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const hour = top(hourCounts);
+  const day = top(weekdayCounts);
+  const sessions = focusLog.filter((entry) => entry.chainId === chain.id);
+  const focusDays = new Map<number, number>();
+  sessions.forEach((entry) => { const weekday = new Date(`${entry.date}T12:00:00`).getDay(); focusDays.set(weekday, (focusDays.get(weekday) || 0) + entry.minutes); });
+  const minutes = sessions.reduce((total, entry) => total + entry.minutes, 0);
+  return { hour, day: top(focusDays) ?? day, minutes, samples: stamps.length };
+}
+
+function readableHour(hour?: number) {
+  if (hour === undefined) return 'still forming';
+  const start = hour % 12 || 12;
+  const end = ((hour + 2) % 12) || 12;
+  return `${start} ${hour >= 12 ? 'PM' : 'AM'}–${end} ${hour + 2 >= 12 ? 'PM' : 'AM'}`;
 }
 
 function CalendarGrid({
@@ -137,6 +161,7 @@ export default function ChainDetailScreen() {
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [showMoreColors, setShowMoreColors] = useState(false);
+  const [focusLog, setFocusLog] = useState<FocusLogEntry[]>([]);
   const touchStartX = useRef<number | null>(null);
 
   const chain = chains.find((c) => c.id === id);
@@ -171,6 +196,16 @@ export default function ChainDetailScreen() {
   const consistency = Math.min(100, Math.round((totalCompleted / daysSinceStart) * 100));
   const restingToday = isRestDay(chain, getTodayStr());
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
+  const rhythm = rhythmFrom(chain, focusLog);
+
+  useEffect(() => {
+    void AsyncStorage.getItem(FOCUS_LOG_KEY).then((raw) => {
+      try {
+        const parsed: unknown = raw ? JSON.parse(raw) : [];
+        setFocusLog(Array.isArray(parsed) ? parsed as FocusLogEntry[] : []);
+      } catch { setFocusLog([]); }
+    });
+  }, [chain.id]);
 
   function handleDelete() {
     if (!chain) return;
@@ -318,12 +353,17 @@ export default function ChainDetailScreen() {
           </Text>
         </View>
 
-        <View style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}> 
           <View style={styles.insight}><Text style={[styles.insightValue, { color: chain.color }]}>{consistency}%</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>CONSISTENCY</Text></View>
           <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
           <View style={styles.insight}><Text style={[styles.insightValue, { color: colors.foreground }]}>{totalCompleted}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>DAYS DONE</Text></View>
           <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
           <View style={styles.insight}><Text style={[styles.insightValue, { color: '#5B8CFF' }]}>{chain.frozenDates.length}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>PROTECTED</Text></View>
+        </View>
+
+        <View style={[styles.rhythmCard, { backgroundColor: chain.color + '10', borderColor: chain.color + '38' }]}>
+          <View style={[styles.rhythmIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="pulse-outline" size={18} color={chain.color} /></View>
+          <View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>RHYTHM</Text><Text style={[styles.rhythmTitle, { color: colors.foreground }]}>{rhythm.samples >= 3 ? `You usually protect this around ${readableHour(rhythm.hour)}.` : 'Your rhythm is still forming.'}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{rhythm.samples >= 3 ? `${DAY_LABELS[rhythm.day ?? 1]} is your strongest day${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of planned focus logged` : ''}.` : `Complete it a few more times and Chain will spot your best window${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of focus logged so far` : ''}.`}</Text></View>
         </View>
 
         {/* Today's action */}
@@ -586,6 +626,12 @@ const styles = StyleSheet.create({
   insightValue: { fontSize: 18, fontFamily: 'Inter_700Bold' },
   insightLabel: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.8 },
   insightDivider: { width: 1, height: 28 },
+  rhythmCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, borderRadius: 18, borderWidth: 1, padding: 14 },
+  rhythmIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  rhythmCopy: { flex: 1 },
+  rhythmEyebrow: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 1.1 },
+  rhythmTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', lineHeight: 19, marginTop: 3 },
+  rhythmBody: { fontSize: 11, fontFamily: 'Inter_400Regular', lineHeight: 16, marginTop: 3 },
   actionRow: {
     flexDirection: 'row',
     gap: 10,
