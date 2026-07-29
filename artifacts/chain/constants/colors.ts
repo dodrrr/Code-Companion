@@ -7,6 +7,15 @@ export const CHAIN_COLORS = [
   '#3B82F6', // blue
 ];
 
+export const EXTRA_CHAIN_COLORS = [
+  '#14B8A6', // teal
+  '#6366F1', // indigo
+  '#EC4899', // pink
+  '#84CC16', // lime
+  '#06B6D4', // cyan
+  '#D97706', // ochre
+];
+
 const palette = {
   text: '#F5F5F5',
   tint: '#FF6B35',
