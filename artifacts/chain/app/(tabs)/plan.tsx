@@ -17,6 +17,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
+import { EXTRA_CHAIN_COLORS } from '@/constants/colors';
 import { Chain, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
 import { PlanItem, usePlan } from '@/context/PlanContext';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
@@ -27,6 +28,7 @@ const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
 const MINUTES = ['00', '05', '10', '15', '20', '30', '40', '45', '50', '55'];
 const REMINDER_OPTIONS = [5, 15, 30, 60];
 const UNLINKED_TASK_COLOR = '#8FA2B3';
+const TASK_ACCENTS = ['#8FA2B3', ...EXTRA_CHAIN_COLORS];
 
 function getPlanLabel(dateKey: string): string {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -49,6 +51,7 @@ export default function PlanScreen() {
   const [inputText, setInputText] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
   const [selectedChainId, setSelectedChainId] = useState<string | undefined>();
+  const [selectedTaskColor, setSelectedTaskColor] = useState<string | undefined>();
   const [selectedReminder, setSelectedReminder] = useState<number | undefined>();
   const [isPriority, setIsPriority] = useState(false);
   const [reminderNotice, setReminderNotice] = useState('');
@@ -91,6 +94,7 @@ export default function PlanScreen() {
     setInputText('');
     setSelectedTime('');
     setSelectedChainId(undefined);
+    setSelectedTaskColor(undefined);
     setSelectedReminder(undefined);
     setIsPriority(false);
     setReminderNotice('');
@@ -105,7 +109,7 @@ export default function PlanScreen() {
       text: inputText,
       timeSlot: selectedTime,
       chainId: selectedChain?.id,
-      color: selectedChain?.color,
+      color: selectedChain?.color ?? selectedTaskColor,
       reminderMinutes: selectedTime ? selectedReminder : undefined,
       isPriority: !isToday && isPriority,
     };
@@ -159,6 +163,7 @@ export default function PlanScreen() {
     setInputText(item.text);
     setSelectedTime(item.timeSlot);
     setSelectedChainId(item.chainId);
+    setSelectedTaskColor(item.chainId ? undefined : item.color);
     setSelectedReminder(item.reminderMinutes);
     setIsPriority(item.isPriority === true);
     setShowInput(true);
@@ -355,6 +360,8 @@ export default function PlanScreen() {
                   chains={chains}
                   selectedChainId={selectedChainId}
                   setSelectedChainId={(chainId: string | undefined) => { setSelectedChainId(chainId); Keyboard.dismiss(); }}
+                  selectedTaskColor={selectedTaskColor}
+                  setSelectedTaskColor={(color: string | undefined) => { setSelectedTaskColor(color); Keyboard.dismiss(); }}
                   selectedTime={selectedTime}
                   setSelectedTime={(time: string) => { setSelectedTime(time); Keyboard.dismiss(); }}
                   openTimePicker={() => { Keyboard.dismiss(); setShowTimePicker(true); }}
@@ -423,13 +430,14 @@ function ChainReflection({ chain, done, resting, isLast }: { chain: Chain; done:
   </View>;
 }
 
-function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, selectedTime, setSelectedTime, openTimePicker, selectedReminder, setSelectedReminder, allowPriority, isPriority, setIsPriority }: any) {
+function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, selectedTaskColor, setSelectedTaskColor, selectedTime, setSelectedTime, openTimePicker, selectedReminder, setSelectedReminder, allowPriority, isPriority, setIsPriority }: any) {
   return <View style={styles.composerMeta}>
     <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>TIME</Text>
     <FlatList data={QUICK_TIMES} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(time) => time} contentContainerStyle={styles.timeSlots} renderItem={({ item: time }) => <Pressable onPress={() => setSelectedTime(time === selectedTime ? '' : time)} style={[styles.timeChip, { backgroundColor: time === selectedTime ? colors.primary : colors.background, borderColor: time === selectedTime ? colors.primary : colors.border }]}><Text style={[styles.timeChipText, { color: time === selectedTime ? '#fff' : colors.mutedForeground }]}>{time}</Text></Pressable>} ListFooterComponent={<Pressable onPress={openTimePicker} style={[styles.timeChip, { backgroundColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.background, borderColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.border }]}><Ionicons name="time-outline" size={14} color={selectedTime && !QUICK_TIMES.includes(selectedTime) ? '#fff' : colors.mutedForeground} /><Text style={[styles.timeChipText, { color: selectedTime && !QUICK_TIMES.includes(selectedTime) ? '#fff' : colors.mutedForeground }]}>{selectedTime && !QUICK_TIMES.includes(selectedTime) ? selectedTime : 'Custom'}</Text></Pressable>} />
     <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>ADD TO A CHAIN · OPTIONAL</Text>
     <Text style={[styles.chainHelper, { color: colors.mutedForeground }]}>Only link tasks that move that chain forward. Unlinked tasks stay neutral.</Text>
     <FlatList data={[{ id: '', name: 'No chain', color: colors.mutedForeground }, ...chains]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(chain) => chain.id} contentContainerStyle={styles.chainChoices} renderItem={({ item: chain }) => { const selected = (chain.id || undefined) === selectedChainId; return <Pressable onPress={() => setSelectedChainId(chain.id || undefined)} style={[styles.chainChip, { borderColor: selected ? chain.color : colors.border, backgroundColor: selected ? chain.color + '1F' : colors.background }]}><View style={[styles.chainChipDot, { backgroundColor: chain.color }]} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{chain.name}</Text></Pressable>; }} />
+    {!selectedChainId && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>TASK ACCENT · OPTIONAL</Text><FlatList data={[undefined, ...TASK_ACCENTS]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(color, index) => color ?? `neutral-${index}`} contentContainerStyle={styles.chainChoices} renderItem={({ item: color }) => { const selected = color === selectedTaskColor; return <Pressable onPress={() => setSelectedTaskColor(selected ? undefined : color)} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 32, paddingHorizontal: 9, borderRadius: 16, borderWidth: 1, borderColor: selected ? (color ?? colors.mutedForeground) : colors.border, backgroundColor: selected ? (color ?? colors.mutedForeground) + '1C' : colors.background }}>{color ? <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: color }} /> : <><Ionicons name="remove-outline" size={14} color={colors.mutedForeground} /><Text style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: 'Inter_500Medium' }}>Neutral</Text></>}</Pressable>; }} /></>}
     {allowPriority && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>TOMORROW'S ONE THING · OPTIONAL</Text><Pressable onPress={() => setIsPriority(!isPriority)} style={[styles.priorityPick, { borderColor: isPriority ? colors.primary : colors.border, backgroundColor: isPriority ? colors.primary + '1A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sparkles-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Make this your one thing</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>The task that matters most tomorrow.</Text></View>{isPriority && <Ionicons name="checkmark-circle" size={19} color={colors.primary} />}</Pressable></>}
     {!!selectedTime && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>REMIND ME</Text><FlatList data={REMINDER_OPTIONS} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(minutes) => String(minutes)} contentContainerStyle={styles.chainChoices} renderItem={({ item: minutes }) => { const selected = selectedReminder === minutes; return <Pressable onPress={() => setSelectedReminder(selected ? undefined : minutes)} style={[styles.chainChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Ionicons name="notifications-outline" size={13} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{minutes} min before</Text></Pressable>; }} /></>}
   </View>;
@@ -446,7 +454,7 @@ function PlanItemRow({ item, chainName, highlighted, newlyAdded, isLast, locked,
     arrival.setValue(0);
     Animated.spring(arrival, { toValue: 1, useNativeDriver: true, friction: 8, tension: 90 }).start();
   }, [arrival, newlyAdded]);
-  return <Animated.View style={[styles.planItem, { backgroundColor, borderColor, marginBottom: isLast ? 14 : 8, opacity: arrival, transform: [{ translateY: arrival.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }, { scale: arrival.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }]}> 
+  return <Animated.View style={[styles.planItem, { backgroundColor, borderColor, marginBottom: isLast ? 20 : 8, opacity: arrival, transform: [{ translateY: arrival.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }, { scale: arrival.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }]}> 
     <View style={[styles.planBar, { backgroundColor: item.completed ? accentColor + 'A8' : item.isPriority ? colors.primary : accentColor }]} />
     <Pressable disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? accentColor : 'transparent', borderColor: item.completed ? accentColor : completionLocked ? colors.mutedForeground : colors.border, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <Ionicons name="checkmark" size={13} color="#fff" /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
     <Pressable disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
