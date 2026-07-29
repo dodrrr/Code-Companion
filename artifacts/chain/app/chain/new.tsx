@@ -167,8 +167,8 @@ export default function NewChainScreen() {
               </View>
             );
           })}
+          <View style={[styles.swatchRing, { borderColor: colors.border, borderWidth: 2.5 }]}><Pressable onPress={() => setShowMoreColors((open) => !open)} style={[styles.colorSwatch, { backgroundColor: colors.card }]}><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} /></Pressable></View>
         </View>
-        <Pressable onPress={() => setShowMoreColors((open) => !open)} style={styles.moreColors}><Text style={[styles.moreColorsText, { color: colors.mutedForeground }]}>{showMoreColors ? 'Fewer colors' : 'More colors'}</Text><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={14} color={colors.mutedForeground} /></Pressable>
         {showMoreColors && <View style={styles.colorRow}>{EXTRA_CHAIN_COLORS.map((c) => { const isSelected = selectedColor === c; return <View key={c} style={[styles.swatchRing, isSelected ? { borderColor: c, borderWidth: 2.5 } : { borderColor: 'transparent', borderWidth: 2.5 }]}><Pressable onPress={() => { setSelectedColor(c); Haptics.selectionAsync(); }} style={[styles.colorSwatch, { backgroundColor: c }, isSelected && styles.colorSwatchSelected]}>{isSelected && <Ionicons name="checkmark" size={16} color="#fff" />}</Pressable></View>; })}</View>}
       </ScrollView>
 
@@ -283,8 +283,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     alignItems: 'center',
   },
-  moreColors: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 3, paddingVertical: 3 },
-  moreColorsText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
   cadenceRow: { flexDirection: 'row', gap: 8 },
   cadenceCard: { flex: 1, borderRadius: 16, borderWidth: 1, padding: 12, gap: 8 },
   cadenceCopy: { gap: 2 },
@@ -301,9 +299,9 @@ const styles = StyleSheet.create({
     padding: 3,
   },
   colorSwatch: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
