@@ -138,7 +138,7 @@ export default function NewChainScreen() {
 
         <Text style={[styles.label, { color: colors.mutedForeground }]}>CHAIN COLOR</Text>
         <View style={styles.colorRow}>
-          {CHAIN_COLORS.map((c) => {
+          {[...CHAIN_COLORS, ...(showMoreColors ? EXTRA_CHAIN_COLORS : [])].map((c) => {
             const isSelected = selectedColor === c;
             return (
               // Outer ring — visible border when selected
@@ -169,7 +169,6 @@ export default function NewChainScreen() {
           })}
           <View style={[styles.swatchRing, { borderColor: colors.border, borderWidth: 2.5 }]}><Pressable onPress={() => setShowMoreColors((open) => !open)} style={[styles.colorSwatch, { backgroundColor: colors.card }]}><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} /></Pressable></View>
         </View>
-        {showMoreColors && <View style={styles.colorRow}>{EXTRA_CHAIN_COLORS.map((c) => { const isSelected = selectedColor === c; return <View key={c} style={[styles.swatchRing, isSelected ? { borderColor: c, borderWidth: 2.5 } : { borderColor: 'transparent', borderWidth: 2.5 }]}><Pressable onPress={() => { setSelectedColor(c); Haptics.selectionAsync(); }} style={[styles.colorSwatch, { backgroundColor: c }, isSelected && styles.colorSwatchSelected]}>{isSelected && <Ionicons name="checkmark" size={16} color="#fff" />}</Pressable></View>; })}</View>}
       </ScrollView>
 
       {/* Create button */}
