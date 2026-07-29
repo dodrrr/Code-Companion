@@ -169,6 +169,19 @@ export default function ChainDetailScreen() {
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
+  useEffect(() => {
+    if (!chain) {
+      setFocusLog([]);
+      return;
+    }
+    void AsyncStorage.getItem(FOCUS_LOG_KEY).then((raw) => {
+      try {
+        const parsed: unknown = raw ? JSON.parse(raw) : [];
+        setFocusLog(Array.isArray(parsed) ? parsed as FocusLogEntry[] : []);
+      } catch { setFocusLog([]); }
+    });
+  }, [chain?.id]);
+
   if (!chain) {
     return (
       <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -198,15 +211,6 @@ export default function ChainDetailScreen() {
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
   const rhythm = rhythmFrom(chain, focusLog);
 
-  useEffect(() => {
-    void AsyncStorage.getItem(FOCUS_LOG_KEY).then((raw) => {
-      try {
-        const parsed: unknown = raw ? JSON.parse(raw) : [];
-        setFocusLog(Array.isArray(parsed) ? parsed as FocusLogEntry[] : []);
-      } catch { setFocusLog([]); }
-    });
-  }, [chain.id]);
-
   function handleDelete() {
     if (!chain) return;
     Alert.alert(
@@ -221,7 +225,7 @@ export default function ChainDetailScreen() {
             if (!chain) return;
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             deleteChain(chain.id);
-            router.back();
+            router.replace('/');
           },
         },
       ],
