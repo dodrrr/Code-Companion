@@ -11,7 +11,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
-import { Chain, getStreak, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
+import { Chain, getStreak, getTodayStr, getWeeklyProgress, isRestDay, useChains } from '@/context/ChainsContext';
 import WeekStrip from './WeekStrip';
 import MilestoneModal from './MilestoneModal';
 
@@ -28,7 +28,9 @@ export default function ChainCard({ chain }: Props) {
   const done   = isCompletedToday(chain);
   const streak = getStreak(chain);
   const restingToday = isRestDay(chain, getTodayStr());
-  const compactStreak = streak >= 100;
+  const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
+  const cardMetric = chain.cadence === 'weekly' ? weeklyProgress : streak;
+  const compactStreak = cardMetric >= 100;
 
   const cardScale  = useSharedValue(1);
   const checkScale = useSharedValue(1);
@@ -102,10 +104,10 @@ export default function ChainCard({ chain }: Props) {
               <View style={styles.rightSide}>
                 <View style={styles.streakBlock}>
                   <Text style={[styles.streakNum, compactStreak && styles.streakNumCompact, { color: chain.color }]}> 
-                    {streak}
+                    {cardMetric}
                   </Text>
                   <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}>
-                    {streak === 1 ? 'day' : 'days'}
+                    {chain.cadence === 'weekly' ? `of ${chain.weeklyTarget} this week` : streak === 1 ? 'day' : 'days'}
                   </Text>
                 </View>
                 <Pressable onPress={handleCheck} disabled={restingToday} hitSlop={14}>
