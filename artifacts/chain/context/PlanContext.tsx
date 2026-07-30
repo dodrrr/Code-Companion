@@ -39,6 +39,7 @@ interface PlanContextValue {
   updateReminderMetadata: (id: string, reminderMinutes?: number, notificationId?: string) => void;
   updateEndAlertMetadata: (id: string, endAlert?: boolean, endNotificationId?: string) => void;
   completeItemForDate: (id: string, date: string) => Promise<PlanItem | undefined>;
+  completeFocusItem: (id: string, actualMinutes: number) => Promise<PlanItem | undefined>;
   updateReminderForDate: (id: string, date: string, reminderMinutes?: number, notificationId?: string) => Promise<void>;
   moveItemToTomorrow: (id: string) => Promise<PlanItem | undefined>;
   copyItemToTomorrow: (id: string) => Promise<PlanItem | undefined>;
@@ -243,11 +244,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     if (activeDate === getPlanTomorrowKey()) setTomorrowItemCount(next.length);
   }
 
-  function recordFocus(item: PlanItem, completedAt: string) {
+  function recordFocus(item: PlanItem, completedAt: string, actualMinutes = item.durationMinutes) {
     if (!item.chainId || !item.durationMinutes) return;
     void AsyncStorage.getItem(FOCUS_LOG_KEY).then((raw) => {
       const existing = normalizeFocusLog(raw).filter((entry) => entry.itemId !== item.id);
-      const next = [...existing, { itemId: item.id, chainId: item.chainId!, date: item.planDate, minutes: item.durationMinutes!, completedAt }];
+      const next = [...existing, { itemId: item.id, chainId: item.chainId!, date: item.planDate, minutes: Math.max(1, actualMinutes || item.durationMinutes!), completedAt }];
       return AsyncStorage.setItem(FOCUS_LOG_KEY, JSON.stringify(next.slice(-500)));
     });
   }
@@ -308,6 +309,17 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     if (date === activeDate) setItems(next);
     const completed = { ...item, completed: true, completedAt };
     recordFocus(completed, completedAt);
+    return completed;
+  }
+
+  async function completeFocusItem(id: string, actualMinutes: number): Promise<PlanItem | undefined> {
+    if (activeDate !== getPlanTodayKey() || closedDateKeys.includes(activeDate)) return undefined;
+    const item = items.find((entry) => entry.id === id);
+    if (!item) return undefined;
+    const completedAt = new Date().toISOString();
+    const completed = { ...item, completed: true, completedAt };
+    persist(items.map((entry) => entry.id === id ? completed : entry));
+    recordFocus(completed, completedAt, actualMinutes);
     return completed;
   }
 
@@ -380,7 +392,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     if (target && completedAt) recordFocus({ ...target, completed: true, completedAt }, completedAt);
   }
 
-  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, updateEndAlertMetadata, completeItemForDate, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys]);
+  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, updateEndAlertMetadata, completeItemForDate, completeFocusItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys]);
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 
