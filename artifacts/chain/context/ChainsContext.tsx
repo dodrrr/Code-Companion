@@ -8,6 +8,7 @@ export interface Chain {
   createdAt: string;
   completedDates: string[]; // 'YYYY-MM-DD'
   minimumDates: string[]; // deliberately protected with a minimum version
+  minimumLabel: string;
   frozenDates: string[];
   restDays: number[]; // 0 (Sunday) through 6 (Saturday)
   cadence: 'daily' | 'weekly';
@@ -25,6 +26,7 @@ interface ChainsContextValue {
   updateChainColor: (id: string, color: string) => void;
   updateChainRestDays: (id: string, restDays: number[]) => void;
   updateChainCadence: (id: string, cadence: Chain['cadence'], weeklyTarget?: number) => void;
+  updateChainMinimumLabel: (id: string, label: string) => void;
   setDayStatus: (id: string, date: string, status: DayStatus) => boolean;
   toggleToday: (id: string) => void;
   useFreeze: (id: string) => void;
@@ -109,6 +111,7 @@ function normalizeChain(value: unknown): Chain | null {
     createdAt: raw.createdAt,
     completedDates,
     minimumDates,
+    minimumLabel: typeof raw.minimumLabel === 'string' && raw.minimumLabel.trim() ? raw.minimumLabel.trim().slice(0, 48) : 'A small version',
     frozenDates,
     restDays: normalizeRestDays(raw.restDays),
     cadence: raw.cadence === 'weekly' ? 'weekly' : 'daily',
@@ -221,6 +224,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
       createdAt: getTodayStr(),
       completedDates: [],
       minimumDates: [],
+      minimumLabel: 'A small version',
       frozenDates: [],
       restDays: [],
       cadence: options?.cadence === 'weekly' ? 'weekly' : 'daily',
@@ -249,6 +253,11 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
       weeklyTarget: normalizeWeeklyTarget(weeklyTarget ?? chain.weeklyTarget),
       restDays: cadence === 'weekly' ? [] : chain.restDays,
     } : chain));
+  }
+
+  function updateChainMinimumLabel(id: string, label: string) {
+    const nextLabel = label.trim().slice(0, 48) || 'A small version';
+    persist(chains.map((chain) => chain.id === id ? { ...chain, minimumLabel: nextLabel } : chain));
   }
 
   function setDayStatus(id: string, date: string, status: DayStatus): boolean {
@@ -340,6 +349,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
         updateChainColor,
         updateChainRestDays,
         updateChainCadence,
+        updateChainMinimumLabel,
         setDayStatus,
         toggleToday,
         useFreeze,
