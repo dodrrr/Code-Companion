@@ -124,3 +124,13 @@ export async function cancelPlanReminder(notificationId?: string) {
     await Notifications.cancelScheduledNotificationAsync(notificationId);
   }
 }
+
+export async function scheduleMorningBriefing(hour: number): Promise<ReminderResult> {
+  if (Platform.OS === 'web') return { status: 'unavailable' };
+  if (await getPlanNotificationPermission() !== 'granted') return { status: 'denied' };
+  const notificationId = await Notifications.scheduleNotificationAsync({
+    content: { title: 'Your day is ready', body: 'Open Chain for your plan, focus blocks and one thing.', sound: 'default', data: { openPlan: true } },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute: 0 },
+  });
+  return { status: 'scheduled', notificationId };
+}
