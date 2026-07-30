@@ -43,6 +43,16 @@ const SCHEDULE_DAYS = [
   { value: 0, label: 'Sun' },
 ];
 
+const BRIGHT_CALENDAR_COLORS: Record<string, string> = {
+  '#FF6B35': '#FF8A5C', '#00C896': '#2FE0B2', '#A855F7': '#BF7BFF', '#F43F5E': '#FF6B84',
+  '#F59E0B': '#FFC247', '#3B82F6': '#65A7FF', '#FBBF24': '#FFD15A', '#A16207': '#F6BD52',
+  '#84CC16': '#A3E635', '#22D3EE': '#67E8F9', '#EF4444': '#FF6B6B', '#4F46E5': '#7C83FF',
+};
+
+function calendarAccent(color: string) {
+  return BRIGHT_CALENDAR_COLORS[color] || color;
+}
+
 function startOfMonth(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), 1, 12);
 }
@@ -83,6 +93,7 @@ function CalendarGrid({
   onSelectDay: (date: string) => void;
 }) {
   const colors = useColors();
+  const accent = calendarAccent(chain.color);
   const today = getTodayStr();
   const editableFrom = new Date();
   editableFrom.setDate(editableFrom.getDate() - 3);
@@ -112,9 +123,9 @@ function CalendarGrid({
         const isFuture = date > today;
         const isBeforeChain = date < chain.createdAt;
         const stateStyle = done
-          ? { backgroundColor: chain.color, borderColor: chain.color, shadowColor: chain.color, shadowOpacity: 0.42, shadowRadius: 7, shadowOffset: { width: 0, height: 2 }, elevation: 3 }
+          ? { backgroundColor: accent, borderColor: accent, shadowColor: accent, shadowOpacity: 0.72, shadowRadius: 10, shadowOffset: { width: 0, height: 2 }, elevation: 5 }
           : minimum
-            ? { backgroundColor: chain.color + '38', borderColor: chain.color, shadowColor: chain.color, shadowOpacity: 0.2, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 2 }
+            ? { backgroundColor: accent + '50', borderColor: accent, shadowColor: accent, shadowOpacity: 0.36, shadowRadius: 6, shadowOffset: { width: 0, height: 1 }, elevation: 3 }
           : frozen
             ? { backgroundColor: FROZEN_COLOR + '33', borderColor: FROZEN_COLOR }
             : rest
@@ -135,7 +146,7 @@ function CalendarGrid({
             ]}
           >
             <View style={[styles.monthDay, stateStyle, isToday && !done && !minimum && !frozen && { borderColor: chain.color, borderWidth: 2 }]}>
-              {frozen ? <Ionicons name="snow" size={12} color={FROZEN_COLOR} /> : minimum ? <Ionicons name="leaf-outline" size={12} color={chain.color} /> : rest && !done ? <Ionicons name="remove" size={14} color={colors.mutedForeground} /> : <Text style={[styles.monthDayText, { color: done ? '#fff' : date < today ? colors.mutedForeground + 'cc' : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
+              {frozen ? <Ionicons name="snow" size={12} color={FROZEN_COLOR} /> : minimum ? <Ionicons name="leaf-outline" size={12} color={accent} /> : rest && !done ? <Ionicons name="remove" size={14} color={colors.mutedForeground} /> : <Text style={[styles.monthDayText, { color: done ? '#fff' : date < today ? colors.mutedForeground + 'ee' : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
             </View>
           </Pressable>
         );
@@ -469,6 +480,11 @@ export default function ChainDetailScreen() {
         >
           MONTHLY HISTORY
         </Text>
+        <View style={[styles.calendarStreak, { backgroundColor: chain.color + '18', borderColor: chain.color + '55' }]}>
+          <Ionicons name="flame" size={16} color={chain.color} />
+          <Text style={[styles.calendarStreakText, { color: chain.color }]}>{streak} {chain.cadence === 'weekly' ? 'week' : 'day'} streak</Text>
+          <Text style={[styles.calendarStreakSub, { color: colors.mutedForeground }]}>{totalProtected} days kept</Text>
+        </View>
         <View
           style={[
             styles.calendarCard,
@@ -723,6 +739,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
+  calendarStreak: { flexDirection: 'row', alignItems: 'center', gap: 7, alignSelf: 'flex-start', borderRadius: 14, borderWidth: 1, paddingHorizontal: 11, paddingVertical: 7, marginTop: -2, marginBottom: 10 },
+  calendarStreakText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  calendarStreakSub: { fontSize: 11, fontFamily: 'Inter_500Medium', marginLeft: 2 },
   calendarInner: {
     paddingHorizontal: 16,
     paddingTop: 16,
