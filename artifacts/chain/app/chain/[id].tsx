@@ -104,6 +104,7 @@ function CalendarGrid({
       {cells.map((date, index) => {
         if (!date) return <View key={`empty-${index}`} style={styles.monthCell} />;
         const done = chain.completedDates.includes(date);
+        const minimum = chain.minimumDates.includes(date);
         const frozen = chain.frozenDates.includes(date);
         const rest = isRestDay(chain, date);
         const isToday = date === today;
@@ -112,6 +113,8 @@ function CalendarGrid({
         const isBeforeChain = date < chain.createdAt;
         const stateStyle = done
           ? { backgroundColor: chain.color, borderColor: chain.color, shadowColor: chain.color, shadowOpacity: 0.42, shadowRadius: 7, shadowOffset: { width: 0, height: 2 }, elevation: 3 }
+          : minimum
+            ? { backgroundColor: chain.color + '38', borderColor: chain.color, shadowColor: chain.color, shadowOpacity: 0.2, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: 2 }
           : frozen
             ? { backgroundColor: FROZEN_COLOR + '33', borderColor: FROZEN_COLOR }
             : rest
@@ -131,8 +134,8 @@ function CalendarGrid({
               { opacity: isEditable && pressed ? 0.7 : isFuture || isBeforeChain ? 0.34 : 1 },
             ]}
           >
-            <View style={[styles.monthDay, stateStyle, isToday && !done && !frozen && { borderColor: chain.color, borderWidth: 2 }]}>
-              {frozen ? <Ionicons name="snow" size={12} color={FROZEN_COLOR} /> : rest && !done ? <Ionicons name="remove" size={14} color={colors.mutedForeground} /> : <Text style={[styles.monthDayText, { color: done ? '#fff' : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
+            <View style={[styles.monthDay, stateStyle, isToday && !done && !minimum && !frozen && { borderColor: chain.color, borderWidth: 2 }]}>
+              {frozen ? <Ionicons name="snow" size={12} color={FROZEN_COLOR} /> : minimum ? <Ionicons name="leaf-outline" size={12} color={chain.color} /> : rest && !done ? <Ionicons name="remove" size={14} color={colors.mutedForeground} /> : <Text style={[styles.monthDayText, { color: done ? '#fff' : date < today ? colors.mutedForeground + 'cc' : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
             </View>
           </Pressable>
         );
@@ -207,8 +210,9 @@ export default function ChainDetailScreen() {
   const frozen = isFrozenToday(chain);
   const freezeTokens = getRemainingFreezeTokens(chain);
   const totalCompleted = chain.completedDates.length;
+  const totalProtected = chain.completedDates.length + chain.minimumDates.length;
   const daysSinceStart = Math.max(1, Math.floor((new Date(`${getTodayStr()}T12:00:00`).getTime() - new Date(`${chain.createdAt}T12:00:00`).getTime()) / 86400000) + 1);
-  const consistency = Math.min(100, Math.round((totalCompleted / daysSinceStart) * 100));
+  const consistency = Math.min(100, Math.round((totalProtected / daysSinceStart) * 100));
   const restingToday = isRestDay(chain, getTodayStr());
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
   const rhythm = rhythmFrom(chain, focusLog);
@@ -306,6 +310,7 @@ export default function ChainDetailScreen() {
     });
     Alert.alert('Update day', prettyDate, [
       { text: 'Done', onPress: () => applyDayStatus(date, 'done') },
+      { text: 'Minimum version', onPress: () => applyDayStatus(date, 'minimum') },
       { text: 'Freeze', onPress: () => applyDayStatus(date, 'frozen') },
       { text: 'Missed', style: 'destructive', onPress: () => applyDayStatus(date, 'missed') },
       { text: 'Cancel', style: 'cancel' },
@@ -387,7 +392,7 @@ export default function ChainDetailScreen() {
         <View style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.insight}><Text style={[styles.insightValue, { color: chain.color }]}>{consistency}%</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>CONSISTENCY</Text></View>
           <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
-          <View style={styles.insight}><Text style={[styles.insightValue, { color: colors.foreground }]}>{totalCompleted}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>DAYS DONE</Text></View>
+          <View style={styles.insight}><Text style={[styles.insightValue, { color: colors.foreground }]}>{totalProtected}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>DAYS KEPT</Text></View>
           <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
           <View style={styles.insight}><Text style={[styles.insightValue, { color: '#5B8CFF' }]}>{chain.frozenDates.length}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>PROTECTED</Text></View>
         </View>
@@ -511,6 +516,10 @@ export default function ChainDetailScreen() {
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: chain.color }]} />
               <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Done</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: chain.color + '38', borderColor: chain.color, borderWidth: 1 }]} />
+              <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Minimum</Text>
             </View>
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: FROZEN_COLOR + '55', borderColor: FROZEN_COLOR, borderWidth: 1 }]} />
