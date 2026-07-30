@@ -224,6 +224,7 @@ export default function ChainDetailScreen() {
   const done = isCompletedToday(chain);
   const frozen = isFrozenToday(chain);
   const freezeTokens = getRemainingFreezeTokens(chain);
+  const freezeRecoveryRemaining = freezeTokens < 2 ? Math.max(0, 14 - chain.freezeRecoveryProgress) : 0;
   const totalCompleted = chain.completedDates.length;
   const totalProtected = chain.completedDates.length + chain.minimumDates.length;
   const daysSinceStart = Math.max(1, Math.floor((new Date(`${getTodayStr()}T12:00:00`).getTime() - new Date(`${chain.createdAt}T12:00:00`).getTime()) / 86400000) + 1);
@@ -487,10 +488,12 @@ export default function ChainDetailScreen() {
           >
             <Ionicons name="snow-outline" size={18} color="#4488ff" />
             <Text style={[styles.actionBtnText, { color: colors.mutedForeground }]}>
-              Freeze ({freezeTokens})
+              Safety net ({freezeTokens}/2)
             </Text>
           </Pressable>
         </View>}
+
+        <View style={[styles.safetyNetCard, { backgroundColor: '#4488ff12', borderColor: '#4488ff44' }]}><View style={[styles.safetyNetIcon, { backgroundColor: '#4488ff22' }]}><Ionicons name="snow-outline" size={16} color="#4488ff" /></View><View style={styles.scheduleCopy}><Text style={[styles.safetyNetTitle, { color: '#4488ff' }]}>Safety net · {freezeTokens} of 2 available</Text><Text style={[styles.safetyNetBody, { color: colors.mutedForeground }]}>{freezeTokens === 2 ? 'Fully restored. Keep it for a day life gets in the way.' : `${freezeRecoveryRemaining} real completed day${freezeRecoveryRemaining === 1 ? '' : 's'} to restore one.`}</Text></View></View>
 
         {/* Frozen today indicator */}
         {frozen && !done && (
@@ -773,6 +776,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Inter_500Medium',
   },
+  safetyNetCard: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 16, borderWidth: 1, padding: 12 },
+  safetyNetIcon: { width: 32, height: 32, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  safetyNetTitle: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  safetyNetBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
   sectionLabel: {
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
