@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +22,7 @@ export default function FocusSession() {
   const targetSeconds = (item?.durationMinutes || 30) * 60;
   const [elapsed, setElapsed] = useState(0);
   const [paused, setPaused] = useState(false);
+  const holdProgress = useRef(new Animated.Value(0)).current;
   const remaining = Math.max(0, targetSeconds - elapsed);
   const progress = Math.min(1, elapsed / targetSeconds);
   const topPad = Platform.OS === 'web' ? 40 : insets.top + 8;
@@ -46,6 +47,23 @@ export default function FocusSession() {
     router.back();
   }
 
+  function beginEndHold() {
+    if (remaining === 0) return;
+    holdProgress.setValue(0);
+    Animated.timing(holdProgress, { toValue: 1, duration: 900, useNativeDriver: false }).start();
+  }
+
+  function cancelEndHold() {
+    if (remaining === 0) return;
+    holdProgress.stopAnimation();
+    Animated.timing(holdProgress, { toValue: 0, duration: 160, useNativeDriver: false }).start();
+  }
+
+  function completeFromHold() {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    void finish();
+  }
+
   if (!item) return <View style={[styles.root, { backgroundColor: colors.background }]} />;
   return <View style={[styles.root, { backgroundColor: colors.background, paddingTop: topPad }]}>
     <Pressable onPress={() => router.back()} style={styles.close}><Ionicons name="close" size={24} color={colors.mutedForeground} /></Pressable>
@@ -61,12 +79,12 @@ export default function FocusSession() {
       <View style={styles.copy}><Text style={[styles.headline, { color: colors.foreground }]}>{headline}</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>{remaining === 0 ? 'You gave this block the attention you planned.' : `${Math.max(1, Math.round(elapsed / 60))} min protected so far.`}</Text></View>
       <View style={styles.actions}>
         <Pressable onPress={() => setPaused((value) => !value)} style={[styles.pause, { backgroundColor: colors.card, borderColor: colors.border }]}><Ionicons name={paused ? 'play' : 'pause'} size={18} color={colors.foreground} /><Text style={[styles.pauseText, { color: colors.foreground }]}>{paused ? 'Resume' : 'Pause'}</Text></Pressable>
-        <Pressable onPress={remaining === 0 ? finish : undefined} onLongPress={remaining > 0 ? finish : undefined} delayLongPress={700} style={[styles.finish, { backgroundColor: item.color || colors.primary }]}><Ionicons name="checkmark" size={19} color="#fff" /><Text style={styles.finishText}>{remaining === 0 ? 'Finish' : 'Hold to end'}</Text></Pressable>
+        <Pressable onPress={remaining === 0 ? finish : undefined} onPressIn={beginEndHold} onPressOut={cancelEndHold} onLongPress={remaining > 0 ? completeFromHold : undefined} delayLongPress={900} style={[styles.finish, { backgroundColor: colors.card, borderColor: item.color || colors.primary }]}><Animated.View pointerEvents="none" style={[styles.holdFill, { backgroundColor: item.color || colors.primary, width: holdProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]} /><View pointerEvents="none" style={styles.finishContent}><Ionicons name="checkmark" size={19} color="#fff" /><Text style={styles.finishText}>{remaining === 0 ? 'Finish' : 'Hold to end'}</Text></View></Pressable>
       </View>
     </View>
   </View>;
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, paddingHorizontal: 24 }, close: { alignSelf: 'flex-end', padding: 10 }, inner: { flex: 1, alignItems: 'center', paddingTop: 64, paddingBottom: 40 }, eyebrow: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.4 }, task: { fontSize: 28, lineHeight: 34, fontFamily: 'Inter_700Bold', textAlign: 'center', marginTop: 10, maxWidth: 330 }, ring: { width: 244, height: 244, borderRadius: 122, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 56 }, ringFill: { width: 194, height: 194, borderRadius: 97, borderWidth: 2, alignItems: 'center', justifyContent: 'center' }, clock: { fontSize: 37, fontFamily: 'Inter_700Bold', letterSpacing: -1 }, remaining: { fontSize: 11, fontFamily: 'Inter_500Medium', marginTop: 4 }, copy: { alignItems: 'center', marginTop: 46 }, headline: { fontSize: 21, fontFamily: 'Inter_700Bold' }, body: { fontSize: 14, fontFamily: 'Inter_400Regular', marginTop: 7 }, actions: { flexDirection: 'row', gap: 10, width: '100%', marginTop: 'auto' }, pause: { flex: 0.78, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderRadius: 19, paddingVertical: 15 }, pauseText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' }, finish: { flex: 1.22, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderRadius: 19, paddingVertical: 15 }, finishText: { color: '#fff', fontSize: 14, fontFamily: 'Inter_700Bold' },
+  root: { flex: 1, paddingHorizontal: 24 }, close: { alignSelf: 'flex-end', padding: 10 }, inner: { flex: 1, alignItems: 'center', paddingTop: 64, paddingBottom: 40 }, eyebrow: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.4 }, task: { fontSize: 28, lineHeight: 34, fontFamily: 'Inter_700Bold', textAlign: 'center', marginTop: 10, maxWidth: 330 }, ring: { width: 244, height: 244, borderRadius: 122, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 56 }, ringFill: { width: 194, height: 194, borderRadius: 97, borderWidth: 2, alignItems: 'center', justifyContent: 'center' }, clock: { fontSize: 37, fontFamily: 'Inter_700Bold', letterSpacing: -1 }, remaining: { fontSize: 11, fontFamily: 'Inter_500Medium', marginTop: 4 }, copy: { alignItems: 'center', marginTop: 46 }, headline: { fontSize: 21, fontFamily: 'Inter_700Bold' }, body: { fontSize: 14, fontFamily: 'Inter_400Regular', marginTop: 7 }, actions: { flexDirection: 'row', gap: 10, width: '100%', marginTop: 'auto' }, pause: { flex: 0.78, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderRadius: 19, paddingVertical: 15 }, pauseText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' }, finish: { flex: 1.22, borderRadius: 19, borderWidth: 1.5, paddingVertical: 15, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }, holdFill: { position: 'absolute', left: 0, top: 0, bottom: 0 }, finishContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 }, finishText: { color: '#fff', fontSize: 14, fontFamily: 'Inter_700Bold' },
 });
