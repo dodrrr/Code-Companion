@@ -10,7 +10,7 @@ import {
   schedulePlanSnooze,
 } from '@/lib/planNotifications';
 
-type PlanNotificationData = { planItemId?: string; planDate?: string };
+type PlanNotificationData = { planItemId?: string; planDate?: string; openPlan?: boolean };
 
 export function PlanNotificationResponseHandler() {
   const { completeItemForDate, showDate, updateReminderForDate } = usePlan();
@@ -24,6 +24,11 @@ export function PlanNotificationResponseHandler() {
       if (response.notification.request.identifier === handledResponseId) return;
       handledResponseId = response.notification.request.identifier;
       const data = response.notification.request.content.data as PlanNotificationData;
+      if (data.openPlan) {
+        router.push('/(tabs)/plan');
+        await Notifications.clearLastNotificationResponseAsync();
+        return;
+      }
       if (!data.planItemId || !data.planDate) return;
 
       const action = response.actionIdentifier;
