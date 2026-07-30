@@ -29,6 +29,7 @@ import {
   useChains,
 } from '@/context/ChainsContext';
 import { FOCUS_LOG_KEY, FocusLogEntry } from '@/context/PlanContext';
+import { getNextProgressionStage, getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
 
 const FROZEN_COLOR = '#5B8CFF';
 const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -43,24 +44,7 @@ const SCHEDULE_DAYS = [
   { value: 0, label: 'Sun' },
 ];
 
-const PROGRESSION_STAGES = [
-  { at: 0, key: 'seed', label: 'Seed', copy: 'One small promise is enough to begin.' },
-  { at: 1, key: 'return', label: 'First return', copy: 'You showed up once. Come back tomorrow.' },
-  { at: 2, key: 'foundation', label: 'Foundation', copy: 'A pattern starts with a second mark.' },
-  { at: 3, key: 'rhythm', label: 'Finding rhythm', copy: 'The action is beginning to feel familiar.' },
-  { at: 5, key: 'grounded', label: 'Grounded', copy: 'Small promises are starting to hold.' },
-  { at: 7, key: 'steady', label: 'Steady', copy: 'A full week of choosing yourself.' },
-  { at: 14, key: 'momentum', label: 'Momentum', copy: 'Keep the line moving. You have proof now.' },
-  { at: 21, key: 'committed', label: 'Committed', copy: 'This is becoming part of your week.' },
-  { at: 30, key: 'strong', label: 'Strong', copy: 'The pattern is visible, not just intended.' },
-  { at: 60, key: 'rooted', label: 'Rooted', copy: 'You make space for this without negotiating.' },
-  { at: 100, key: 'unshakable', label: 'Unshakable', copy: 'You built this through ordinary days.' },
-  { at: 365, key: 'year-one', label: 'Year one', copy: 'A year of keeping a promise to yourself.' },
-] as const;
-
-function getProgressionStage(streak: number) {
-  return [...PROGRESSION_STAGES].reverse().find((stage) => streak >= stage.at) ?? PROGRESSION_STAGES[0];
-}
+const MINIMUM_PRESETS = ['5 min', 'One page', 'One set'] as const;
 
 const BRIGHT_CALENDAR_COLORS: Record<string, string> = {
   '#FF6B35': '#FF8A5C', '#00C896': '#2FE0B2', '#A855F7': '#BF7BFF', '#F43F5E': '#FF6B84',
@@ -253,6 +237,10 @@ export default function ChainDetailScreen() {
   const weeklyFocus = focusLog.filter((entry) => entry.chainId === chain.id && entry.date >= weekStartKey);
   const weeklyFocusMinutes = weeklyFocus.reduce((total, entry) => total + entry.minutes, 0);
   const stage = getProgressionStage(streak);
+  const nextStage = getNextProgressionStage(streak);
+  const stageStart = stage.at;
+  const stageProgress = nextStage ? Math.min(1, Math.max(0, (streak - stageStart) / (nextStage.at - stageStart))) : 1;
+  const stageUnit = chain.cadence === 'weekly' ? 'week' : 'day';
 
   function handleDelete() {
     if (!chain) return;
@@ -419,7 +407,10 @@ export default function ChainDetailScreen() {
           {scheduleOpen && (chain.cadence === 'weekly' ? <View style={styles.scheduleExpanded}><Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>Reach your target in a week to extend your week streak.</Text><View style={styles.weekDays}>{[1, 2, 3, 4, 5, 6, 7].map((target) => { const selected = target === chain.weeklyTarget; return <Pressable key={target} onPress={() => { Haptics.selectionAsync(); updateChainCadence(chain.id, 'weekly', target); }} style={[styles.weekDay, { backgroundColor: selected ? chain.color : colors.background, borderColor: selected ? chain.color : colors.border }]}><Text style={[styles.weekDayText, { color: selected ? '#fff' : colors.mutedForeground }]}>{target}</Text></Pressable>; })}</View></View> : <View style={styles.scheduleExpanded}><Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>Choose rest days. They never break your streak.</Text><View style={styles.weekDays}>{SCHEDULE_DAYS.map(({ label, value }) => { const isRest = chain.restDays.includes(value); return <Pressable key={label} onPress={() => toggleRestDay(value)} style={[styles.weekDay, { backgroundColor: isRest ? chain.color : colors.background, borderColor: isRest ? chain.color : colors.border }]}><Text style={[styles.weekDayText, { color: isRest ? '#fff' : colors.mutedForeground }]}>{label.slice(0, 1)}</Text></Pressable>; })}</View></View>)}
         </View>
 
-        <Pressable onPress={editMinimum} style={({ pressed }) => [styles.minimumCard, { backgroundColor: chain.color + '12', borderColor: chain.color + '44', opacity: pressed ? 0.8 : 1 }]}><View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="leaf-outline" size={17} color={chain.color} /></View><View style={styles.scheduleCopy}><Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Minimum version</Text><Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{chain.minimumLabel} · tap to edit</Text></View><Ionicons name="chevron-forward" size={17} color={chain.color} /></Pressable>
+        <View style={[styles.minimumPanel, { backgroundColor: chain.color + '12', borderColor: chain.color + '44' }]}>
+          <Pressable onPress={editMinimum} style={({ pressed }) => [styles.minimumCard, { opacity: pressed ? 0.8 : 1 }]}><View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="leaf-outline" size={17} color={chain.color} /></View><View style={styles.scheduleCopy}><Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Minimum version</Text><Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{chain.minimumLabel} · tap to edit</Text></View><Ionicons name="chevron-forward" size={17} color={chain.color} /></Pressable>
+          <View style={styles.minimumPresetRow}>{MINIMUM_PRESETS.map((preset) => <Pressable key={preset} onPress={() => { Haptics.selectionAsync(); updateChainMinimumLabel(chain.id, preset); }} style={({ pressed }) => [styles.minimumPreset, { backgroundColor: chain.minimumLabel === preset ? chain.color + '28' : colors.card, borderColor: chain.minimumLabel === preset ? chain.color : colors.border, opacity: pressed ? 0.7 : 1 }]}><Text style={[styles.minimumPresetText, { color: chain.minimumLabel === preset ? chain.color : colors.mutedForeground }]}>{preset}</Text></Pressable>)}<Pressable onPress={editMinimum} style={({ pressed }) => [styles.minimumPreset, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.7 : 1 }]}><Ionicons name="create-outline" size={12} color={colors.mutedForeground} /><Text style={[styles.minimumPresetText, { color: colors.mutedForeground }]}>Custom</Text></Pressable></View>
+        </View>
 
         {/* Streak hero */}
         <View style={[styles.streakHero, { backgroundColor: chain.color + '14', borderColor: chain.color + '33' }]}>
@@ -431,7 +422,10 @@ export default function ChainDetailScreen() {
             {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : `${totalCompleted} total completed`}
           </Text>
           <View style={[styles.stagePill, { backgroundColor: chain.color + '22' }]}><Text style={[styles.stageText, { color: chain.color }]}>{stage.label.toUpperCase()} · {stage.copy}</Text></View>
+          {nextStage ? <View style={styles.nextStage}><View style={[styles.nextStageTrack, { backgroundColor: chain.color + '22' }]}><View style={[styles.nextStageFill, { backgroundColor: chain.color, width: `${Math.max(5, stageProgress * 100)}%` }]} /></View><Text style={[styles.nextStageText, { color: colors.mutedForeground }]}>{nextStage.at - streak} {stageUnit}{nextStage.at - streak === 1 ? '' : 's'} to {nextStage.label}</Text></View> : <Text style={[styles.nextStageText, { color: chain.color }]}>Your long-term rhythm is built.</Text>}
         </View>
+
+        <View style={[styles.milestoneCard, { backgroundColor: colors.card, borderColor: colors.border }]}><Text style={[styles.milestoneTitle, { color: colors.mutedForeground }]}>MILESTONES</Text><View style={styles.milestoneRow}>{PROGRESSION_STAGES.filter((item) => [1, 7, 30, 100, 365].includes(item.at)).map((milestone) => { const unlocked = streak >= milestone.at; return <View key={milestone.key} style={styles.milestoneItem}><View style={[styles.milestoneDot, { backgroundColor: unlocked ? chain.color : colors.background, borderColor: unlocked ? chain.color : colors.border }]}><Ionicons name={unlocked ? 'checkmark' : 'lock-closed'} size={12} color={unlocked ? '#fff' : colors.mutedForeground} /></View><Text style={[styles.milestoneLabel, { color: unlocked ? chain.color : colors.mutedForeground }]}>{milestone.at === 365 ? '1y' : milestone.at}</Text></View>; })}</View></View>
 
         <View style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.insight}><Text style={[styles.insightValue, { color: chain.color }]}>{consistency}%</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>CONSISTENCY</Text></View>
@@ -445,7 +439,7 @@ export default function ChainDetailScreen() {
           <View style={[styles.rhythmIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="pulse-outline" size={18} color={chain.color} /></View>
           <View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>RHYTHM</Text><Text style={[styles.rhythmTitle, { color: colors.foreground }]}>{rhythm.samples >= 3 ? `You usually protect this around ${readableHour(rhythm.hour)}.` : 'Your rhythm is still forming.'}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{rhythm.samples >= 3 ? `${DAY_LABELS[rhythm.day ?? 1]} is your strongest day${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of planned focus logged` : ''}.` : `Complete it a few more times and Chain will spot your best window${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of focus logged so far` : ''}.`}</Text></View>
         </View>
-        <View style={[styles.weekReflection, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={chain.color} /></View><View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>THIS WEEK</Text><Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m focused on ${chain.name}` : `${totalProtected} days kept on ${chain.name}.`}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{weeklyFocus.length ? `${weeklyFocus.length} focus block${weeklyFocus.length === 1 ? '' : 's'} logged · You showed up for yourself.` : stage.key === 'seed' ? 'Your reflection becomes meaningful with your next session.' : stage.copy}</Text></View></View>
+        <View style={[styles.weekReflection, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={chain.color} /></View><View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>THIS WEEK</Text><Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m focused on ${chain.name}` : `${totalProtected} days kept on ${chain.name}.`}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{weeklyFocus.length ? `${weeklyFocus.length} focus block${weeklyFocus.length === 1 ? '' : 's'} logged · You showed up for yourself.` : stage.key === 'starting-line' ? 'Your reflection becomes meaningful with your next session.' : stage.copy}</Text></View></View>
         <Pressable onPress={enableGodMode} style={({ pressed }) => [styles.godMode, { borderColor: chain.color + '44', opacity: pressed ? 0.7 : 1 }]}><Ionicons name="sparkles-outline" size={13} color={chain.color} /><Text style={[styles.godModeText, { color: chain.color }]}>God mode · simulate 3 weeks of rhythm</Text></Pressable>
 
         {/* Today's action */}
@@ -668,7 +662,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
-  minimumCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, borderWidth: 1, padding: 13, marginTop: 10 },
+  minimumPanel: { borderRadius: 18, borderWidth: 1, overflow: 'hidden', marginTop: 10 },
+  minimumCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13 },
+  minimumPresetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, paddingHorizontal: 13, paddingBottom: 13 },
+  minimumPreset: { flexDirection: 'row', alignItems: 'center', gap: 4, borderRadius: 12, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 6 },
+  minimumPresetText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
   scheduleHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -714,7 +712,17 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   stagePill: { alignSelf: 'center', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, marginTop: 10 },
-  stageText: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 0.4 },
+  stageText: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 0.4, textAlign: 'center' },
+  nextStage: { alignSelf: 'stretch', gap: 6, marginTop: 10 },
+  nextStageTrack: { height: 5, borderRadius: 3, overflow: 'hidden' },
+  nextStageFill: { height: '100%', borderRadius: 3 },
+  nextStageText: { fontSize: 11, fontFamily: 'Inter_500Medium', textAlign: 'center' },
+  milestoneCard: { borderRadius: 18, borderWidth: 1, padding: 14 },
+  milestoneTitle: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.1, marginBottom: 12 },
+  milestoneRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  milestoneItem: { alignItems: 'center', gap: 5, minWidth: 35 },
+  milestoneDot: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  milestoneLabel: { fontSize: 10, fontFamily: 'Inter_700Bold' },
   insightsCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 18, borderWidth: 1, paddingVertical: 14 },
   insight: { flex: 1, alignItems: 'center', gap: 3 },
   insightValue: { fontSize: 18, fontFamily: 'Inter_700Bold' },
