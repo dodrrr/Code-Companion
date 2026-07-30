@@ -268,13 +268,9 @@ export default function GateScreen() {
           <View style={styles.savesCopy}><Text style={[styles.savesNumber, { color: colors.primary }]}>{saveEvents.length}</Text><Text style={[styles.savesTitle, { color: colors.foreground }]}>times you chose the pause</Text><Text style={[styles.savesBody, { color: colors.mutedForeground }]}>Your wins in the last 24 hours.</Text></View>
         </View>
         <Pressable onPress={openDemo} style={({ pressed }) => [styles.previewWide, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}><Text style={styles.previewWideText}>Preview your Pause Gate</Text></Pressable>
-        {/* Info card */}
-        <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={[styles.infoIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="eye-outline" size={18} color={colors.primary} /></View>
-          <View style={styles.infoCopy}>
-            <Text style={[styles.infoEyebrow, { color: colors.primary }]}>PREVIEW MODE</Text>
-            <Text style={[styles.infoText, { color: colors.mutedForeground }]}>Your rules are saved here. Use Preview to feel the pause; iOS blocking remains managed through Screen Time.</Text>
-          </View>
+        <View style={[styles.previewNote, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Ionicons name="eye-outline" size={15} color={colors.primary} />
+          <Text style={[styles.previewNoteText, { color: colors.mutedForeground }]}>Preview lets you feel the pause. Native blocking comes with iOS Screen Time.</Text>
         </View>
 
         {/* Apps list */}
@@ -463,6 +459,8 @@ const styles = StyleSheet.create({
   savesBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 3 },
   previewWide: { alignItems: 'center', justifyContent: 'center', borderRadius: 18, paddingVertical: 15 },
   previewWideText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold', textAlign: 'center' },
+  previewNote: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 10 },
+  previewNoteText: { flex: 1, fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17 },
   scroll: {
     paddingHorizontal: 20,
     gap: 12,
