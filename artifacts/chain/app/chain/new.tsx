@@ -17,8 +17,36 @@ import { CHAIN_COLORS, EXTRA_CHAIN_COLORS } from '@/constants/colors';
 import { useChains } from '@/context/ChainsContext';
 
 const SUGGESTIONS = [
-  'Write daily', 'Morning run', 'Meditate', 'Read 30 min',
-  'No phone after 10pm', 'Cold shower', 'Gym', 'Ship something',
+  'Write daily',
+  'Morning run',
+  'Meditate',
+  'Read 30 min',
+  'No phone after 10pm',
+  'Cold shower',
+  'Gym',
+  'Ship something',
+  'Walk 10k steps',
+  'Stretch',
+  'Drink water',
+  'Sleep by 11pm',
+  'No sugar today',
+  'Cook at home',
+  'Journal',
+  'Practice gratitude',
+  'Learn something',
+  'Study 1 hour',
+  'Deep work',
+  'Review notes',
+  'Practice a language',
+  'Build my project',
+  'Create something',
+  'Post content',
+  'Reply to messages',
+  'Plan tomorrow',
+  'Tidy my space',
+  'Call family',
+  'Take a real break',
+  'Get outside',
 ];
 
 export default function NewChainScreen() {
