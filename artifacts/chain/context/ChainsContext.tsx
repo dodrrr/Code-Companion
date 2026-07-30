@@ -30,6 +30,7 @@ interface ChainsContextValue {
   isCompletedToday: (chain: Chain) => boolean;
   isFrozenToday: (chain: Chain) => boolean;
   getRemainingFreezeTokens: (chain: Chain) => number;
+  seedChainRhythm: (id: string) => void;
 }
 
 const STORAGE_KEY = '@chain_v2';
@@ -287,6 +288,28 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
     setDayStatus(id, today, 'frozen');
   }
 
+  function seedChainRhythm(id: string) {
+    const today = new Date();
+    const completionTimes: Record<string, string> = {};
+    const completedDates: string[] = [];
+    // A believable morning pattern: 18 sessions, strongest on Wednesdays.
+    for (let offset = 1; offset <= 24; offset += 1) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - offset);
+      const weekday = date.getDay();
+      if (weekday === 0 || weekday === 6 || (offset % 5 === 0 && weekday !== 3)) continue;
+      date.setHours(8 + (weekday === 3 ? 0 : 1), weekday === 3 ? 42 : 18, 0, 0);
+      const key = toLocalDateString(date);
+      completedDates.push(key);
+      completionTimes[key] = date.toISOString();
+    }
+    persist(chains.map((chain) => chain.id === id ? {
+      ...chain,
+      completedDates: Array.from(new Set([...chain.completedDates, ...completedDates])).sort(),
+      completionTimes: { ...completionTimes, ...chain.completionTimes },
+    } : chain));
+  }
+
   const isCompletedToday = (c: Chain) =>
     c.completedDates.includes(getTodayStr());
   const isFrozenToday = (c: Chain) => c.frozenDates.includes(getTodayStr());
@@ -312,6 +335,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
         isCompletedToday,
         isFrozenToday,
         getRemainingFreezeTokens,
+        seedChainRhythm,
       }}
     >
       {children}
