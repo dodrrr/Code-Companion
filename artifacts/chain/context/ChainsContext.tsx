@@ -7,6 +7,7 @@ export interface Chain {
   color: string;
   createdAt: string;
   completedDates: string[]; // 'YYYY-MM-DD'
+  minimumDates: string[]; // deliberately protected with a minimum version
   frozenDates: string[];
   restDays: number[]; // 0 (Sunday) through 6 (Saturday)
   cadence: 'daily' | 'weekly';
@@ -14,7 +15,7 @@ export interface Chain {
   completionTimes: Record<string, string>; // ISO timestamps, keyed by local date
 }
 
-export type DayStatus = 'done' | 'frozen' | 'missed';
+export type DayStatus = 'done' | 'minimum' | 'frozen' | 'missed';
 
 interface ChainsContextValue {
   chains: Chain[];
@@ -28,6 +29,7 @@ interface ChainsContextValue {
   toggleToday: (id: string) => void;
   useFreeze: (id: string) => void;
   isCompletedToday: (chain: Chain) => boolean;
+  isProtectedToday: (chain: Chain) => boolean;
   isFrozenToday: (chain: Chain) => boolean;
   getRemainingFreezeTokens: (chain: Chain) => number;
   seedChainRhythm: (id: string) => void;
@@ -86,7 +88,7 @@ export function getWeeklyProgress(chain: Chain, referenceDate = getTodayStr()): 
   end.setDate(start.getDate() + 6);
   const startKey = toLocalDateString(start);
   const endKey = toLocalDateString(end);
-  return chain.completedDates.filter((date) => date >= startKey && date <= endKey).length;
+  return [...chain.completedDates, ...chain.minimumDates].filter((date) => date >= startKey && date <= endKey).length;
 }
 
 function normalizeChain(value: unknown): Chain | null {
@@ -95,8 +97,9 @@ function normalizeChain(value: unknown): Chain | null {
   if (!raw.id || !raw.name || !raw.color || !isDateKey(raw.createdAt)) return null;
 
   const completedDates = uniqueDateKeys(raw.completedDates);
+  const minimumDates = uniqueDateKeys(raw.minimumDates).filter((date) => !completedDates.includes(date));
   const frozenDates = uniqueDateKeys(raw.frozenDates).filter(
-    (date) => !completedDates.includes(date),
+    (date) => !completedDates.includes(date) && !minimumDates.includes(date),
   );
 
   return {
@@ -105,6 +108,7 @@ function normalizeChain(value: unknown): Chain | null {
     color: raw.color,
     createdAt: raw.createdAt,
     completedDates,
+    minimumDates,
     frozenDates,
     restDays: normalizeRestDays(raw.restDays),
     cadence: raw.cadence === 'weekly' ? 'weekly' : 'daily',
@@ -145,7 +149,7 @@ export function getStreak(chain: Chain): number {
   }
 
   const today = getTodayStr();
-  const completed = new Set(chain.completedDates);
+  const completed = new Set([...chain.completedDates, ...chain.minimumDates]);
   const frozen = new Set(chain.frozenDates);
   const coveredDays = new Set([...completed, ...frozen]);
 
@@ -216,6 +220,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
       color,
       createdAt: getTodayStr(),
       completedDates: [],
+      minimumDates: [],
       frozenDates: [],
       restDays: [],
       cadence: options?.cadence === 'weekly' ? 'weekly' : 'daily',
@@ -259,18 +264,22 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
       chains.map((chain) => {
         if (chain.id !== id) return chain;
         const completedDates = chain.completedDates.filter((day) => day !== date);
+        const minimumDates = chain.minimumDates.filter((day) => day !== date);
         const frozenDates = chain.frozenDates.filter((day) => day !== date);
 
         const completionTimes = { ...chain.completionTimes };
         if (status === 'done') {
           completedDates.push(date);
           completionTimes[date] = new Date().toISOString();
+        } else if (status === 'minimum') {
+          minimumDates.push(date);
+          completionTimes[date] = new Date().toISOString();
         } else {
           delete completionTimes[date];
         }
         if (status === 'frozen') frozenDates.push(date);
 
-        return { ...chain, completedDates, frozenDates, completionTimes };
+        return { ...chain, completedDates, minimumDates, frozenDates, completionTimes };
       }),
     );
     return true;
@@ -280,7 +289,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
     const today = getTodayStr();
     const chain = chains.find((item) => item.id === id);
     if (!chain) return;
-    setDayStatus(id, today, chain.completedDates.includes(today) ? 'missed' : 'done');
+    setDayStatus(id, today, (chain.completedDates.includes(today) || chain.minimumDates.includes(today)) ? 'missed' : 'done');
   }
 
   function useFreeze(id: string) {
@@ -312,6 +321,8 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
 
   const isCompletedToday = (c: Chain) =>
     c.completedDates.includes(getTodayStr());
+  const isProtectedToday = (c: Chain) =>
+    c.completedDates.includes(getTodayStr()) || c.minimumDates.includes(getTodayStr());
   const isFrozenToday = (c: Chain) => c.frozenDates.includes(getTodayStr());
   const getRemainingFreezeTokens = (c: Chain) => {
     const monthPrefix = getTodayStr().slice(0, 7);
@@ -333,6 +344,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
         toggleToday,
         useFreeze,
         isCompletedToday,
+        isProtectedToday,
         isFrozenToday,
         getRemainingFreezeTokens,
         seedChainRhythm,
