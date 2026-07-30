@@ -31,6 +31,7 @@ export default function WeekStrip({ chain }: Props) {
       {dates.map((date, i) => {
         const dow = new Date(date + 'T12:00:00').getDay();
         const completed = chain.completedDates.includes(date);
+        const minimum = chain.minimumDates.includes(date);
         const frozen = chain.frozenDates.includes(date);
         const rest = isRestDay(chain, date);
         const isToday = date === toLocalDateString(new Date());
@@ -53,6 +54,8 @@ export default function WeekStrip({ chain }: Props) {
                 styles.dot,
                 completed
                   ? { backgroundColor: chain.color, borderWidth: 0 }
+                  : minimum
+                  ? { backgroundColor: chain.color + '33', borderColor: chain.color, borderWidth: 1.5 }
                   : frozen
                   ? { backgroundColor: 'transparent', borderColor: '#4488ff', borderWidth: 1.5 }
                   : rest
@@ -65,6 +68,7 @@ export default function WeekStrip({ chain }: Props) {
               {frozen && !completed && (
                 <Ionicons name="snow-outline" size={9} color="#4488ff" />
               )}
+              {minimum && !completed && <Ionicons name="leaf-outline" size={10} color={chain.color} />}
               {rest && !completed && !frozen && <Ionicons name="moon" size={13} color={colors.foreground} />}
             </View>
           </View>
