@@ -43,6 +43,25 @@ const SCHEDULE_DAYS = [
   { value: 0, label: 'Sun' },
 ];
 
+const PROGRESSION_STAGES = [
+  { at: 0, key: 'seed', label: 'Seed', copy: 'One small promise is enough to begin.' },
+  { at: 1, key: 'return', label: 'First return', copy: 'You showed up once. Come back tomorrow.' },
+  { at: 2, key: 'foundation', label: 'Foundation', copy: 'A pattern starts with a second mark.' },
+  { at: 3, key: 'rhythm', label: 'Finding rhythm', copy: 'The action is beginning to feel familiar.' },
+  { at: 5, key: 'grounded', label: 'Grounded', copy: 'Small promises are starting to hold.' },
+  { at: 7, key: 'steady', label: 'Steady', copy: 'A full week of choosing yourself.' },
+  { at: 14, key: 'momentum', label: 'Momentum', copy: 'Keep the line moving. You have proof now.' },
+  { at: 21, key: 'committed', label: 'Committed', copy: 'This is becoming part of your week.' },
+  { at: 30, key: 'strong', label: 'Strong', copy: 'The pattern is visible, not just intended.' },
+  { at: 60, key: 'rooted', label: 'Rooted', copy: 'You make space for this without negotiating.' },
+  { at: 100, key: 'unshakable', label: 'Unshakable', copy: 'You built this through ordinary days.' },
+  { at: 365, key: 'year-one', label: 'Year one', copy: 'A year of keeping a promise to yourself.' },
+] as const;
+
+function getProgressionStage(streak: number) {
+  return [...PROGRESSION_STAGES].reverse().find((stage) => streak >= stage.at) ?? PROGRESSION_STAGES[0];
+}
+
 const BRIGHT_CALENDAR_COLORS: Record<string, string> = {
   '#FF6B35': '#FF8A5C', '#00C896': '#2FE0B2', '#A855F7': '#BF7BFF', '#F43F5E': '#FF6B84',
   '#F59E0B': '#FFC247', '#3B82F6': '#65A7FF', '#FBBF24': '#FFD15A', '#A16207': '#F6BD52',
@@ -233,8 +252,7 @@ export default function ChainDetailScreen() {
   const weekStartKey = toLocalDateString(weekStart);
   const weeklyFocus = focusLog.filter((entry) => entry.chainId === chain.id && entry.date >= weekStartKey);
   const weeklyFocusMinutes = weeklyFocus.reduce((total, entry) => total + entry.minutes, 0);
-  const stage = streak >= 30 ? 'Strong' : streak >= 7 ? 'Steady' : 'Build';
-  const stageCopy = stage === 'Strong' ? 'This is part of who you are now.' : stage === 'Steady' ? 'The pattern is becoming reliable.' : 'Every return makes the pattern stronger.';
+  const stage = getProgressionStage(streak);
 
   function handleDelete() {
     if (!chain) return;
@@ -412,7 +430,7 @@ export default function ChainDetailScreen() {
           <Text style={[styles.streakSub, { color: colors.mutedForeground }]}>
             {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : `${totalCompleted} total completed`}
           </Text>
-          <View style={[styles.stagePill, { backgroundColor: chain.color + '22' }]}><Text style={[styles.stageText, { color: chain.color }]}>{stage.toUpperCase()} · {stageCopy}</Text></View>
+          <View style={[styles.stagePill, { backgroundColor: chain.color + '22' }]}><Text style={[styles.stageText, { color: chain.color }]}>{stage.label.toUpperCase()} · {stage.copy}</Text></View>
         </View>
 
         <View style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -427,7 +445,7 @@ export default function ChainDetailScreen() {
           <View style={[styles.rhythmIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="pulse-outline" size={18} color={chain.color} /></View>
           <View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>RHYTHM</Text><Text style={[styles.rhythmTitle, { color: colors.foreground }]}>{rhythm.samples >= 3 ? `You usually protect this around ${readableHour(rhythm.hour)}.` : 'Your rhythm is still forming.'}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{rhythm.samples >= 3 ? `${DAY_LABELS[rhythm.day ?? 1]} is your strongest day${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of planned focus logged` : ''}.` : `Complete it a few more times and Chain will spot your best window${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of focus logged so far` : ''}.`}</Text></View>
         </View>
-        <View style={[styles.weekReflection, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={chain.color} /></View><View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>THIS WEEK</Text><Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m focused on ${chain.name}` : `${totalProtected} days kept on ${chain.name}.`}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{weeklyFocus.length ? `${weeklyFocus.length} focus block${weeklyFocus.length === 1 ? '' : 's'} logged · You showed up for yourself.` : stage === 'Build' ? 'Your reflection becomes meaningful with your next session.' : 'Your consistency is becoming visible. Keep the promise small and real.'}</Text></View></View>
+        <View style={[styles.weekReflection, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={chain.color} /></View><View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>THIS WEEK</Text><Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m focused on ${chain.name}` : `${totalProtected} days kept on ${chain.name}.`}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{weeklyFocus.length ? `${weeklyFocus.length} focus block${weeklyFocus.length === 1 ? '' : 's'} logged · You showed up for yourself.` : stage.key === 'seed' ? 'Your reflection becomes meaningful with your next session.' : stage.copy}</Text></View></View>
         <Pressable onPress={enableGodMode} style={({ pressed }) => [styles.godMode, { borderColor: chain.color + '44', opacity: pressed ? 0.7 : 1 }]}><Ionicons name="sparkles-outline" size={13} color={chain.color} /><Text style={[styles.godModeText, { color: chain.color }]}>God mode · simulate 3 weeks of rhythm</Text></Pressable>
 
         {/* Today's action */}
