@@ -14,14 +14,15 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { EXTRA_CHAIN_COLORS } from '@/constants/colors';
 import { Chain, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
 import { PlanItem, usePlan } from '@/context/PlanContext';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
-import { cancelPlanReminder, getPlanNotificationPermission, requestPlanNotificationPermission, schedulePlanEndAlert, schedulePlanReminder } from '@/lib/planNotifications';
+import { cancelPlanReminder, getPlanNotificationPermission, requestPlanNotificationPermission, scheduleMorningBriefing, schedulePlanEndAlert, schedulePlanReminder } from '@/lib/planNotifications';
 
 const QUICK_TIMES = ['7 AM', '9 AM', '12 PM', '3 PM', '6 PM', '8 PM'];
 const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
@@ -30,6 +31,7 @@ const REMINDER_OPTIONS = [5, 15, 30, 60];
 const DURATION_OPTIONS = [30, 60, 90, 120, 180, 240];
 const UNLINKED_TASK_COLOR = '#8FA2B3';
 const TASK_ACCENTS = ['#8FA2B3', ...EXTRA_CHAIN_COLORS];
+const MORNING_BRIEFING_KEY = '@chain_morning_briefing';
 
 function getPlanLabel(dateKey: string): string {
   const [year, month, day] = dateKey.split('-').map(Number);
@@ -67,6 +69,7 @@ export default function PlanScreen() {
   const [showInput, setShowInput] = useState(false);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [briefingHour, setBriefingHour] = useState<number | null>(null);
   const [editingItem, setEditingItem] = useState<PlanItem | null>(null);
   const [showCompletion, setShowCompletion] = useState(false);
   const [showReminderPermission, setShowReminderPermission] = useState(false);
@@ -91,6 +94,14 @@ export default function PlanScreen() {
   const plannedFocusMinutes = items.reduce((total, item) => total + (item.durationMinutes || 0), 0);
   const reminderCount = items.filter((item) => item.reminderMinutes || item.endAlert).length;
   const canEditActivePlan = !isToday || !isActiveDayClosed;
+
+  useEffect(() => { void AsyncStorage.getItem(MORNING_BRIEFING_KEY).then((raw) => { try { const value = raw ? JSON.parse(raw) : null; if (typeof value?.hour === 'number') setBriefingHour(value.hour); } catch {} }); }, []);
+
+  async function setMorningBriefing(hour: number) {
+    if (await getPlanNotificationPermission() === 'undetermined') await requestPlanNotificationPermission();
+    const result = await scheduleMorningBriefing(hour);
+    if (result.status === 'scheduled') { await AsyncStorage.setItem(MORNING_BRIEFING_KEY, JSON.stringify({ hour, notificationId: result.notificationId })); setBriefingHour(hour); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); }
+  }
 
   useEffect(() => {
     if (!taskId || !planDate) return;
@@ -315,6 +326,8 @@ export default function PlanScreen() {
           </View>
         )}
 
+        {isToday && <View style={[styles.briefingCard, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.briefingIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sunny-outline" size={18} color={colors.primary} /></View><View style={styles.briefingCopy}><Text style={[styles.briefingTitle, { color: colors.foreground }]}>Morning briefing</Text><Text style={[styles.briefingBody, { color: colors.mutedForeground }]}>{briefingHour === null ? 'A gentle nudge to open your day.' : `Daily at ${briefingHour % 12 || 12} ${briefingHour >= 12 ? 'PM' : 'AM'}`}</Text></View><View style={styles.briefingChoices}>{[7, 8, 9].map((hour) => <Pressable key={hour} onPress={() => { void setMorningBriefing(hour); }} style={[styles.briefingHour, { backgroundColor: briefingHour === hour ? colors.primary : colors.background, borderColor: briefingHour === hour ? colors.primary : colors.border }]}><Text style={[styles.briefingHourText, { color: briefingHour === hour ? '#fff' : colors.mutedForeground }]}>{hour}</Text></Pressable>)}</View></View>}
+
         <View style={styles.focusHeading}>
           <View>
             <Text style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 3 }]}>{isToday ? "TODAY'S AGENDA" : "TOMORROW'S FOCUS"}</Text>
@@ -453,7 +466,9 @@ export default function PlanScreen() {
       <TaskMenuMoment
         item={taskMenuItem}
         showCopy={isToday}
+        showFocus={isToday && !isActiveDayClosed && !!taskMenuItem?.durationMinutes && !taskMenuItem.completed}
         onClose={() => setTaskMenuItem(null)}
+        onFocus={() => { if (taskMenuItem) router.push({ pathname: '/focus/[id]', params: { id: taskMenuItem.id } }); setTaskMenuItem(null); }}
         onCopy={() => { if (taskMenuItem) void copyToTomorrow(taskMenuItem); }}
         onEdit={() => { if (taskMenuItem) startEditing(taskMenuItem); setTaskMenuItem(null); }}
         onDelete={() => { if (taskMenuItem) { void cancelPlanReminder(taskMenuItem.notificationId); removeItem(taskMenuItem.id); } setTaskMenuItem(null); }}
@@ -515,13 +530,13 @@ function PlanItemRow({ item, chainName, highlighted, newlyAdded, isLast, locked,
   </Animated.View>;
 }
 
-function TaskMenuMoment({ item, showCopy, onClose, onCopy, onEdit, onDelete }: { item: PlanItem | null; showCopy: boolean; onClose: () => void; onCopy: () => void; onEdit: () => void; onDelete: () => void }) {
+function TaskMenuMoment({ item, showCopy, showFocus, onClose, onFocus, onCopy, onEdit, onDelete }: { item: PlanItem | null; showCopy: boolean; showFocus: boolean; onClose: () => void; onFocus: () => void; onCopy: () => void; onEdit: () => void; onDelete: () => void }) {
   const colors = useColors();
   if (!item) return null;
   const titleStyle = { color: colors.foreground, fontSize: 17, fontFamily: 'Inter_600SemiBold', marginBottom: 16 } as const;
   const actionStyle = { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 15, padding: 14, marginBottom: 8 } as const;
   const actionTextStyle = { fontSize: 14, fontFamily: 'Inter_600SemiBold' } as const;
-  return <Modal transparent visible animationType="fade" onRequestClose={onClose}><View style={completionStyles.shade}><View style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch', padding: 22 }]}><Text style={titleStyle} numberOfLines={1}>{item.text}</Text>{showCopy && <Pressable onPress={onCopy} style={[actionStyle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="copy-outline" size={18} color={colors.primary} /><Text style={[actionTextStyle, { color: colors.primary }]}>Copy to tomorrow</Text></Pressable>}<Pressable onPress={onEdit} style={[actionStyle, { backgroundColor: colors.background }]}><Ionicons name="create-outline" size={18} color={colors.foreground} /><Text style={[actionTextStyle, { color: colors.foreground }]}>Edit task</Text></Pressable><Pressable onPress={onDelete} style={[actionStyle, { backgroundColor: colors.destructive + '16' }]}><Ionicons name="trash-outline" size={18} color={colors.destructive} /><Text style={[actionTextStyle, { color: colors.destructive }]}>Delete task</Text></Pressable><Pressable onPress={onClose} style={{ alignItems: 'center', paddingTop: 8 }}><Text style={{ color: colors.mutedForeground, fontSize: 14, fontFamily: 'Inter_500Medium' }}>Cancel</Text></Pressable></View></View></Modal>;
+  return <Modal transparent visible animationType="fade" onRequestClose={onClose}><View style={completionStyles.shade}><View style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch', padding: 22 }]}><Text style={titleStyle} numberOfLines={1}>{item.text}</Text>{showFocus && <Pressable onPress={onFocus} style={[actionStyle, { backgroundColor: colors.primary }]}><Ionicons name="play" size={16} color="#fff" /><Text style={[actionTextStyle, { color: '#fff' }]}>Start focus · {formatDurationLabel(item.durationMinutes || 0)}</Text></Pressable>}{showCopy && <Pressable onPress={onCopy} style={[actionStyle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="copy-outline" size={18} color={colors.primary} /><Text style={[actionTextStyle, { color: colors.primary }]}>Copy to tomorrow</Text></Pressable>}<Pressable onPress={onEdit} style={[actionStyle, { backgroundColor: colors.background }]}><Ionicons name="create-outline" size={18} color={colors.foreground} /><Text style={[actionTextStyle, { color: colors.foreground }]}>Edit task</Text></Pressable><Pressable onPress={onDelete} style={[actionStyle, { backgroundColor: colors.destructive + '16' }]}><Ionicons name="trash-outline" size={18} color={colors.destructive} /><Text style={[actionTextStyle, { color: colors.destructive }]}>Delete task</Text></Pressable><Pressable onPress={onClose} style={{ alignItems: 'center', paddingTop: 8 }}><Text style={{ color: colors.mutedForeground, fontSize: 14, fontFamily: 'Inter_500Medium' }}>Cancel</Text></Pressable></View></View></Modal>;
 }
 
 function CompletionMoment({ visible, onClose, onPrepareTomorrow }: { visible: boolean; onClose: () => void; onPrepareTomorrow: () => void }) {
@@ -576,6 +591,14 @@ function TimePickerModal({ visible, hour, minute, setHour, setMinute, onClose, o
 }
 
 const styles = StyleSheet.create({
+  briefingCard: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 17, borderWidth: 1, padding: 12, marginTop: 14 },
+  briefingIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  briefingCopy: { flex: 1 },
+  briefingTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  briefingBody: { fontSize: 10, fontFamily: 'Inter_400Regular', marginTop: 2 },
+  briefingChoices: { flexDirection: 'row', gap: 5 },
+  briefingHour: { width: 29, height: 29, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  briefingHourText: { fontSize: 11, fontFamily: 'Inter_700Bold' },
   advancedToggle: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 14, paddingHorizontal: 10, paddingVertical: 6, marginVertical: 2 },
   advancedToggleText: { fontSize: 11, fontFamily: 'Inter_600SemiBold' },
   root: { flex: 1 }, header: { paddingHorizontal: 20, paddingBottom: 18 }, headerEyebrow: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.3, marginBottom: 6 }, headerTitle: { fontSize: 32, fontFamily: 'Inter_700Bold', letterSpacing: -0.8 }, headerSub: { fontSize: 14, fontFamily: 'Inter_400Regular', marginTop: 3 }, scroll: { paddingHorizontal: 20 }, sectionLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.2, marginBottom: 8 }, emptySection: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 16, borderRadius: 18, borderWidth: 1 }, emptyText: { fontSize: 13, fontFamily: 'Inter_400Regular', flex: 1, lineHeight: 19 }, reflectCard: { borderRadius: 18, borderWidth: 1, overflow: 'hidden' }, reflectRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, gap: 10 }, reflectDot: { width: 8, height: 8, borderRadius: 4 }, reflectName: { flex: 1, fontSize: 15, fontFamily: 'Inter_500Medium' }, doneBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 }, doneBadgeText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' }, pendingText: { fontSize: 12, fontFamily: 'Inter_400Regular' }, divider: { height: 1, marginLeft: 16 }, focusHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 24, marginBottom: 10 }, focusCaption: { fontSize: 16, fontFamily: 'Inter_600SemiBold' }, countPill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 12, borderWidth: 1 }, itemCount: { fontSize: 12, fontFamily: 'Inter_600SemiBold' }, progressWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }, progressTrack: { flex: 1, height: 5, borderRadius: 3, overflow: 'hidden' }, progressFill: { height: '100%', borderRadius: 3 }, progressLabel: { fontSize: 11, fontFamily: 'Inter_500Medium', minWidth: 68, textAlign: 'right' }, emptyFocus: { alignItems: 'center', paddingHorizontal: 28, paddingVertical: 26, borderRadius: 20, borderWidth: 1, marginBottom: 12, gap: 8 }, moonCircle: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginBottom: 2 }, emptyFocusTitle: { fontSize: 18, fontFamily: 'Inter_600SemiBold', textAlign: 'center' }, emptyFocusBody: { fontSize: 14, fontFamily: 'Inter_400Regular', textAlign: 'center', lineHeight: 21 }, planItem: { flexDirection: 'row', alignItems: 'center', borderRadius: 17, borderWidth: 1, paddingRight: 14, paddingVertical: 14, marginBottom: 8, gap: 12, overflow: 'hidden' }, planBar: { width: 4, alignSelf: 'stretch' }, planCheck: { padding: 2 }, planCheckCircle: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, alignItems: 'center', justifyContent: 'center' }, planTextBlock: { flex: 1, gap: 3 }, planMeta: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7 }, planTime: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 0.8 }, linkBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 8 }, linkBadgeText: { fontSize: 10, fontFamily: 'Inter_600SemiBold' }, priorityBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 8 }, priorityBadgeText: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.6 }, planText: { fontSize: 15, fontFamily: 'Inter_500Medium' }, addCard: { borderRadius: 19, borderWidth: 1, marginTop: 4, overflow: 'hidden' }, addTrigger: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15 }, addIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }, addCopy: { flex: 1 }, addTriggerText: { fontSize: 16, fontFamily: 'Inter_600SemiBold' }, addTriggerSub: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2 }, input: { fontSize: 16, fontFamily: 'Inter_400Regular', padding: 16, paddingBottom: 10 }, composerMeta: { gap: 7, paddingBottom: 4 }, metaLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1, paddingHorizontal: 16, marginTop: 2 }, chainHelper: { fontSize: 11, fontFamily: 'Inter_400Regular', lineHeight: 15, paddingHorizontal: 16, marginTop: -2 }, timeSlots: { paddingHorizontal: 16, gap: 7, paddingBottom: 8 }, timeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 18, borderWidth: 1 }, timeChipText: { fontSize: 12, fontFamily: 'Inter_500Medium' }, chainChoices: { paddingHorizontal: 16, gap: 7, paddingBottom: 8 }, chainChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 17, borderWidth: 1 }, chainChipDot: { width: 7, height: 7, borderRadius: 4 }, chainChipText: { fontSize: 12, fontFamily: 'Inter_500Medium' }, priorityPick: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderRadius: 16, padding: 10, marginHorizontal: 16, marginBottom: 3 }, priorityIcon: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' }, priorityCopy: { flex: 1 }, priorityTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold' }, priorityBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 1 }, addActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, paddingHorizontal: 14, paddingBottom: 14, paddingTop: 4 }, cancelBtn: { padding: 8 }, cancelText: { fontSize: 14, fontFamily: 'Inter_500Medium' }, addConfirmBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 }, addConfirmText: { color: '#fff', fontSize: 14, fontFamily: 'Inter_600SemiBold' }, modalShade: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000088' }, modalCard: { borderTopLeftRadius: 26, borderTopRightRadius: 26, borderWidth: 1, padding: 20, paddingBottom: 30, maxHeight: '78%' }, modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }, modalTitle: { fontSize: 20, fontFamily: 'Inter_700Bold' }, timePreview: { fontSize: 34, fontFamily: 'Inter_700Bold', textAlign: 'center', marginVertical: 18 }, pickerColumns: { flexDirection: 'row', gap: 12, height: 220 }, pickerColumn: { flex: 1 }, pickerLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1, textAlign: 'center', marginBottom: 7 }, pickerList: { flex: 1 }, pickerValue: { borderRadius: 12, paddingVertical: 9, alignItems: 'center', marginBottom: 4 }, pickerValueText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' }, modalConfirm: { borderRadius: 18, alignItems: 'center', paddingVertical: 14, marginTop: 18 }, modalConfirmText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold' }, reminderNotice: { fontSize: 11, fontFamily: 'Inter_400Regular', lineHeight: 16, paddingHorizontal: 16, paddingBottom: 3 }, reviewTrigger: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 19, borderWidth: 1, padding: 15, marginTop: 4, marginBottom: 8 }, reviewIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' }, reviewCopy: { flex: 1 }, reviewTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold' }, reviewSubtitle: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2 }, reviewModal: { borderTopLeftRadius: 28, borderTopRightRadius: 28, borderWidth: 1, padding: 22, paddingBottom: 30, maxHeight: '78%' }, reviewModalIcon: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center', marginBottom: 13 }, reviewModalTitle: { fontSize: 24, fontFamily: 'Inter_700Bold', letterSpacing: -0.4 }, reviewModalBody: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20, marginTop: 6, marginBottom: 16 }, reviewList: { maxHeight: 260 }, reviewRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 11, borderTopWidth: 1 }, reviewDot: { width: 7, height: 7, borderRadius: 4 }, reviewItemCopy: { flex: 1 }, reviewItemText: { fontSize: 14, fontFamily: 'Inter_600SemiBold' }, reviewItemTime: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 }, reviewMove: { borderRadius: 11, paddingHorizontal: 10, paddingVertical: 7 }, reviewMoveText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' }, reviewLetGo: { padding: 5 }, reviewDone: { alignItems: 'center', borderRadius: 18, paddingVertical: 14, marginTop: 16 }, reviewDoneText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold' }, reviewAllClear: { fontSize: 14, fontFamily: 'Inter_600SemiBold', marginVertical: 14 }, reviewLater: { alignItems: 'center', paddingTop: 13, paddingBottom: 2 }, reviewLaterText: { fontSize: 14, fontFamily: 'Inter_500Medium' }, tomorrowSet: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 19, borderWidth: 1, padding: 14, marginTop: 14 }, tomorrowSetIcon: { width: 36, height: 36, borderRadius: 13, alignItems: 'center', justifyContent: 'center' }, tomorrowSetCopy: { flex: 1 }, tomorrowSetTitle: { fontSize: 16, fontFamily: 'Inter_700Bold' }, tomorrowSetBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 3 },
