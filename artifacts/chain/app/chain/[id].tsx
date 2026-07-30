@@ -165,6 +165,7 @@ export default function ChainDetailScreen() {
     updateChainColor,
     updateChainRestDays,
     updateChainCadence,
+    updateChainMinimumLabel,
     setDayStatus,
     toggleToday,
     useFreeze,
@@ -232,6 +233,8 @@ export default function ChainDetailScreen() {
   const weekStartKey = toLocalDateString(weekStart);
   const weeklyFocus = focusLog.filter((entry) => entry.chainId === chain.id && entry.date >= weekStartKey);
   const weeklyFocusMinutes = weeklyFocus.reduce((total, entry) => total + entry.minutes, 0);
+  const stage = streak >= 30 ? 'Strong' : streak >= 7 ? 'Steady' : 'Build';
+  const stageCopy = stage === 'Strong' ? 'This is part of who you are now.' : stage === 'Steady' ? 'The pattern is becoming reliable.' : 'Every return makes the pattern stronger.';
 
   function handleDelete() {
     if (!chain) return;
@@ -272,6 +275,15 @@ export default function ChainDetailScreen() {
     if (!chain || color === chain.color) return;
     Haptics.selectionAsync();
     updateChainColor(chain.id, color);
+  }
+
+  function editMinimum() {
+    if (!chain) return;
+    if (Platform.OS === 'ios') {
+      Alert.prompt('Your minimum version', 'What still counts on a difficult day?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Save', onPress: (value?: string) => updateChainMinimumLabel(chain.id, value || '') }], 'plain-text', chain.minimumLabel);
+      return;
+    }
+    Alert.alert('Your minimum version', `Currently: ${chain.minimumLabel}`);
   }
 
   function enableGodMode() {
@@ -389,6 +401,8 @@ export default function ChainDetailScreen() {
           {scheduleOpen && (chain.cadence === 'weekly' ? <View style={styles.scheduleExpanded}><Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>Reach your target in a week to extend your week streak.</Text><View style={styles.weekDays}>{[1, 2, 3, 4, 5, 6, 7].map((target) => { const selected = target === chain.weeklyTarget; return <Pressable key={target} onPress={() => { Haptics.selectionAsync(); updateChainCadence(chain.id, 'weekly', target); }} style={[styles.weekDay, { backgroundColor: selected ? chain.color : colors.background, borderColor: selected ? chain.color : colors.border }]}><Text style={[styles.weekDayText, { color: selected ? '#fff' : colors.mutedForeground }]}>{target}</Text></Pressable>; })}</View></View> : <View style={styles.scheduleExpanded}><Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>Choose rest days. They never break your streak.</Text><View style={styles.weekDays}>{SCHEDULE_DAYS.map(({ label, value }) => { const isRest = chain.restDays.includes(value); return <Pressable key={label} onPress={() => toggleRestDay(value)} style={[styles.weekDay, { backgroundColor: isRest ? chain.color : colors.background, borderColor: isRest ? chain.color : colors.border }]}><Text style={[styles.weekDayText, { color: isRest ? '#fff' : colors.mutedForeground }]}>{label.slice(0, 1)}</Text></Pressable>; })}</View></View>)}
         </View>
 
+        <Pressable onPress={editMinimum} style={({ pressed }) => [styles.minimumCard, { backgroundColor: chain.color + '12', borderColor: chain.color + '44', opacity: pressed ? 0.8 : 1 }]}><View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="leaf-outline" size={17} color={chain.color} /></View><View style={styles.scheduleCopy}><Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Minimum version</Text><Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{chain.minimumLabel} · tap to edit</Text></View><Ionicons name="chevron-forward" size={17} color={chain.color} /></Pressable>
+
         {/* Streak hero */}
         <View style={[styles.streakHero, { backgroundColor: chain.color + '14', borderColor: chain.color + '33' }]}>
           <Text style={[styles.streakNumber, { color: chain.color }]}>{streak}</Text>
@@ -398,6 +412,7 @@ export default function ChainDetailScreen() {
           <Text style={[styles.streakSub, { color: colors.mutedForeground }]}>
             {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : `${totalCompleted} total completed`}
           </Text>
+          <View style={[styles.stagePill, { backgroundColor: chain.color + '22' }]}><Text style={[styles.stageText, { color: chain.color }]}>{stage.toUpperCase()} · {stageCopy}</Text></View>
         </View>
 
         <View style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -412,7 +427,7 @@ export default function ChainDetailScreen() {
           <View style={[styles.rhythmIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="pulse-outline" size={18} color={chain.color} /></View>
           <View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>RHYTHM</Text><Text style={[styles.rhythmTitle, { color: colors.foreground }]}>{rhythm.samples >= 3 ? `You usually protect this around ${readableHour(rhythm.hour)}.` : 'Your rhythm is still forming.'}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{rhythm.samples >= 3 ? `${DAY_LABELS[rhythm.day ?? 1]} is your strongest day${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of planned focus logged` : ''}.` : `Complete it a few more times and Chain will spot your best window${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of focus logged so far` : ''}.`}</Text></View>
         </View>
-        <View style={[styles.weekReflection, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={chain.color} /></View><View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>THIS WEEK</Text><Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m focused on ${chain.name}` : 'Your weekly reflection starts with your next focus block.'}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{weeklyFocus.length ? `${weeklyFocus.length} focus block${weeklyFocus.length === 1 ? '' : 's'} logged · Keep making the pattern visible.` : 'Time you protect here becomes part of your Rhythm.'}</Text></View></View>
+        <View style={[styles.weekReflection, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={chain.color} /></View><View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>THIS WEEK</Text><Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m focused on ${chain.name}` : `${totalProtected} days kept on ${chain.name}.`}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{weeklyFocus.length ? `${weeklyFocus.length} focus block${weeklyFocus.length === 1 ? '' : 's'} logged · You showed up for yourself.` : stage === 'Build' ? 'Your reflection becomes meaningful with your next session.' : 'Your consistency is becoming visible. Keep the promise small and real.'}</Text></View></View>
         <Pressable onPress={enableGodMode} style={({ pressed }) => [styles.godMode, { borderColor: chain.color + '44', opacity: pressed ? 0.7 : 1 }]}><Ionicons name="sparkles-outline" size={13} color={chain.color} /><Text style={[styles.godModeText, { color: chain.color }]}>God mode · simulate 3 weeks of rhythm</Text></Pressable>
 
         {/* Today's action */}
@@ -635,6 +650,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
+  minimumCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, borderWidth: 1, padding: 13, marginTop: 10 },
   scheduleHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -679,6 +695,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular',
     marginTop: 4,
   },
+  stagePill: { alignSelf: 'center', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, marginTop: 10 },
+  stageText: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 0.4 },
   insightsCard: { flexDirection: 'row', alignItems: 'center', borderRadius: 18, borderWidth: 1, paddingVertical: 14 },
   insight: { flex: 1, alignItems: 'center', gap: 3 },
   insightValue: { fontSize: 18, fontFamily: 'Inter_700Bold' },
