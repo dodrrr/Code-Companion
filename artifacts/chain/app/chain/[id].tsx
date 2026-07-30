@@ -29,7 +29,7 @@ import {
   useChains,
 } from '@/context/ChainsContext';
 import { FOCUS_LOG_KEY, FocusLogEntry } from '@/context/PlanContext';
-import { getNextProgressionStage, getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
+import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
 
 const FROZEN_COLOR = '#5B8CFF';
 const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -237,8 +237,9 @@ export default function ChainDetailScreen() {
   const weeklyFocus = focusLog.filter((entry) => entry.chainId === chain.id && entry.date >= weekStartKey);
   const weeklyFocusMinutes = weeklyFocus.reduce((total, entry) => total + entry.minutes, 0);
   const stage = getProgressionStage(streak);
-  const nextStage = getNextProgressionStage(streak);
-  const stageStart = stage.at;
+  const milestoneStages = PROGRESSION_STAGES.filter((item) => [7, 30, 100, 365].includes(item.at));
+  const nextStage = milestoneStages.find((item) => item.at > streak);
+  const stageStart = [...milestoneStages].reverse().find((item) => item.at <= streak)?.at ?? 0;
   const stageProgress = nextStage ? Math.min(1, Math.max(0, (streak - stageStart) / (nextStage.at - stageStart))) : 1;
   const stageUnit = chain.cadence === 'weekly' ? 'week' : 'day';
 
