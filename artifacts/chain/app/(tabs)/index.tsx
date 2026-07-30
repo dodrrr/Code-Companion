@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
-import { Chain, getStreak, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
+import { Chain, getStreak, getTodayStr, isRestDay, toLocalDateString, useChains } from '@/context/ChainsContext';
 import { usePlan } from '@/context/PlanContext';
 import ChainCard from '@/components/ChainCard';
 import { getDailyQuote } from '@/constants/quotes';
@@ -63,6 +63,12 @@ export default function TodayScreen() {
   // Logging it today protects today's chain even if the weekly target is still in progress.
   const allProtected = chains.length > 0 && chains.every((chain) => isRestDay(chain, localDay) || isProtectedToday(chain));
   const protectedCount = chains.filter((chain) => isRestDay(chain, localDay) || isProtectedToday(chain)).length;
+  const nowHour = new Date().getHours();
+  const hoursLeft = Math.max(1, 24 - nowHour);
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayKey = toLocalDateString(yesterday);
+  const recoveryChain = chains.find((chain) => chain.createdAt < localDay && !isRestDay(chain, yesterdayKey) && !chain.completedDates.includes(yesterdayKey) && !chain.minimumDates.includes(yesterdayKey) && !chain.frozenDates.includes(yesterdayKey) && !isProtectedToday(chain));
 
   const renderChain = useCallback(
     ({ item }: { item: Chain }) => <ChainCard chain={item} />,
@@ -80,11 +86,12 @@ export default function TodayScreen() {
           — {quote.author}
         </Text>
       </View>
+      {recoveryChain && <Pressable onPress={() => setDayStatus(recoveryChain.id, localDay, 'minimum')} style={({ pressed }) => [styles.recoveryCard, { backgroundColor: recoveryChain.color + '12', borderColor: recoveryChain.color + '55', opacity: pressed ? 0.8 : 1 }]}><Ionicons name="refresh-outline" size={18} color={recoveryChain.color} /><View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: recoveryChain.color }]}>START AGAIN TODAY</Text><Text style={[styles.focusTitle, { color: colors.foreground }]}>One miss does not end {recoveryChain.name}.</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>Protect it with {recoveryChain.minimumLabel}.</Text></View></Pressable>}
       {allProtected ? <View style={[styles.protectedCard, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '58' }]}><View style={[styles.protectedIcon, { backgroundColor: colors.primary + '22' }]}><Ionicons name="shield-checkmark-outline" size={21} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: colors.primary }]}>ALL PROTECTED</Text><Text style={[styles.focusTitle, { color: colors.foreground }]}>Today’s work is done.</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>{protectedCount} chain{protectedCount === 1 ? '' : 's'} kept · Let that count.</Text></View></View> : focusChain && <><Pressable onPress={() => router.push({ pathname: '/chain/[id]', params: { id: focusChain.id } })} style={({ pressed }) => [styles.focusCard, { backgroundColor: focusChain.color + '16', borderColor: focusChain.color + '55', opacity: pressed ? 0.8 : 1 }]}>
         <View style={[styles.focusIcon, { backgroundColor: focusChain.color + '22' }]}><Ionicons name="flame-outline" size={19} color={focusChain.color} /></View>
-        <View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: focusChain.color }]}>TODAY'S FOCUS</Text><Text style={[styles.focusTitle, { color: colors.foreground }]} numberOfLines={1}>{focusTask?.text || `Protect ${focusChain.name}`}</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>Protect your {getStreak(focusChain)}-{focusChain.cadence === 'weekly' ? 'week' : 'day'} {focusChain.name} chain.</Text></View>
+        <View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: focusChain.color }]}>CHAIN AT RISK · {hoursLeft}H LEFT</Text><Text style={[styles.focusTitle, { color: colors.foreground }]} numberOfLines={1}>{focusTask?.text || `Protect ${focusChain.name}`}</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>Protect your {getStreak(focusChain)}-{focusChain.cadence === 'weekly' ? 'week' : 'day'} {focusChain.name} chain.</Text></View>
         <Ionicons name="chevron-forward" size={18} color={focusChain.color} />
-      </Pressable><Pressable onPress={() => { setDayStatus(focusChain.id, localDay, 'minimum'); }} style={({ pressed }) => [styles.rescue, { borderColor: focusChain.color + '55', opacity: pressed ? 0.7 : 1 }]}><Ionicons name="leaf-outline" size={15} color={focusChain.color} /><Text style={[styles.rescueText, { color: focusChain.color }]}>Rescue mode · protect it with the minimum</Text></Pressable></>}
+      </Pressable><Pressable onPress={() => { setDayStatus(focusChain.id, localDay, 'minimum'); }} style={({ pressed }) => [styles.rescue, { borderColor: focusChain.color + '55', opacity: pressed ? 0.7 : 1 }]}><Ionicons name="leaf-outline" size={15} color={focusChain.color} /><Text style={[styles.rescueText, { color: focusChain.color }]}>Rescue mode · {focusChain.minimumLabel}</Text></Pressable></>}
     </>
   );
 
@@ -236,6 +243,7 @@ const styles = StyleSheet.create({
   protectedIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   rescue: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderRadius: 15, paddingVertical: 10, marginTop: -7, marginBottom: 16 },
   rescueText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
+  recoveryCard: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 18, borderWidth: 1, padding: 13, marginBottom: 10 },
   empty: {
     flex: 1,
     alignItems: 'center',
