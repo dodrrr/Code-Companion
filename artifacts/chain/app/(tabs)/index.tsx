@@ -7,13 +7,12 @@ import {
   Text,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { Chain, getStreak, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
-import { FOCUS_LOG_KEY, FocusLogEntry, usePlan } from '@/context/PlanContext';
+import { usePlan } from '@/context/PlanContext';
 import ChainCard from '@/components/ChainCard';
 import { getDailyQuote } from '@/constants/quotes';
 
@@ -40,14 +39,6 @@ export default function TodayScreen() {
   const { chains, isReady } = useChains();
   const { items } = usePlan();
   const [localDay, setLocalDay] = useState(getTodayStr());
-  const [weeklyFocusMinutes, setWeeklyFocusMinutes] = useState(0);
-
-  useEffect(() => {
-    const now = new Date();
-    const start = new Date(now); start.setDate(now.getDate() - ((now.getDay() + 6) % 7)); start.setHours(0, 0, 0, 0);
-    const startKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
-    void AsyncStorage.getItem(FOCUS_LOG_KEY).then((raw) => { try { const entries: FocusLogEntry[] = raw ? JSON.parse(raw) : []; setWeeklyFocusMinutes(entries.filter((entry) => entry.date >= startKey).reduce((sum, entry) => sum + entry.minutes, 0)); } catch { setWeeklyFocusMinutes(0); } });
-  }, [items]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -94,7 +85,6 @@ export default function TodayScreen() {
         <View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: focusChain.color }]}>TODAY'S FOCUS</Text><Text style={[styles.focusTitle, { color: colors.foreground }]} numberOfLines={1}>{focusTask?.text || `Protect ${focusChain.name}`}</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>Protect your {getStreak(focusChain)}-{focusChain.cadence === 'weekly' ? 'week' : 'day'} {focusChain.name} chain.</Text></View>
         <Ionicons name="chevron-forward" size={18} color={focusChain.color} />
       </Pressable>}
-      <View style={[styles.weeklyCard, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.weeklyIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="analytics-outline" size={18} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: colors.primary }]}>THIS WEEK</Text><Text style={[styles.weeklyTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m of real focus` : 'Your reflection is beginning.'}</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>{protectedCount} chain{protectedCount === 1 ? '' : 's'} protected today · Rhythm learns as you go.</Text></View></View>
     </>
   );
 
@@ -244,9 +234,6 @@ const styles = StyleSheet.create({
   focusBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
   protectedCard: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 18, borderWidth: 1, padding: 13, marginBottom: 16 },
   protectedIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  weeklyCard: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 18, borderWidth: 1, padding: 13, marginBottom: 16, marginTop: -6 },
-  weeklyIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  weeklyTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', marginTop: 2 },
   empty: {
     flex: 1,
     alignItems: 'center',
