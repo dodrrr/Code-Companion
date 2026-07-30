@@ -53,7 +53,7 @@ function formatDurationLabel(minutes: number) {
 export default function PlanScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { chains, setDayStatus } = useChains();
+  const { chains, setDayStatus, isProtectedToday } = useChains();
   const { items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, updateEndAlertMetadata, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem } = usePlan();
   const { taskId, planDate } = useLocalSearchParams<{ taskId?: string; planDate?: string }>();
   const [inputText, setInputText] = useState('');
@@ -72,6 +72,7 @@ export default function PlanScreen() {
   const [briefingHour, setBriefingHour] = useState<number | null>(null);
   const [editingItem, setEditingItem] = useState<PlanItem | null>(null);
   const [showCompletion, setShowCompletion] = useState(false);
+  const [showTomorrowSet, setShowTomorrowSet] = useState(false);
   const [showReminderPermission, setShowReminderPermission] = useState(false);
   const [showDayReview, setShowDayReview] = useState(false);
   const [chainCompletion, setChainCompletion] = useState<{ item: PlanItem; chain: Chain; finishesAgenda: boolean } | null>(null);
@@ -85,7 +86,7 @@ export default function PlanScreen() {
   const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
   const today = getTodayStr();
   const completedCount = items.filter((item) => item.completed).length;
-  const protectedChains = chains.filter((chain) => isRestDay(chain, today) || chain.completedDates.includes(today)).length;
+  const protectedChains = chains.filter((chain) => isRestDay(chain, today) || isProtectedToday(chain)).length;
   const progressFill = items.length ? completedCount / items.length : 0;
   const selectedChain = chains.find((chain) => chain.id === selectedChainId);
   const priorityItem = items.find((item) => item.isPriority);
@@ -260,7 +261,7 @@ export default function PlanScreen() {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const remainingChainsAreDone = chains
       .filter((chain) => chain.id !== chainCompletion.chain.id)
-      .every((chain) => isRestDay(chain, today) || chain.completedDates.includes(today));
+      .every((chain) => isRestDay(chain, today) || isProtectedToday(chain));
     const shouldCelebrate = chainCompletion.finishesAgenda && remainingChainsAreDone;
     setDayStatus(chainCompletion.chain.id, today, 'done');
     setChainCompletion(null);
@@ -287,7 +288,12 @@ export default function PlanScreen() {
 
   function finishDayAndPrepareTomorrow() {
     setShowDayReview(false);
-    void closeToday().then(showTomorrow);
+    void closeToday().then(async () => { await showTomorrow(); setShowTomorrowSet(true); });
+  }
+
+  function prepareTomorrowWithClosure() {
+    setShowCompletion(false);
+    void closeToday().then(async () => { await showTomorrow(); setShowTomorrowSet(true); });
   }
 
   return (
@@ -314,7 +320,8 @@ export default function PlanScreen() {
           <View style={[styles.reflectCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {chains.map((chain, index) => {
               const done = chain.completedDates.includes(today);
-              return <ChainReflection key={chain.id} chain={chain} done={done} resting={isRestDay(chain, today)} isLast={index === chains.length - 1} />;
+              const minimum = chain.minimumDates.includes(today);
+              return <ChainReflection key={chain.id} chain={chain} done={done} minimum={minimum} resting={isRestDay(chain, today)} isLast={index === chains.length - 1} />;
             })}
           </View>
         )}</>}
@@ -459,7 +466,8 @@ export default function PlanScreen() {
         onClose={() => setShowTimePicker(false)}
         onConfirm={chooseCustomTime}
       />
-      <CompletionMoment visible={showCompletion} onClose={() => setShowCompletion(false)} onPrepareTomorrow={() => { setShowCompletion(false); void closeToday().then(showTomorrow); }} />
+      <CompletionMoment visible={showCompletion} onClose={() => setShowCompletion(false)} onPrepareTomorrow={prepareTomorrowWithClosure} />
+      <TomorrowSetMoment visible={showTomorrowSet} itemCount={items.length} priority={priorityItem?.text} focusMinutes={plannedFocusMinutes} reminders={reminderCount} onClose={() => setShowTomorrowSet(false)} />
       <ReminderPermissionMoment visible={showReminderPermission} minutes={selectedReminder} onSkip={() => { setShowReminderPermission(false); savePlanItem(false); }} onAllow={() => { void enableRemindersAndSave(); }} />
       <DayReviewMoment visible={showDayReview} completedCount={completedCount} totalCount={items.length} protectedChains={protectedChains} chainCount={chains.length} pendingItems={items.filter((item) => !item.completed)} onMove={(item) => { void moveToTomorrow(item); }} onLetGo={letGo} onClose={() => setShowDayReview(false)} onPrepareTomorrow={finishDayAndPrepareTomorrow} />
       <ChainCompletionMoment visible={!!chainCompletion} item={chainCompletion?.item} chain={chainCompletion?.chain} onConfirm={completeLinkedChain} onClose={() => setChainCompletion(null)} />
@@ -477,13 +485,13 @@ export default function PlanScreen() {
   );
 }
 
-function ChainReflection({ chain, done, resting, isLast }: { chain: Chain; done: boolean; resting: boolean; isLast: boolean }) {
+function ChainReflection({ chain, done, minimum, resting, isLast }: { chain: Chain; done: boolean; minimum: boolean; resting: boolean; isLast: boolean }) {
   const colors = useColors();
   return <View>
     <View style={styles.reflectRow}>
       <View style={[styles.reflectDot, { backgroundColor: chain.color }]} />
       <Text style={[styles.reflectName, { color: colors.foreground }]} numberOfLines={1}>{chain.name}</Text>
-      {done ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '20' }]}><Ionicons name="checkmark" size={12} color={chain.color} /><Text style={[styles.doneBadgeText, { color: chain.color }]}>done today</Text></View> : resting ? <View style={[styles.doneBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="moon-outline" size={12} color={colors.mutedForeground} /><Text style={[styles.doneBadgeText, { color: colors.mutedForeground }]}>rest day</Text></View> : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>pending</Text>}
+      {done ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '20' }]}><Ionicons name="checkmark" size={12} color={chain.color} /><Text style={[styles.doneBadgeText, { color: chain.color }]}>done today</Text></View> : minimum ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '14' }]}><Ionicons name="leaf-outline" size={12} color={chain.color} /><Text style={[styles.doneBadgeText, { color: chain.color }]}>minimum kept</Text></View> : resting ? <View style={[styles.doneBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="moon-outline" size={12} color={colors.mutedForeground} /><Text style={[styles.doneBadgeText, { color: colors.mutedForeground }]}>rest day</Text></View> : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>pending</Text>}
     </View>
     {!isLast && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
   </View>;
@@ -551,6 +559,11 @@ function CompletionMoment({ visible, onClose, onPrepareTomorrow }: { visible: bo
     Animated.sequence([Animated.spring(iconScale, { toValue: 1.12, useNativeDriver: true, friction: 4 }), Animated.spring(iconScale, { toValue: 1, useNativeDriver: true, friction: 5 })]).start();
   }, [visible, scale, iconScale]);
   return <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}><View style={completionStyles.shade}><Animated.View style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border, transform: [{ scale }] }]}><Animated.View style={[completionStyles.icon, { backgroundColor: colors.primary + '20', transform: [{ scale: iconScale }] }]}><Ionicons name="checkmark" size={30} color={colors.primary} /></Animated.View><Text style={[completionStyles.title, { color: colors.foreground }]}>Day complete</Text><Text style={[completionStyles.body, { color: colors.mutedForeground, textAlign: 'center', lineHeight: 20 }]}>You followed through today. Let that count.</Text><Pressable onPress={onPrepareTomorrow} style={[completionStyles.primaryButton, { backgroundColor: colors.primary }]}><Text style={completionStyles.primaryText}>Prepare tomorrow</Text></Pressable><Pressable onPress={onClose} style={completionStyles.secondaryButton}><Text style={[completionStyles.secondaryText, { color: colors.mutedForeground }]}>Done</Text></Pressable></Animated.View></View></Modal>;
+}
+
+function TomorrowSetMoment({ visible, itemCount, priority, focusMinutes, reminders, onClose }: { visible: boolean; itemCount: number; priority?: string; focusMinutes: number; reminders: number; onClose: () => void }) {
+  const colors = useColors();
+  return <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}><View style={completionStyles.shade}><View style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.primary + '66' }]}><View style={[completionStyles.icon, { backgroundColor: colors.primary + '20' }]}><Ionicons name="moon" size={28} color={colors.primary} /></View><Text style={[completionStyles.title, { color: colors.foreground }]}>Tomorrow is set</Text><Text style={[completionStyles.body, { color: colors.mutedForeground, textAlign: 'center', lineHeight: 20 }]}>{itemCount} task{itemCount === 1 ? '' : 's'}{focusMinutes ? ` · ${formatDurationLabel(focusMinutes)} of focus` : ''}{reminders ? ` · ${reminders} reminder${reminders === 1 ? '' : 's'} ready` : ''}</Text>{priority ? <Text style={{ color: colors.primary, fontSize: 13, fontFamily: 'Inter_600SemiBold', marginTop: 12, textAlign: 'center' }}>One thing · {priority}</Text> : null}<Pressable onPress={onClose} style={[completionStyles.primaryButton, { backgroundColor: colors.primary }]}><Text style={completionStyles.primaryText}>Rest easy</Text></Pressable></View></View></Modal>;
 }
 
 function ReminderPermissionMoment({ visible, minutes, onSkip, onAllow }: { visible: boolean; minutes?: number; onSkip: () => void; onAllow: () => void }) {
