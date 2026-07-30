@@ -10,6 +10,8 @@ export interface Chain {
   minimumDates: string[]; // deliberately protected with a minimum version
   minimumLabel: string;
   frozenDates: string[];
+  freezeCredits: number; // a small safety net, capped at 2
+  freezeRecoveryProgress: number; // real completed days since the last freeze use
   restDays: number[]; // 0 (Sunday) through 6 (Saturday)
   cadence: 'daily' | 'weekly';
   weeklyTarget: number;
@@ -113,6 +115,8 @@ function normalizeChain(value: unknown): Chain | null {
     minimumDates,
     minimumLabel: typeof raw.minimumLabel === 'string' && raw.minimumLabel.trim() ? raw.minimumLabel.trim().slice(0, 48) : 'A small version',
     frozenDates,
+    freezeCredits: typeof raw.freezeCredits === 'number' && Number.isInteger(raw.freezeCredits) ? Math.max(0, Math.min(2, raw.freezeCredits)) : 1,
+    freezeRecoveryProgress: typeof raw.freezeRecoveryProgress === 'number' && Number.isInteger(raw.freezeRecoveryProgress) ? Math.max(0, Math.min(13, raw.freezeRecoveryProgress)) : 0,
     restDays: normalizeRestDays(raw.restDays),
     cadence: raw.cadence === 'weekly' ? 'weekly' : 'daily',
     weeklyTarget: normalizeWeeklyTarget(raw.weeklyTarget),
@@ -226,6 +230,8 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
       minimumDates: [],
       minimumLabel: 'A small version',
       frozenDates: [],
+      freezeCredits: 1,
+      freezeRecoveryProgress: 0,
       restDays: [],
       cadence: options?.cadence === 'weekly' ? 'weekly' : 'daily',
       weeklyTarget: normalizeWeeklyTarget(options?.weeklyTarget),
@@ -264,10 +270,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
     const target = chains.find((chain) => chain.id === id);
     if (!target || !isDateKey(date)) return false;
 
-    if (status === 'frozen' && !target.frozenDates.includes(date)) {
-      const usedThisMonth = target.frozenDates.filter((day) => day.startsWith(date.slice(0, 7))).length;
-      if (usedThisMonth >= 2) return false;
-    }
+    if (status === 'frozen' && !target.frozenDates.includes(date) && target.freezeCredits <= 0) return false;
 
     persist(
       chains.map((chain) => {
@@ -275,20 +278,41 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
         const completedDates = chain.completedDates.filter((day) => day !== date);
         const minimumDates = chain.minimumDates.filter((day) => day !== date);
         const frozenDates = chain.frozenDates.filter((day) => day !== date);
+        const wasFullyCompleted = chain.completedDates.includes(date);
+        const wasFrozen = chain.frozenDates.includes(date);
+        let freezeCredits = chain.freezeCredits;
+        let freezeRecoveryProgress = chain.freezeRecoveryProgress;
 
         const completionTimes = { ...chain.completionTimes };
         if (status === 'done') {
           completedDates.push(date);
           completionTimes[date] = new Date().toISOString();
+          if (!wasFullyCompleted && freezeCredits < 2) {
+            freezeRecoveryProgress += 1;
+            if (freezeRecoveryProgress >= 14) {
+              freezeCredits += 1;
+              freezeRecoveryProgress = 0;
+            }
+          }
         } else if (status === 'minimum') {
           minimumDates.push(date);
           completionTimes[date] = new Date().toISOString();
         } else {
           delete completionTimes[date];
         }
-        if (status === 'frozen') frozenDates.push(date);
+        if (status === 'frozen') {
+          frozenDates.push(date);
+          if (!wasFrozen) {
+            freezeCredits = Math.max(0, freezeCredits - 1);
+            freezeRecoveryProgress = 0;
+          }
+        } else if (wasFrozen) {
+          // Editing a frozen day back to another state gives the safety net back.
+          freezeCredits = Math.min(2, freezeCredits + 1);
+          freezeRecoveryProgress = 0;
+        }
 
-        return { ...chain, completedDates, minimumDates, frozenDates, completionTimes };
+        return { ...chain, completedDates, minimumDates, frozenDates, completionTimes, freezeCredits, freezeRecoveryProgress };
       }),
     );
     return true;
@@ -333,11 +357,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
   const isProtectedToday = (c: Chain) =>
     c.completedDates.includes(getTodayStr()) || c.minimumDates.includes(getTodayStr());
   const isFrozenToday = (c: Chain) => c.frozenDates.includes(getTodayStr());
-  const getRemainingFreezeTokens = (c: Chain) => {
-    const monthPrefix = getTodayStr().slice(0, 7);
-    const used = c.frozenDates.filter((d) => d.startsWith(monthPrefix)).length;
-    return Math.max(0, 2 - used);
-  };
+  const getRemainingFreezeTokens = (c: Chain) => c.freezeCredits;
 
   return (
     <ChainsContext.Provider
