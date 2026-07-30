@@ -32,6 +32,7 @@ import { FOCUS_LOG_KEY, FocusLogEntry } from '@/context/PlanContext';
 
 const FROZEN_COLOR = '#5B8CFF';
 const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const CALENDAR_DAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const SCHEDULE_DAYS = [
   { value: 1, label: 'Mon' },
   { value: 2, label: 'Tue' },
@@ -87,7 +88,7 @@ function CalendarGrid({
   editableFrom.setDate(editableFrom.getDate() - 3);
   const editableFromKey = toLocalDateString(editableFrom);
   const monthStart = startOfMonth(month);
-  const firstDayOffset = monthStart.getDay();
+  const firstDayOffset = (monthStart.getDay() + 6) % 7;
   const daysInMonth = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0).getDate();
   const cells = Array.from({ length: 42 }, (_, index) => {
     const day = index - firstDayOffset + 1;
@@ -97,7 +98,7 @@ function CalendarGrid({
 
   return (
     <View style={styles.monthGrid}>
-      {DAY_LABELS.map((label, index) => (
+      {CALENDAR_DAY_LABELS.map((label, index) => (
         <Text key={`${label}-${index}`} style={[styles.monthDayLabel, { color: colors.mutedForeground }]}>{label}</Text>
       ))}
       {cells.map((date, index) => {
@@ -110,13 +111,13 @@ function CalendarGrid({
         const isFuture = date > today;
         const isBeforeChain = date < chain.createdAt;
         const stateStyle = done
-          ? { backgroundColor: chain.color, borderColor: chain.color }
+          ? { backgroundColor: chain.color, borderColor: chain.color, shadowColor: chain.color, shadowOpacity: 0.42, shadowRadius: 7, shadowOffset: { width: 0, height: 2 }, elevation: 3 }
           : frozen
             ? { backgroundColor: FROZEN_COLOR + '33', borderColor: FROZEN_COLOR }
             : rest
               ? { backgroundColor: colors.secondary, borderColor: colors.border }
             : !isFuture && !isBeforeChain
-              ? { backgroundColor: colors.background, borderColor: colors.mutedForeground + '99' }
+              ? { backgroundColor: 'transparent', borderColor: 'transparent' }
               : { backgroundColor: 'transparent', borderColor: 'transparent' };
 
         return (
@@ -211,6 +212,11 @@ export default function ChainDetailScreen() {
   const restingToday = isRestDay(chain, getTodayStr());
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
   const rhythm = rhythmFrom(chain, focusLog);
+  const weekStart = new Date();
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+  const weekStartKey = toLocalDateString(weekStart);
+  const weeklyFocus = focusLog.filter((entry) => entry.chainId === chain.id && entry.date >= weekStartKey);
+  const weeklyFocusMinutes = weeklyFocus.reduce((total, entry) => total + entry.minutes, 0);
 
   function handleDelete() {
     if (!chain) return;
@@ -390,6 +396,7 @@ export default function ChainDetailScreen() {
           <View style={[styles.rhythmIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="pulse-outline" size={18} color={chain.color} /></View>
           <View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>RHYTHM</Text><Text style={[styles.rhythmTitle, { color: colors.foreground }]}>{rhythm.samples >= 3 ? `You usually protect this around ${readableHour(rhythm.hour)}.` : 'Your rhythm is still forming.'}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{rhythm.samples >= 3 ? `${DAY_LABELS[rhythm.day ?? 1]} is your strongest day${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of planned focus logged` : ''}.` : `Complete it a few more times and Chain will spot your best window${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of focus logged so far` : ''}.`}</Text></View>
         </View>
+        <View style={[styles.weekReflection, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={chain.color} /></View><View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>THIS WEEK</Text><Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m focused on ${chain.name}` : 'Your weekly reflection starts with your next focus block.'}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{weeklyFocus.length ? `${weeklyFocus.length} focus block${weeklyFocus.length === 1 ? '' : 's'} logged · Keep making the pattern visible.` : 'Time you protect here becomes part of your Rhythm.'}</Text></View></View>
         <Pressable onPress={enableGodMode} style={({ pressed }) => [styles.godMode, { borderColor: chain.color + '44', opacity: pressed ? 0.7 : 1 }]}><Ionicons name="sparkles-outline" size={13} color={chain.color} /><Text style={[styles.godModeText, { color: chain.color }]}>God mode · simulate 3 weeks of rhythm</Text></Pressable>
 
         {/* Today's action */}
@@ -653,6 +660,9 @@ const styles = StyleSheet.create({
   insightLabel: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.8 },
   insightDivider: { width: 1, height: 28 },
   rhythmCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, borderRadius: 18, borderWidth: 1, padding: 14 },
+  weekReflection: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, borderRadius: 18, borderWidth: 1, padding: 14 },
+  weekReflectionIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  weekReflectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', lineHeight: 18, marginTop: 3 },
   rhythmIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   rhythmCopy: { flex: 1 },
   rhythmEyebrow: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 1.1 },
@@ -746,15 +756,15 @@ const styles = StyleSheet.create({
     marginBottom: 5,
   },
   monthDay: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   monthDayText: {
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: 'Inter_600SemiBold',
   },
   calendarHint: {
