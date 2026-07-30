@@ -24,8 +24,9 @@ const MILESTONES = new Set([7, 30, 100]);
 // Extracted component so useAnimatedStyle is never called inside a .map()
 export default function ChainCard({ chain }: Props) {
   const colors = useColors();
-  const { toggleToday, isCompletedToday } = useChains();
+  const { toggleToday, isCompletedToday, isProtectedToday } = useChains();
   const done   = isCompletedToday(chain);
+  const protectedToday = isProtectedToday(chain);
   const streak = getStreak(chain);
   const restingToday = isRestDay(chain, getTodayStr());
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
@@ -37,15 +38,15 @@ export default function ChainCard({ chain }: Props) {
   // Milestone celebration
   const [celebratingMilestone, setCelebratingMilestone] = useState<number | null>(null);
   const [celebratingExtra, setCelebratingExtra] = useState<number | null>(null);
-  const prevDoneRef = useRef(done);
+  const prevDoneRef = useRef(protectedToday);
   const prevWeeklyProgressRef = useRef(weeklyProgress);
 
   useEffect(() => {
-    if (!prevDoneRef.current && done && MILESTONES.has(streak)) {
+    if (!prevDoneRef.current && protectedToday && MILESTONES.has(streak)) {
       setCelebratingMilestone(streak);
     }
-    prevDoneRef.current = done;
-  }, [done, streak]);
+    prevDoneRef.current = protectedToday;
+  }, [protectedToday, streak]);
 
   useEffect(() => {
     if (chain.cadence === 'weekly' && weeklyProgress > chain.weeklyTarget && weeklyProgress > prevWeeklyProgressRef.current) {
@@ -111,10 +112,10 @@ export default function ChainCard({ chain }: Props) {
               </Text>
               <View style={styles.rightSide}>
                 <View style={styles.streakBlock}>
-                  <Text style={[styles.streakNum, compactStreak && styles.streakNumCompact, { color: chain.color }]}> 
+                  <Text style={[styles.streakNum, compactStreak && styles.streakNumCompact, { color: chain.color }]}>
                     {streak}
                   </Text>
-                  <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}> 
+                  <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}>
                     {chain.cadence === 'weekly' ? (streak === 1 ? 'week' : 'weeks') : streak === 1 ? 'day' : 'days'}
                   </Text>
                 </View>
@@ -125,12 +126,12 @@ export default function ChainCard({ chain }: Props) {
                         style={[
                           styles.checkBtn,
                           {
-                            backgroundColor: done ? chain.color : restingToday ? colors.secondary : 'transparent',
-                            borderColor:     done ? chain.color : restingToday ? colors.mutedForeground + '55' : colors.border,
+                            backgroundColor: protectedToday ? chain.color : restingToday ? colors.secondary : 'transparent',
+                            borderColor:     protectedToday ? chain.color : restingToday ? colors.mutedForeground + '55' : colors.border,
                           },
                         ]}
                       >
-                        {done ? <Ionicons name="checkmark" size={18} color="#fff" /> : restingToday ? <Ionicons name="moon-outline" size={17} color={colors.mutedForeground} /> : null}
+                        {protectedToday ? <Ionicons name={done ? 'checkmark' : 'leaf-outline'} size={18} color="#fff" /> : restingToday ? <Ionicons name="moon-outline" size={17} color={colors.mutedForeground} /> : null}
                       </View>
                     </Animated.View>
                   </Pressable>
