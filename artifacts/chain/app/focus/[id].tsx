@@ -61,7 +61,7 @@ export default function FocusSession() {
       <View style={styles.copy}><Text style={[styles.headline, { color: colors.foreground }]}>{headline}</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>{remaining === 0 ? 'You gave this block the attention you planned.' : `${Math.max(1, Math.round(elapsed / 60))} min protected so far.`}</Text></View>
       <View style={styles.actions}>
         <Pressable onPress={() => setPaused((value) => !value)} style={[styles.pause, { backgroundColor: colors.card, borderColor: colors.border }]}><Ionicons name={paused ? 'play' : 'pause'} size={18} color={colors.foreground} /><Text style={[styles.pauseText, { color: colors.foreground }]}>{paused ? 'Resume' : 'Pause'}</Text></Pressable>
-        <Pressable onPress={finish} style={[styles.finish, { backgroundColor: item.color || colors.primary }]}><Ionicons name="checkmark" size={19} color="#fff" /><Text style={styles.finishText}>{remaining === 0 ? 'Finish' : 'Complete early'}</Text></Pressable>
+        <Pressable onPress={remaining === 0 ? finish : undefined} onLongPress={remaining > 0 ? finish : undefined} delayLongPress={700} style={[styles.finish, { backgroundColor: item.color || colors.primary }]}><Ionicons name="checkmark" size={19} color="#fff" /><Text style={styles.finishText}>{remaining === 0 ? 'Finish' : 'Hold to end'}</Text></Pressable>
       </View>
     </View>
   </View>;
