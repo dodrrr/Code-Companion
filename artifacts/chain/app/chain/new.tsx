@@ -16,16 +16,19 @@ import { useColors } from '@/hooks/useColors';
 import { CHAIN_COLORS, EXTRA_CHAIN_COLORS } from '@/constants/colors';
 import { useChains } from '@/context/ChainsContext';
 
-const SUGGESTIONS = [
+const PRIMARY_SUGGESTIONS = [
   'Write daily',
   'Morning run',
   'Meditate',
   'Read 30 min',
   'No phone after 10pm',
-  'Cold shower',
   'Gym',
-  'Ship something',
   'Walk 10k steps',
+  'Deep work',
+];
+
+const MORE_SUGGESTIONS = [
+  'Cold shower',
   'Stretch',
   'Drink water',
   'Sleep by 11pm',
@@ -35,7 +38,6 @@ const SUGGESTIONS = [
   'Practice gratitude',
   'Learn something',
   'Study 1 hour',
-  'Deep work',
   'Review notes',
   'Practice a language',
   'Build my project',
@@ -59,6 +61,7 @@ export default function NewChainScreen() {
   const [showMoreColors, setShowMoreColors] = useState(false);
   const [cadence, setCadence] = useState<'daily' | 'weekly'>('daily');
   const [weeklyTarget, setWeeklyTarget] = useState(3);
+  const [showMoreSuggestions, setShowMoreSuggestions] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
@@ -135,8 +138,9 @@ export default function NewChainScreen() {
         </View>
 
         {/* Suggestions */}
+        <Text style={[styles.quickStart, { color: colors.mutedForeground }]}>Start with something you can actually keep.</Text>
         <View style={styles.suggestions}>
-          {SUGGESTIONS.map((s) => (
+          {[...PRIMARY_SUGGESTIONS, ...(showMoreSuggestions ? MORE_SUGGESTIONS : [])].map((s) => (
             <Pressable
               key={s}
               onPress={() => setName(s)}
@@ -154,6 +158,16 @@ export default function NewChainScreen() {
               </Text>
             </Pressable>
           ))}
+          <Pressable
+            accessibilityLabel={showMoreSuggestions ? 'Show fewer chain suggestions' : 'Show more chain suggestions'}
+            onPress={() => setShowMoreSuggestions((visible) => !visible)}
+            style={({ pressed }) => [
+              styles.suggestionExpand,
+              { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+            ]}
+          >
+            <Ionicons name={showMoreSuggestions ? 'chevron-up' : 'chevron-down'} size={17} color={colors.mutedForeground} />
+          </Pressable>
         </View>
 
         {/* Color picker */}
@@ -294,11 +308,20 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
+  quickStart: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: -8, marginBottom: -1 },
   chip: {
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
     borderWidth: 1,
+  },
+  suggestionExpand: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   chipText: {
     fontSize: 13,
