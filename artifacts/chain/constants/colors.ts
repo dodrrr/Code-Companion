@@ -8,7 +8,7 @@ export const CHAIN_COLORS = [
 ];
 
 export const EXTRA_CHAIN_COLORS = [
-  '#A16207', // bronze
+  '#FBBF24', // gold
   '#84CC16', // lime
   '#22D3EE', // cyan
   '#EF4444', // red
