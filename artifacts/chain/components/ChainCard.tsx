@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { Chain, getStreak, getTodayStr, getWeeklyProgress, isRestDay, useChains } from '@/context/ChainsContext';
+import { getProgressionStage } from '@/constants/progression';
 import WeekStrip from './WeekStrip';
 import MilestoneModal from './MilestoneModal';
 
@@ -24,10 +25,12 @@ const MILESTONES = new Set([7, 30, 100]);
 // Extracted component so useAnimatedStyle is never called inside a .map()
 export default function ChainCard({ chain }: Props) {
   const colors = useColors();
-  const { toggleToday, isCompletedToday, isProtectedToday } = useChains();
+  const { toggleToday, isCompletedToday, isProtectedToday, isFrozenToday } = useChains();
   const done   = isCompletedToday(chain);
   const protectedToday = isProtectedToday(chain);
+  const frozen = isFrozenToday(chain);
   const streak = getStreak(chain);
+  const stage = getProgressionStage(streak);
   const restingToday = isRestDay(chain, getTodayStr());
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
   const compactStreak = streak >= 100;
@@ -104,12 +107,15 @@ export default function ChainCard({ chain }: Props) {
           <View style={styles.body}>
             {/* Top row: name + streak + check */}
             <View style={styles.topRow}>
-              <Text
-                style={[styles.name, { color: colors.foreground }]}
-                numberOfLines={1}
-              >
-                {chain.name}
-              </Text>
+              <View style={styles.nameBlock}>
+                <Text
+                  style={[styles.name, { color: colors.foreground }]}
+                  numberOfLines={1}
+                >
+                  {chain.name}
+                </Text>
+                <Text style={[styles.stageLabel, { color: chain.color }]} numberOfLines={1}>{stage.label.toUpperCase()}</Text>
+              </View>
               <View style={styles.rightSide}>
                 <View style={styles.streakBlock}>
                   <Text style={[styles.streakNum, compactStreak && styles.streakNumCompact, { color: chain.color }]}>
@@ -126,12 +132,12 @@ export default function ChainCard({ chain }: Props) {
                         style={[
                           styles.checkBtn,
                           {
-                            backgroundColor: protectedToday ? chain.color : restingToday ? colors.secondary : 'transparent',
-                            borderColor:     protectedToday ? chain.color : restingToday ? colors.mutedForeground + '55' : colors.border,
+                            backgroundColor: protectedToday ? chain.color : frozen ? '#5B8CFF' : restingToday ? colors.secondary : 'transparent',
+                            borderColor:     protectedToday ? chain.color : frozen ? '#5B8CFF' : restingToday ? colors.mutedForeground + '55' : colors.border,
                           },
                         ]}
                       >
-                        {protectedToday ? <Ionicons name={done ? 'checkmark' : 'leaf-outline'} size={18} color="#fff" /> : restingToday ? <Ionicons name="moon-outline" size={17} color={colors.mutedForeground} /> : null}
+                        {protectedToday ? <Ionicons name={done ? 'checkmark' : 'leaf-outline'} size={18} color="#fff" /> : frozen ? <Ionicons name="snow" size={17} color="#fff" /> : restingToday ? <Ionicons name="moon-outline" size={17} color={colors.mutedForeground} /> : null}
                       </View>
                     </Animated.View>
                   </Pressable>
@@ -184,9 +190,9 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
-    flex: 1,
-    marginRight: 12,
   },
+  nameBlock: { flex: 1, marginRight: 12, gap: 3 },
+  stageLabel: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.9 },
   rightSide: {
     flexDirection: 'row',
     alignItems: 'center',
