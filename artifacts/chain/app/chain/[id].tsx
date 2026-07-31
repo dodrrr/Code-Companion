@@ -487,13 +487,13 @@ export default function ChainDetailScreen() {
             ]}
           >
             <Ionicons name="snow-outline" size={18} color="#4488ff" />
-            <Text style={[styles.actionBtnText, { color: colors.mutedForeground }]}>
-              Safety net ({freezeTokens}/2)
+            <Text numberOfLines={1} style={[styles.actionBtnText, { color: colors.mutedForeground }]}>
+              Freeze · {freezeTokens}
             </Text>
           </Pressable>
         </View>}
 
-        <View style={[styles.safetyNetCard, { backgroundColor: '#4488ff12', borderColor: '#4488ff44' }]}><View style={[styles.safetyNetIcon, { backgroundColor: '#4488ff22' }]}><Ionicons name="snow-outline" size={16} color="#4488ff" /></View><View style={styles.scheduleCopy}><Text style={[styles.safetyNetTitle, { color: '#4488ff' }]}>Safety net · {freezeTokens} of 2 available</Text><Text style={[styles.safetyNetBody, { color: colors.mutedForeground }]}>{freezeTokens === 2 ? 'Fully restored. Keep it for a day life gets in the way.' : `${freezeRecoveryRemaining} real completed day${freezeRecoveryRemaining === 1 ? '' : 's'} to restore one.`}</Text></View></View>
+        {freezeTokens < 2 && <View style={[styles.safetyNetCard, { backgroundColor: '#4488ff12', borderColor: '#4488ff44' }]}><View style={[styles.safetyNetIcon, { backgroundColor: '#4488ff22' }]}><Ionicons name="snow-outline" size={16} color="#4488ff" /></View><View style={styles.scheduleCopy}><Text style={[styles.safetyNetTitle, { color: '#4488ff' }]}>Safety net · {freezeTokens} available</Text><Text style={[styles.safetyNetBody, { color: colors.mutedForeground }]}>{freezeRecoveryRemaining} real completed day{freezeRecoveryRemaining === 1 ? '' : 's'} to restore one.</Text></View></View>}
 
         {/* Frozen today indicator */}
         {frozen && !done && (
