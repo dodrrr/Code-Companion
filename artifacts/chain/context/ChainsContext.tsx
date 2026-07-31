@@ -12,6 +12,7 @@ export interface Chain {
   frozenDates: string[];
   freezeCredits: number; // a small safety net, capped at 2
   freezeRecoveryProgress: number; // real completed days since the last freeze use
+  freezeSystemVersion: number;
   restDays: number[]; // 0 (Sunday) through 6 (Saturday)
   cadence: 'daily' | 'weekly';
   weeklyTarget: number;
@@ -106,6 +107,16 @@ function normalizeChain(value: unknown): Chain | null {
     (date) => !completedDates.includes(date) && !minimumDates.includes(date),
   );
 
+  // The first Safety net release started legacy chains with one credit. New
+  // chains start with two, so upgrade untouched legacy chains once on load.
+  const storedFreezeCredits = typeof raw.freezeCredits === 'number' && Number.isInteger(raw.freezeCredits)
+    ? Math.max(0, Math.min(2, raw.freezeCredits))
+    : null;
+  const isLegacyFreezeSystem = raw.freezeSystemVersion !== 2;
+  const freezeCredits = isLegacyFreezeSystem && (storedFreezeCredits === null || (storedFreezeCredits === 1 && frozenDates.length === 0))
+    ? 2
+    : storedFreezeCredits ?? 2;
+
   return {
     id: raw.id,
     name: raw.name.trim(),
@@ -115,8 +126,9 @@ function normalizeChain(value: unknown): Chain | null {
     minimumDates,
     minimumLabel: typeof raw.minimumLabel === 'string' && raw.minimumLabel.trim() ? raw.minimumLabel.trim().slice(0, 48) : 'A small version',
     frozenDates,
-    freezeCredits: typeof raw.freezeCredits === 'number' && Number.isInteger(raw.freezeCredits) ? Math.max(0, Math.min(2, raw.freezeCredits)) : 1,
+    freezeCredits,
     freezeRecoveryProgress: typeof raw.freezeRecoveryProgress === 'number' && Number.isInteger(raw.freezeRecoveryProgress) ? Math.max(0, Math.min(13, raw.freezeRecoveryProgress)) : 0,
+    freezeSystemVersion: 2,
     restDays: normalizeRestDays(raw.restDays),
     cadence: raw.cadence === 'weekly' ? 'weekly' : 'daily',
     weeklyTarget: normalizeWeeklyTarget(raw.weeklyTarget),
@@ -230,8 +242,9 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
       minimumDates: [],
       minimumLabel: 'A small version',
       frozenDates: [],
-      freezeCredits: 1,
+      freezeCredits: 2,
       freezeRecoveryProgress: 0,
+      freezeSystemVersion: 2,
       restDays: [],
       cadence: options?.cadence === 'weekly' ? 'weekly' : 'daily',
       weeklyTarget: normalizeWeeklyTarget(options?.weeklyTarget),
