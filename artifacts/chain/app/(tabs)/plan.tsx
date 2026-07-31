@@ -321,7 +321,8 @@ export default function PlanScreen() {
             {chains.map((chain, index) => {
               const done = chain.completedDates.includes(today);
               const minimum = chain.minimumDates.includes(today);
-              return <ChainReflection key={chain.id} chain={chain} done={done} minimum={minimum} resting={isRestDay(chain, today)} isLast={index === chains.length - 1} />;
+              const frozen = chain.frozenDates.includes(today);
+              return <ChainReflection key={chain.id} chain={chain} done={done} minimum={minimum} frozen={frozen} resting={isRestDay(chain, today)} isLast={index === chains.length - 1} />;
             })}
           </View>
         )}</>}
@@ -485,13 +486,13 @@ export default function PlanScreen() {
   );
 }
 
-function ChainReflection({ chain, done, minimum, resting, isLast }: { chain: Chain; done: boolean; minimum: boolean; resting: boolean; isLast: boolean }) {
+function ChainReflection({ chain, done, minimum, frozen, resting, isLast }: { chain: Chain; done: boolean; minimum: boolean; frozen: boolean; resting: boolean; isLast: boolean }) {
   const colors = useColors();
   return <View>
     <View style={styles.reflectRow}>
       <View style={[styles.reflectDot, { backgroundColor: chain.color }]} />
       <Text style={[styles.reflectName, { color: colors.foreground }]} numberOfLines={1}>{chain.name}</Text>
-      {done ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '20' }]}><Ionicons name="checkmark" size={12} color={chain.color} /><Text style={[styles.doneBadgeText, { color: chain.color }]}>done today</Text></View> : minimum ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '14' }]}><Ionicons name="leaf-outline" size={12} color={chain.color} /><Text style={[styles.doneBadgeText, { color: chain.color }]}>minimum kept</Text></View> : resting ? <View style={[styles.doneBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="moon-outline" size={12} color={colors.mutedForeground} /><Text style={[styles.doneBadgeText, { color: colors.mutedForeground }]}>rest day</Text></View> : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>pending</Text>}
+      {done ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '20' }]}><Ionicons name="checkmark" size={12} color={chain.color} /><Text style={[styles.doneBadgeText, { color: chain.color }]}>done today</Text></View> : minimum ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '14' }]}><Ionicons name="leaf-outline" size={12} color={chain.color} /><Text style={[styles.doneBadgeText, { color: chain.color }]}>minimum kept</Text></View> : frozen ? <View style={[styles.doneBadge, { backgroundColor: '#4488ff20' }]}><Ionicons name="snow" size={12} color="#4488ff" /><Text style={[styles.doneBadgeText, { color: '#4488ff' }]}>frozen today</Text></View> : resting ? <View style={[styles.doneBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="moon-outline" size={12} color={colors.mutedForeground} /><Text style={[styles.doneBadgeText, { color: colors.mutedForeground }]}>rest day</Text></View> : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>pending</Text>}
     </View>
     {!isLast && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
   </View>;
