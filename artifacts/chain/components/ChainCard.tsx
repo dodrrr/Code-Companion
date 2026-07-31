@@ -35,7 +35,6 @@ export default function ChainCard({ chain }: Props) {
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
   const compactStreak = streak >= 100;
 
-  const cardScale  = useSharedValue(1);
   const checkScale = useSharedValue(1);
 
   // Milestone celebration
@@ -58,10 +57,6 @@ export default function ChainCard({ chain }: Props) {
     prevWeeklyProgressRef.current = weeklyProgress;
   }, [chain.cadence, chain.weeklyTarget, weeklyProgress]);
 
-  const cardStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: cardScale.value }],
-  }));
-
   const checkStyle = useAnimatedStyle(() => ({
     transform: [{ scale: checkScale.value }],
   }));
@@ -71,18 +66,14 @@ export default function ChainCard({ chain }: Props) {
     if (!done) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       checkScale.value = withSequence(
-        withSpring(1.35, { damping: 3, stiffness: 500 }),
-        withSpring(1, { damping: 8, stiffness: 300 }),
-      );
-      cardScale.value = withSequence(
-        withTiming(0.97, { duration: 60 }),
-        withSpring(1, { damping: 6, stiffness: 300 }),
+        withTiming(1.14, { duration: 115 }),
+        withSpring(1, { damping: 15, stiffness: 260 }),
       );
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
     toggleToday(chain.id);
-  }, [done, chain.id, restingToday, toggleToday, checkScale, cardScale]);
+  }, [done, chain.id, restingToday, toggleToday, checkScale]);
 
   const handleCardPress = useCallback(() => {
     router.push({ pathname: '/chain/[id]', params: { id: chain.id } });
@@ -98,7 +89,6 @@ export default function ChainCard({ chain }: Props) {
           style={[
             styles.card,
             { backgroundColor: colors.card, borderColor: colors.border },
-            cardStyle,
           ]}
         >
           {/* Color accent stripe */}
@@ -125,7 +115,7 @@ export default function ChainCard({ chain }: Props) {
                     {chain.cadence === 'weekly' ? (streak === 1 ? 'week' : 'weeks') : streak === 1 ? 'day' : 'days'}
                   </Text>
                 </View>
-                <View style={chain.cadence === 'weekly' && styles.weeklyCheckBlock}>
+                <View style={chain.cadence === 'weekly' ? styles.weeklyCheckBlock : undefined}>
                   <Pressable onPress={handleCheck} disabled={restingToday} hitSlop={14}>
                     <Animated.View style={checkStyle}>
                       <View
@@ -230,11 +220,14 @@ const styles = StyleSheet.create({
   weeklyCheckBlock: {
     alignItems: 'center',
     gap: 4,
+    width: 42,
   },
   weeklyProgress: {
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.4,
+    minHeight: 14,
+    textAlign: 'center',
   },
   extraShade: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000088', padding: 28 },
   extraCard: { width: '100%', maxWidth: 330, alignItems: 'center', borderRadius: 25, borderWidth: 1, padding: 28 },
