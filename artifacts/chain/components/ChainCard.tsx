@@ -131,7 +131,13 @@ export default function ChainCard({ chain }: Props) {
                       </View>
                     </Animated.View>
                   </Pressable>
-                  {chain.cadence === 'weekly' && <Text style={[styles.weeklyProgress, { color: chain.color }]}>{weeklyProgress}/{chain.weeklyTarget}{weeklyProgress > chain.weeklyTarget ? ` · +${weeklyProgress - chain.weeklyTarget}` : ''}</Text>}
+                  {chain.cadence === 'weekly' && (
+                    <Text numberOfLines={1} style={[styles.weeklyProgress, { color: chain.color }]}>
+                      {weeklyProgress > chain.weeklyTarget
+                        ? `+${weeklyProgress - chain.weeklyTarget} extra`
+                        : `${weeklyProgress}/${chain.weeklyTarget}`}
+                    </Text>
+                  )}
                 </View>
               </View>
             </View>
@@ -220,12 +226,12 @@ const styles = StyleSheet.create({
   weeklyCheckBlock: {
     alignItems: 'center',
     gap: 4,
-    width: 42,
+    width: 54,
   },
   weeklyProgress: {
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: 'Inter_700Bold',
-    letterSpacing: 0.4,
+    letterSpacing: 0,
     minHeight: 14,
     textAlign: 'center',
   },
