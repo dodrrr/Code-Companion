@@ -261,14 +261,14 @@ export default function GateScreen() {
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
-        <View style={{ flex: 1 }}>
+        <View style={styles.switcherColumn}>
           <View style={[styles.gateSwitcher, { backgroundColor: colors.card, borderColor: colors.border }]}>
             {pauseSegmentWidth > 0 && windowsSegmentWidth > 0 && <Animated.View pointerEvents="none" style={[styles.gateSwitcherPill, { width: pageProgress.interpolate({ inputRange: [0, 1], outputRange: [pauseSegmentWidth, windowsSegmentWidth] }), backgroundColor: colors.primary + '28', borderColor: colors.primary + '45', transform: [{ translateX: pageProgress.interpolate({ inputRange: [0, 1], outputRange: [0, pauseSegmentWidth + 3] }) }, { scaleX: pageProgress.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.025, 1] }) }] }]} />}
             <Pressable onLayout={(event) => setPauseSegmentWidth(event.nativeEvent.layout.width)} onPress={() => showPage(0)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 0 ? colors.foreground : colors.mutedForeground }]}>Pause Gate</Text></Pressable>
             <Pressable onLayout={(event) => setWindowsSegmentWidth(event.nativeEvent.layout.width)} onPress={() => showPage(1)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
           </View>
           <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
-            {activePage === 0 ? `${enabledCount} app${enabledCount !== 1 ? 's' : ''} protected · ${saveEvents.length} pauses chosen` : windowCount ? `${windowCount} scheduled guardrail${windowCount === 1 ? '' : 's'}` : 'Give important hours their own guardrail.'}
+            {activePage === 0 ? `${enabledCount} app${enabledCount !== 1 ? 's' : ''} protected · ${saveEvents.length} pauses chosen` : windowCount ? `${windowCount} protection window${windowCount === 1 ? '' : 's'} saved` : 'Give important hours their own guardrail.'}
           </Text>
         </View>
         <View style={styles.headerRight}>
@@ -457,9 +457,10 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontFamily: 'Inter_700Bold',
   },
-  gateSwitcher: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', padding: 4, borderWidth: 1, borderRadius: 20, gap: 3, position: 'relative', overflow: 'hidden' },
+  switcherColumn: { flex: 1, minWidth: 0 },
+  gateSwitcher: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', padding: 4, borderWidth: 1, borderRadius: 20, gap: 3, position: 'relative', overflow: 'hidden' },
   gateSwitcherPill: { position: 'absolute', left: 4, top: 4, bottom: 4, borderRadius: 15, borderWidth: 1, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
-  gateSegment: { borderRadius: 15, paddingHorizontal: 12, paddingVertical: 7, zIndex: 1 },
+  gateSegment: { flex: 1, alignItems: 'center', borderRadius: 15, paddingHorizontal: 4, paddingVertical: 7, zIndex: 1 },
   headerSub: {
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
