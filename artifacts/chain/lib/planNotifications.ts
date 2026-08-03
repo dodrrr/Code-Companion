@@ -20,6 +20,7 @@ export type PlanNotificationPermission = 'granted' | 'undetermined' | 'denied' |
 export const PLAN_TASK_CATEGORY = 'chain_task_actions';
 export const PLAN_TASK_DONE_ACTION = 'chain_task_done';
 export const PLAN_TASK_SNOOZE_ACTION = 'chain_task_snooze';
+export const PLAN_TASK_OPEN_ACTION = 'chain_task_open';
 
 export async function configurePlanNotificationActions() {
   if (Platform.OS === 'web') return;
@@ -28,6 +29,7 @@ export async function configurePlanNotificationActions() {
     [
       { identifier: PLAN_TASK_DONE_ACTION, buttonTitle: 'Done', options: { opensAppToForeground: true } },
       { identifier: PLAN_TASK_SNOOZE_ACTION, buttonTitle: 'Remind in 15 min', options: { opensAppToForeground: true } },
+      { identifier: PLAN_TASK_OPEN_ACTION, buttonTitle: 'Open plan', options: { opensAppToForeground: true } },
     ],
   );
 }
@@ -70,8 +72,12 @@ export async function schedulePlanReminder(item: PlanItem, minutesBefore: number
   await configurePlanNotificationActions();
   const notificationId = await Notifications.scheduleNotificationAsync({
     content: {
-      title: item.text,
-      body: `Starting in ${minutesBefore} minutes.`,
+      title: item.isPriority ? 'Your one thing is up next' : `Up next · ${item.text}`,
+      body: item.isPriority
+        ? `Starts in ${minutesBefore} min. Protect some space for what matters most.`
+        : item.chainId
+          ? `Starts in ${minutesBefore} min. One small step protects your chain.`
+          : `Starts in ${minutesBefore} min. Leave a little room for it.`,
       sound: 'default',
       categoryIdentifier: PLAN_TASK_CATEGORY,
       data: { planItemId: item.id, planDate: item.planDate },
@@ -89,7 +95,7 @@ export async function schedulePlanSnooze(item: PlanItem, minutes = 15): Promise<
   const notificationId = await Notifications.scheduleNotificationAsync({
     content: {
       title: item.text,
-      body: `A gentle reminder for right now.`,
+      body: 'You gave yourself 15 more minutes. Come back gently.',
       sound: 'default',
       categoryIdentifier: PLAN_TASK_CATEGORY,
       data: { planItemId: item.id, planDate: item.planDate },
@@ -109,7 +115,7 @@ export async function scheduleMorningBriefing(hour: number): Promise<ReminderRes
   if (Platform.OS === 'web') return { status: 'unavailable' };
   if (await getPlanNotificationPermission() !== 'granted') return { status: 'denied' };
   const notificationId = await Notifications.scheduleNotificationAsync({
-    content: { title: 'Your day is ready', body: 'Open Chain for your plan, focus blocks and one thing.', sound: 'default', data: { openPlan: true } },
+    content: { title: 'Good morning — your day is ready', body: 'Open Chain, protect your one thing, then start gently.', sound: 'default', data: { openPlan: true } },
     trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute: 0 },
   });
   return { status: 'scheduled', notificationId };
