@@ -16,12 +16,10 @@ export interface PlanItem {
   repeatDays?: number[];
   repeatSourceId?: string;
   durationMinutes?: number;
-  endAlert?: boolean;
-  endNotificationId?: string;
   completedAt?: string;
 }
 
-type PlanItemOptions = Pick<PlanItem, 'text' | 'timeSlot' | 'chainId' | 'color' | 'reminderMinutes' | 'isPriority' | 'repeatDays' | 'durationMinutes' | 'endAlert'>;
+type PlanItemOptions = Pick<PlanItem, 'text' | 'timeSlot' | 'chainId' | 'color' | 'reminderMinutes' | 'isPriority' | 'repeatDays' | 'durationMinutes'>;
 
 interface PlanContextValue {
   items: PlanItem[];
@@ -37,7 +35,6 @@ interface PlanContextValue {
   addItem: (options: PlanItemOptions) => PlanItem;
   updateItem: (id: string, options: PlanItemOptions) => PlanItem | undefined;
   updateReminderMetadata: (id: string, reminderMinutes?: number, notificationId?: string) => void;
-  updateEndAlertMetadata: (id: string, endAlert?: boolean, endNotificationId?: string) => void;
   completeItemForDate: (id: string, date: string) => Promise<PlanItem | undefined>;
   completeFocusItem: (id: string, actualMinutes: number) => Promise<PlanItem | undefined>;
   updateReminderForDate: (id: string, date: string, reminderMinutes?: number, notificationId?: string) => Promise<void>;
@@ -93,8 +90,6 @@ function normalizeItems(raw: string | null, fallbackDate: string): PlanItem[] {
         repeatDays: Array.isArray(item.repeatDays) ? item.repeatDays.filter((day): day is number => typeof day === 'number' && day >= 0 && day <= 6) : undefined,
         repeatSourceId: typeof item.repeatSourceId === 'string' ? item.repeatSourceId : undefined,
         durationMinutes: typeof item.durationMinutes === 'number' && item.durationMinutes > 0 ? item.durationMinutes : undefined,
-        endAlert: item.endAlert === true,
-        endNotificationId: typeof item.endNotificationId === 'string' ? item.endNotificationId : undefined,
         completedAt: typeof item.completedAt === 'string' ? item.completedAt : undefined,
       }];
     });
@@ -205,7 +200,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const tomorrowDay = new Date(`${date}T12:00:00`).getDay();
     const repeated = todayItems
       .filter((item) => item.repeatDays?.includes(tomorrowDay) && !nextItems.some((next) => next.repeatSourceId === (item.repeatSourceId || item.id)))
-      .map((item) => ({ ...item, id: `${Date.now()}${Math.random().toString(36).substring(2, 8)}`, completed: false, completedAt: undefined, planDate: date, notificationId: undefined, endNotificationId: undefined, isPriority: false, repeatSourceId: item.repeatSourceId || item.id }));
+      .map((item) => ({ ...item, id: `${Date.now()}${Math.random().toString(36).substring(2, 8)}`, completed: false, completedAt: undefined, planDate: date, notificationId: undefined, isPriority: false, repeatSourceId: item.repeatSourceId || item.id }));
     const resolved = [...nextItems, ...repeated];
     if (repeated.length) await AsyncStorage.setItem(KEY_PREFIX + date, JSON.stringify(resolved));
     setActiveDate(date);
@@ -266,7 +261,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       isPriority: options.isPriority === true,
       repeatDays: options.repeatDays?.length ? options.repeatDays : undefined,
       durationMinutes: options.durationMinutes,
-      endAlert: options.endAlert === true,
     };
     persist([...items.map((entry) => options.isPriority ? { ...entry, isPriority: false } : entry), item]);
     return item;
@@ -275,7 +269,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   function updateItem(id: string, options: PlanItemOptions) {
     const existing = items.find((item) => item.id === id);
     if (!existing) return undefined;
-    const updated: PlanItem = { ...existing, ...options, text: options.text.trim(), notificationId: undefined, endNotificationId: undefined, repeatDays: options.repeatDays?.length ? options.repeatDays : undefined };
+    const updated: PlanItem = { ...existing, ...options, text: options.text.trim(), notificationId: undefined, repeatDays: options.repeatDays?.length ? options.repeatDays : undefined };
     persist(items.map((item) => item.id === id ? updated : options.isPriority ? { ...item, isPriority: false } : item));
     return updated;
   }
@@ -283,14 +277,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   function updateReminderMetadata(id: string, reminderMinutes?: number, notificationId?: string) {
     setItems((previous) => {
       const next = previous.map((item) => item.id === id ? { ...item, reminderMinutes, notificationId } : item);
-      void AsyncStorage.setItem(KEY_PREFIX + activeDate, JSON.stringify(next));
-      return next;
-    });
-  }
-
-  function updateEndAlertMetadata(id: string, endAlert?: boolean, endNotificationId?: string) {
-    setItems((previous) => {
-      const next = previous.map((item) => item.id === id ? { ...item, endAlert, endNotificationId } : item);
       void AsyncStorage.setItem(KEY_PREFIX + activeDate, JSON.stringify(next));
       return next;
     });
@@ -342,7 +328,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       planDate: tomorrow,
       reminderMinutes: undefined,
       notificationId: undefined,
-      endNotificationId: undefined,
       completedAt: undefined,
     };
     const remaining = items.filter((entry) => entry.id !== id);
@@ -367,7 +352,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       completed: false,
       planDate: tomorrow,
       notificationId: undefined,
-      endNotificationId: undefined,
       completedAt: undefined,
       isPriority: false,
     };
@@ -392,7 +376,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     if (target && completedAt) recordFocus({ ...target, completed: true, completedAt }, completedAt);
   }
 
-  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, updateEndAlertMetadata, completeItemForDate, completeFocusItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys]);
+  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, completeFocusItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys]);
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 
