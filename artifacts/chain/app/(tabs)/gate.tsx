@@ -173,7 +173,8 @@ export default function GateScreen() {
   const [tutorialChecked, setTutorialChecked]  = useState(false);
   const [windowCount, setWindowCount] = useState(0);
   const [activePage, setActivePage] = useState(0);
-  const [switcherWidth, setSwitcherWidth] = useState(0);
+  const [pauseSegmentWidth, setPauseSegmentWidth] = useState(0);
+  const [windowsSegmentWidth, setWindowsSegmentWidth] = useState(0);
   const pagerRef = useRef<ScrollView>(null);
   const pageProgress = useRef(new Animated.Value(0)).current;
 
@@ -244,8 +245,6 @@ export default function GateScreen() {
     pagerRef.current?.scrollTo({ x: page * pageWidth, animated: true });
   };
 
-  const switcherPillWidth = Math.max(0, (switcherWidth - 11) / 2);
-
   function removeProtection(app: AppEntry) {
     Alert.alert('Remove protection?', `${app.name} will no longer appear in your Pause Gate.`, [
       { text: 'Cancel', style: 'cancel' },
@@ -263,10 +262,10 @@ export default function GateScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
         <View style={{ flex: 1 }}>
-          <View onLayout={(event) => setSwitcherWidth(event.nativeEvent.layout.width)} style={[styles.gateSwitcher, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Animated.View pointerEvents="none" style={[styles.gateSwitcherPill, { width: switcherPillWidth, backgroundColor: colors.primary + '28', borderColor: colors.primary + '45', transform: [{ translateX: pageProgress.interpolate({ inputRange: [0, 1], outputRange: [0, switcherPillWidth + 3] }) }, { scaleX: pageProgress.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.035, 1] }) }] }]} />
-            <Pressable onPress={() => showPage(0)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 0 ? colors.foreground : colors.mutedForeground }]}>Pause Gate</Text></Pressable>
-            <Pressable onPress={() => showPage(1)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
+          <View style={[styles.gateSwitcher, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            {pauseSegmentWidth > 0 && windowsSegmentWidth > 0 && <Animated.View pointerEvents="none" style={[styles.gateSwitcherPill, { width: pageProgress.interpolate({ inputRange: [0, 1], outputRange: [pauseSegmentWidth, windowsSegmentWidth] }), backgroundColor: colors.primary + '28', borderColor: colors.primary + '45', transform: [{ translateX: pageProgress.interpolate({ inputRange: [0, 1], outputRange: [0, pauseSegmentWidth + 3] }) }, { scaleX: pageProgress.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.025, 1] }) }] }]} />}
+            <Pressable onLayout={(event) => setPauseSegmentWidth(event.nativeEvent.layout.width)} onPress={() => showPage(0)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 0 ? colors.foreground : colors.mutedForeground }]}>Pause Gate</Text></Pressable>
+            <Pressable onLayout={(event) => setWindowsSegmentWidth(event.nativeEvent.layout.width)} onPress={() => showPage(1)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
           </View>
           <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
             {activePage === 0 ? `${enabledCount} app${enabledCount !== 1 ? 's' : ''} protected · ${saveEvents.length} pauses chosen` : windowCount ? `${windowCount} scheduled guardrail${windowCount === 1 ? '' : 's'}` : 'Give important hours their own guardrail.'}
