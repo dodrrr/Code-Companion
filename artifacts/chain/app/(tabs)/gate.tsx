@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Animated,
   Alert,
   Modal,
   Platform,
@@ -172,7 +173,9 @@ export default function GateScreen() {
   const [tutorialChecked, setTutorialChecked]  = useState(false);
   const [windowCount, setWindowCount] = useState(0);
   const [activePage, setActivePage] = useState(0);
+  const [switcherWidth, setSwitcherWidth] = useState(0);
   const pagerRef = useRef<ScrollView>(null);
+  const pageProgress = useRef(new Animated.Value(0)).current;
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
@@ -237,8 +240,11 @@ export default function GateScreen() {
   const availableApps = APPS.filter((app) => !enabled[app.id]);
   const savesForApp = (id: string) => saveEvents.filter((event) => event.appId === id).length;
   const showPage = (page: 0 | 1) => {
+    setActivePage(page);
     pagerRef.current?.scrollTo({ x: page * pageWidth, animated: true });
   };
+
+  const switcherPillWidth = Math.max(0, (switcherWidth - 11) / 2);
 
   function removeProtection(app: AppEntry) {
     Alert.alert('Remove protection?', `${app.name} will no longer appear in your Pause Gate.`, [
@@ -257,9 +263,10 @@ export default function GateScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
         <View style={{ flex: 1 }}>
-          <View style={[styles.gateSwitcher, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Pressable onPress={() => showPage(0)} style={({ pressed }) => [styles.gateSegment, activePage === 0 && { backgroundColor: colors.primary + '24' }, { opacity: pressed ? 0.78 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 0 ? colors.foreground : colors.mutedForeground }]}>Pause Gate</Text></Pressable>
-            <Pressable onPress={() => showPage(1)} style={({ pressed }) => [styles.gateSegment, activePage === 1 && { backgroundColor: colors.primary + '24' }, { opacity: pressed ? 0.78 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
+          <View onLayout={(event) => setSwitcherWidth(event.nativeEvent.layout.width)} style={[styles.gateSwitcher, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Animated.View pointerEvents="none" style={[styles.gateSwitcherPill, { width: switcherPillWidth, backgroundColor: colors.primary + '28', borderColor: colors.primary + '45', transform: [{ translateX: pageProgress.interpolate({ inputRange: [0, 1], outputRange: [0, switcherPillWidth + 3] }) }, { scaleX: pageProgress.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.035, 1] }) }] }]} />
+            <Pressable onPress={() => showPage(0)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 0 ? colors.foreground : colors.mutedForeground }]}>Pause Gate</Text></Pressable>
+            <Pressable onPress={() => showPage(1)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
           </View>
           <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
             {activePage === 0 ? `${enabledCount} app${enabledCount !== 1 ? 's' : ''} protected · ${saveEvents.length} pauses chosen` : windowCount ? `${windowCount} scheduled guardrail${windowCount === 1 ? '' : 's'}` : 'Give important hours their own guardrail.'}
@@ -284,7 +291,9 @@ export default function GateScreen() {
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
         onScroll={(event) => {
-          const nextPage = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
+          const progress = Math.max(0, Math.min(1, event.nativeEvent.contentOffset.x / pageWidth));
+          pageProgress.setValue(progress);
+          const nextPage = Math.round(progress);
           if (nextPage !== activePage) setActivePage(nextPage);
         }}
       >
@@ -449,8 +458,9 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontFamily: 'Inter_700Bold',
   },
-  gateSwitcher: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', padding: 4, borderWidth: 1, borderRadius: 20, gap: 3 },
-  gateSegment: { borderRadius: 15, paddingHorizontal: 12, paddingVertical: 7 },
+  gateSwitcher: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', padding: 4, borderWidth: 1, borderRadius: 20, gap: 3, position: 'relative', overflow: 'hidden' },
+  gateSwitcherPill: { position: 'absolute', left: 4, top: 4, bottom: 4, borderRadius: 15, borderWidth: 1, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  gateSegment: { borderRadius: 15, paddingHorizontal: 12, paddingVertical: 7, zIndex: 1 },
   headerSub: {
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
