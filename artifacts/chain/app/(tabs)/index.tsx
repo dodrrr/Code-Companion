@@ -123,20 +123,15 @@ export default function TodayScreen() {
             {formatDate()}
           </Text>
         </View>
-        {chains.length < 5 && (
-          <Pressable
-            onPress={() => router.push('/chain/new')}
-            style={({ pressed }) => [
-              styles.addBtn,
-              {
-                backgroundColor: colors.primary,
-                transform: [{ scale: pressed ? 0.94 : 1 }],
-              },
-            ]}
-          >
-            <Ionicons name="add" size={24} color="#fff" />
+        <View style={styles.headerActions}>
+          <Pressable onPress={() => router.push('/settings')} style={[styles.settingsBtn, { borderColor: colors.border }]} hitSlop={8}>
+            <Ionicons name="settings-outline" size={19} color={colors.mutedForeground} />
           </Pressable>
-        )}
+          {chains.length < 5 && <Pressable
+            onPress={() => router.push('/chain/new')}
+            style={({ pressed }) => [styles.addBtn, { backgroundColor: colors.primary, transform: [{ scale: pressed ? 0.94 : 1 }] }]}
+          ><Ionicons name="add" size={24} color="#fff" /></Pressable>}
+        </View>
       </View>
 
       {/* Chain list or empty state */}
@@ -231,6 +226,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  settingsBtn: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   list: {
     paddingHorizontal: 20,
     paddingTop: 4,
