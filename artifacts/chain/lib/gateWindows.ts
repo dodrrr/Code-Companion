@@ -9,6 +9,8 @@ export type GateWindow = {
   endMinute: number;
   days: number[];
   appIds: string[];
+  mode?: 'scheduled' | 'onDemand';
+  onDemandDurationMinutes?: number;
   /** A same-day manual override. It lets a saved window be used outside its schedule. */
   manualActive?: boolean;
   manualDate?: string;
@@ -32,6 +34,8 @@ function normalize(value: unknown): GateWindow | undefined {
     endMinute: typeof window.endMinute === 'number' ? Math.max(0, Math.min(59, window.endMinute)) : 0,
     days: Array.isArray(window.days) ? window.days.filter((day): day is number => typeof day === 'number' && day >= 0 && day <= 6) : [],
     appIds: Array.isArray(window.appIds) ? window.appIds.filter((id): id is string => typeof id === 'string') : [],
+    mode: window.mode === 'onDemand' ? 'onDemand' : 'scheduled',
+    onDemandDurationMinutes: typeof window.onDemandDurationMinutes === 'number' ? Math.max(5, Math.min(360, Math.round(window.onDemandDurationMinutes))) : 60,
     manualActive: typeof window.manualActive === 'boolean' ? window.manualActive : undefined,
     manualDate: typeof window.manualDate === 'string' ? window.manualDate : undefined,
     manualActivatedAt: typeof window.manualActivatedAt === 'number' ? window.manualActivatedAt : undefined,
@@ -64,6 +68,7 @@ export function formatGateHour(hour: number, minute = 0) {
 }
 
 export function gateWindowSchedule(window: GateWindow) {
+  if (window.mode === 'onDemand') return `On demand · ${formatGateWindowMinutes(window.onDemandDurationMinutes ?? 60)}`;
   return `${formatGateHour(window.startHour, window.startMinute)}–${formatGateHour(window.endHour, window.endMinute)}`;
 }
 
@@ -75,49 +80,60 @@ export const gateDateKey = (date = new Date()) => {
 };
 
 export const gateWindowDurationMinutes = (window: GateWindow) => Math.max(0, (window.endHour * 60 + window.endMinute) - (window.startHour * 60 + window.startMinute));
+export const formatGateWindowMinutes = (minutes: number) => minutes >= 60 ? `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}` : `${minutes}m`;
 
 export type GateWindowStatus = {
   active: boolean;
   manual: boolean;
   scheduledToday: boolean;
+  skippedToday: boolean;
   completedToday: boolean;
   remainingMinutes: number;
   protectedMinutesToday: number;
 };
 
 export function getGateWindowStatus(window: GateWindow, date = new Date()): GateWindowStatus {
-  const duration = gateWindowDurationMinutes(window);
+  const onDemand = window.mode === 'onDemand';
+  const duration = onDemand ? window.onDemandDurationMinutes ?? 60 : gateWindowDurationMinutes(window);
   const dayKey = gateDateKey(date);
   const nowMinutes = date.getHours() * 60 + date.getMinutes();
   const start = window.startHour * 60 + window.startMinute;
   const end = window.endHour * 60 + window.endMinute;
-  const scheduledToday = window.days.includes(date.getDay());
+  const scheduledToday = !onDemand && window.days.includes(date.getDay());
   const hasManualOverride = window.manualDate === dayKey;
 
+  if (onDemand && !hasManualOverride) return { active: false, manual: false, scheduledToday: false, skippedToday: false, completedToday: false, remainingMinutes: 0, protectedMinutesToday: 0 };
+
   if (hasManualOverride) {
-    if (!window.manualActive) return { active: false, manual: true, scheduledToday, completedToday: false, remainingMinutes: 0, protectedMinutesToday: 0 };
+    if (!window.manualActive) return { active: false, manual: onDemand, scheduledToday, skippedToday: !onDemand, completedToday: false, remainingMinutes: 0, protectedMinutesToday: 0 };
     const activatedAt = window.manualActivatedAt ?? date.getTime();
     const elapsed = Math.max(0, Math.floor((date.getTime() - activatedAt) / 60000));
     const protectedMinutesToday = Math.min(duration, elapsed);
     const active = elapsed < duration;
-    return { active, manual: true, scheduledToday, completedToday: !active && duration > 0, remainingMinutes: active ? Math.max(1, duration - elapsed) : 0, protectedMinutesToday };
+    return { active, manual: true, scheduledToday, skippedToday: false, completedToday: !active && duration > 0, remainingMinutes: active ? Math.max(1, duration - elapsed) : 0, protectedMinutesToday };
   }
 
   const active = scheduledToday && nowMinutes >= start && nowMinutes < end;
   const completedToday = scheduledToday && nowMinutes >= end;
   const protectedMinutesToday = !scheduledToday || nowMinutes < start ? 0 : completedToday ? duration : Math.max(0, nowMinutes - start);
-  return { active, manual: false, scheduledToday, completedToday, remainingMinutes: active ? Math.max(1, end - nowMinutes) : 0, protectedMinutesToday };
+  return { active, manual: false, scheduledToday, skippedToday: false, completedToday, remainingMinutes: active ? Math.max(1, end - nowMinutes) : 0, protectedMinutesToday };
 }
 
-export function toggleGateWindowManual(window: GateWindow, date = new Date()): GateWindow {
-  const status = getGateWindowStatus(window, date);
-  const nextActive = !status.active;
+export function toggleGateWindowSkipToday(window: GateWindow, date = new Date()): GateWindow {
+  const skipped = window.manualDate === gateDateKey(date) && window.manualActive === false;
+  if (skipped) {
+    return { ...window, manualActive: undefined, manualDate: undefined, manualActivatedAt: undefined };
+  }
   return {
     ...window,
-    manualActive: nextActive,
+    manualActive: false,
     manualDate: gateDateKey(date),
-    manualActivatedAt: nextActive ? date.getTime() : undefined,
+    manualActivatedAt: undefined,
   };
+}
+
+export function startGateWindowOnDemand(window: GateWindow, date = new Date()): GateWindow {
+  return { ...window, manualActive: true, manualDate: gateDateKey(date), manualActivatedAt: date.getTime() };
 }
 
 /** Persist a conservative local log of scheduled/manual protection while Chain is able to observe it. */
