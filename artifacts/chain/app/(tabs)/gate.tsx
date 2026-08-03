@@ -55,14 +55,19 @@ const TUTORIAL_STEPS = [
     body: 'Chain adds a moment of friction before you open apps you have flagged. You see your streak, you see your progress — and you decide if it is worth breaking.',
   },
   {
-    icon: 'toggle' as const,
-    title: 'Toggle to protect',
-    body: 'Flip the switch next to any app to mark it as protected. When you open that app, Chain will surface your streak first.',
+    icon: 'apps-outline' as const,
+    title: 'Choose what deserves friction',
+    body: 'Add only the apps where you want a pause. Choose every opening or a daily limit for each one.',
   },
   {
-    icon: 'phone-portrait-outline' as const,
-    title: 'For hard limits, use Screen Time',
-    body: 'Chain shows you a reminder — it cannot technically block apps on its own. For genuine blocking, go to Settings → Screen Time → App Limits on iOS. Chain works best alongside it.',
+    icon: 'flash-outline' as const,
+    title: 'Connect it with Shortcuts',
+    body: 'Open Shortcuts → Automation → + → App. Pick an app, choose “Is Opened”, then select “Run Immediately”. Make one automation for each app you protect.',
+  },
+  {
+    icon: 'link-outline' as const,
+    title: 'Open Chain on every trigger',
+    body: 'In that automation, add the Open URL action and use chain://pause-gate-demo. It opens Chain’s pause; pair it with Screen Time if you also want an iOS system limit.',
   },
 ];
 
@@ -137,7 +142,7 @@ function GateRuleModal({ app, initialRule, onSave, onClose }: { app: AppEntry; i
     <Pressable onPress={() => setRule((current) => ({ ...current, mode: 'every_open' }))} style={[ruleStyles.mode, { backgroundColor: rule.mode === 'every_open' ? colors.primary + '16' : colors.background, borderColor: rule.mode === 'every_open' ? colors.primary : colors.border }]}><View style={[ruleStyles.modeIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="shield-outline" size={19} color={colors.primary} /></View><View style={ruleStyles.modeCopy}><Text style={[ruleStyles.modeTitle, { color: colors.foreground }]}>Every opening</Text><Text style={[ruleStyles.modeBody, { color: colors.mutedForeground }]}>Show a pause before every open.</Text></View>{rule.mode === 'every_open' && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}</Pressable>
     <Pressable onPress={() => setRule((current) => ({ ...current, mode: 'daily_limit' }))} style={[ruleStyles.mode, { backgroundColor: rule.mode === 'daily_limit' ? colors.primary + '16' : colors.background, borderColor: rule.mode === 'daily_limit' ? colors.primary : colors.border }]}><View style={[ruleStyles.modeIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="timer-outline" size={19} color={colors.primary} /></View><View style={ruleStyles.modeCopy}><Text style={[ruleStyles.modeTitle, { color: colors.foreground }]}>Daily limit</Text><Text style={[ruleStyles.modeBody, { color: colors.mutedForeground }]}>Pause once you reach your chosen time.</Text></View>{rule.mode === 'daily_limit' && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}</Pressable>
     {rule.mode === 'daily_limit' && <><Text style={[ruleStyles.limitLabel, { color: colors.mutedForeground }]}>DAILY TIME</Text><View style={ruleStyles.limitRow}>{DAILY_LIMIT_OPTIONS.map((minutes) => <Pressable key={minutes} onPress={() => setRule((current) => ({ ...current, dailyLimitMinutes: minutes }))} style={[ruleStyles.limitPill, { backgroundColor: rule.dailyLimitMinutes === minutes ? colors.primary : colors.background, borderColor: rule.dailyLimitMinutes === minutes ? colors.primary : colors.border }]}><Text style={[ruleStyles.limitText, { color: rule.dailyLimitMinutes === minutes ? '#fff' : colors.mutedForeground }]}>{minutes >= 60 ? `${minutes / 60}h` : `${minutes}m`}</Text></Pressable>)}</View></>}
-    <Text style={[ruleStyles.note, { color: colors.mutedForeground }]}>This saves your Gate rule. Native enforcement comes with the full iOS Gate integration.</Text>
+    <Text style={[ruleStyles.note, { color: colors.mutedForeground }]}>This saves your rule. Set up the Shortcuts automation from the Gate guide to open Chain’s pause when this app opens.</Text>
     <Pressable onPress={() => onSave(rule)} style={[ruleStyles.save, { backgroundColor: colors.primary }]}><Text style={ruleStyles.saveText}>Save protection</Text></Pressable>
     <Pressable onPress={onClose} style={ruleStyles.cancel}><Text style={[ruleStyles.cancelText, { color: colors.mutedForeground }]}>Cancel</Text></Pressable>
   </View></View></Modal>;
@@ -268,10 +273,11 @@ export default function GateScreen() {
           <View style={styles.savesCopy}><Text style={[styles.savesNumber, { color: colors.primary }]}>{saveEvents.length}</Text><Text style={[styles.savesTitle, { color: colors.foreground }]}>times you chose the pause</Text><Text style={[styles.savesBody, { color: colors.mutedForeground }]}>Your wins in the last 24 hours.</Text></View>
         </View>
         <Pressable onPress={openDemo} style={({ pressed }) => [styles.previewWide, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}><Text style={styles.previewWideText}>Preview your Pause Gate</Text></Pressable>
-        <View style={[styles.previewNote, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Ionicons name="eye-outline" size={15} color={colors.primary} />
-          <Text style={[styles.previewNoteText, { color: colors.mutedForeground }]}>Preview lets you feel the pause. Native blocking comes with iOS Screen Time.</Text>
-        </View>
+        <Pressable onPress={() => setShowTutorial(true)} style={({ pressed }) => [styles.previewNote, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}>
+          <Ionicons name="flash-outline" size={15} color={colors.primary} />
+          <View style={{ flex: 1 }}><Text style={[styles.shortcutTitle, { color: colors.foreground }]}>Set up with Shortcuts</Text><Text style={[styles.previewNoteText, { color: colors.mutedForeground }]}>Open Chain’s pause when a protected app opens. Tap for the 4-step guide.</Text></View>
+          <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+        </Pressable>
 
         {/* Apps list */}
         <Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>
@@ -310,11 +316,11 @@ export default function GateScreen() {
         <View style={[styles.noteCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Ionicons name="information-circle-outline" size={16} color={colors.mutedForeground} />
           <Text style={[styles.noteText, { color: colors.mutedForeground }]}>
-            For real blocking on iOS, go to{' '}
+            For a stricter iOS limit, pair the Shortcut with{' '}
             <Text style={{ fontFamily: 'Inter_600SemiBold', color: colors.foreground }}>
               Settings → Screen Time → App Limits
             </Text>
-            . Chain works best alongside Screen Time for genuine friction.
+            . Shortcuts opens Chain’s pause; Screen Time provides the system limit.
           </Text>
         </View>
       </ScrollView>
@@ -461,6 +467,7 @@ const styles = StyleSheet.create({
   previewWideText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold', textAlign: 'center' },
   previewNote: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 10 },
   previewNoteText: { flex: 1, fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17 },
+  shortcutTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', marginBottom: 2 },
   scroll: {
     paddingHorizontal: 20,
     gap: 12,
