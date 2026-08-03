@@ -58,10 +58,15 @@ export default function PauseGateDemoScreen() {
   // One full breath: 4s in, 2s hold, 6s out. The pause lasts exactly one cycle.
   const breathScale = useSharedValue(1);
   const breathOpacity = useSharedValue(0.5);
+  const pauseFill = useSharedValue(0);
 
   const breathStyle = useAnimatedStyle(() => ({
     transform: [{ scale: breathScale.value }],
     opacity: breathOpacity.value,
+  }));
+
+  const pauseFillStyle = useAnimatedStyle(() => ({
+    width: `${pauseFill.value * 100}%`,
   }));
 
   useEffect(() => {
@@ -82,6 +87,16 @@ export default function PauseGateDemoScreen() {
       -1,
     );
   }, []);
+
+  // The primary action becomes available over the same calm pause as the rings.
+  // It gives the user a clear visual endpoint instead of a suddenly-enabled button.
+  useEffect(() => {
+    pauseFill.value = 0;
+    pauseFill.value = withTiming(1, {
+      duration: COUNTDOWN_SECONDS * 1000,
+      easing: Easing.inOut(Easing.cubic),
+    });
+  }, [pauseFill]);
 
   useEffect(() => {
     void getGateSaves24h().then((events) => setSavedCount(events.filter((event) => event.appId === appId).length));
@@ -180,22 +195,26 @@ export default function PauseGateDemoScreen() {
         </View>
 
         {/* Action buttons */}
-        <View style={[styles.actions, { opacity: ready ? 1 : 0.3 }]}>
+        <View style={styles.actions}>
           <Pressable
             onPress={handleNotNow}
             disabled={!ready}
             style={({ pressed }) => [
               styles.notNowBtn,
-              { backgroundColor: '#fff', opacity: pressed ? 0.85 : 1 },
+              { borderColor: chainColor + '72', opacity: pressed && ready ? 0.88 : 1 },
             ]}
           >
+            <Animated.View
+              pointerEvents="none"
+              style={[styles.notNowFill, { backgroundColor: chainColor }, pauseFillStyle]}
+            />
             <Text style={styles.notNowText}>Not now</Text>
           </Pressable>
 
           <Pressable
             onPress={handleOpenAnyway}
             disabled={!ready}
-            style={({ pressed }) => [styles.openAnywayBtn, { opacity: pressed ? 0.7 : 1 }]}
+            style={({ pressed }) => [styles.openAnywayBtn, { opacity: ready ? (pressed ? 0.7 : 1) : 0.32 }]}
           >
             <Text style={styles.openAnywayText}>Open anyway</Text>
           </Pressable>
@@ -295,11 +314,22 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     borderRadius: 32,
     alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    backgroundColor: '#090909',
+    borderWidth: 1,
+  },
+  notNowFill: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: 31,
   },
   notNowText: {
     fontSize: 17,
     fontFamily: 'Inter_700Bold',
-    color: '#000',
+    color: '#fff',
   },
   openAnywayBtn: {
     alignItems: 'center',
