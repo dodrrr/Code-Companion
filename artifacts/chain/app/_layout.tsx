@@ -31,6 +31,7 @@ function RootLayoutNav() {
       <Stack.Screen name="chain/[id]" options={{ headerShown: false }} />
       <Stack.Screen name="pause-gate-demo" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
       <Stack.Screen name="focus/[id]" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
+      <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal' }} />
     </Stack>
   );
 }
