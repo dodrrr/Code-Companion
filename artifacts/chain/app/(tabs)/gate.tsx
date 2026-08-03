@@ -271,15 +271,6 @@ export default function GateScreen() {
             {activePage === 0 ? `${enabledCount} app${enabledCount !== 1 ? 's' : ''} protected · ${saveEvents.length} pauses chosen` : windowCount ? `${windowCount} protection window${windowCount === 1 ? '' : 's'} saved` : 'Give important hours their own guardrail.'}
           </Text>
         </View>
-        <View style={styles.headerRight}>
-          {/* Re-open tutorial */}
-          <Pressable
-            onPress={() => setShowTutorial(true)}
-            style={({ pressed }) => [styles.helpBtn, { opacity: pressed ? 0.6 : 1, borderColor: colors.border }]}
-          >
-            <Ionicons name="help-circle-outline" size={20} color={colors.mutedForeground} />
-          </Pressable>
-        </View>
       </View>
 
       <ScrollView
@@ -447,9 +438,7 @@ const tStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     paddingHorizontal: 20,
     paddingBottom: 20,
   },
@@ -457,7 +446,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontFamily: 'Inter_700Bold',
   },
-  switcherColumn: { flex: 1, minWidth: 0 },
+  switcherColumn: { alignSelf: 'stretch' },
   gateSwitcher: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', padding: 4, borderWidth: 1, borderRadius: 20, gap: 3, position: 'relative', overflow: 'hidden' },
   gateSwitcherPill: { position: 'absolute', left: 4, top: 4, bottom: 4, borderRadius: 15, borderWidth: 1, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
   gateSegment: { flex: 1, alignItems: 'center', borderRadius: 15, paddingHorizontal: 4, paddingVertical: 7, zIndex: 1 },
@@ -465,19 +454,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
     marginTop: 2,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  helpBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   previewBtn: {
     flexDirection: 'row',
