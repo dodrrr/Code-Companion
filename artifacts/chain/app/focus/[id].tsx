@@ -23,6 +23,8 @@ export default function FocusSession() {
   const [elapsed, setElapsed] = useState(0);
   const [paused, setPaused] = useState(false);
   const holdProgress = useRef(new Animated.Value(0)).current;
+  const holdingRef = useRef(false);
+  const finishingRef = useRef(false);
   const remaining = Math.max(0, targetSeconds - elapsed);
   const progress = Math.min(1, elapsed / targetSeconds);
   const topPad = Platform.OS === 'web' ? 40 : insets.top + 8;
@@ -48,20 +50,25 @@ export default function FocusSession() {
   }
 
   function beginEndHold() {
-    if (remaining === 0) return;
+    if (remaining === 0 || finishingRef.current) return;
+    holdingRef.current = true;
+    holdProgress.stopAnimation();
     holdProgress.setValue(0);
-    Animated.timing(holdProgress, { toValue: 1, duration: 900, useNativeDriver: false }).start();
+    Haptics.selectionAsync();
+    Animated.timing(holdProgress, { toValue: 1, duration: 900, useNativeDriver: false }).start(({ finished }) => {
+      if (!finished || !holdingRef.current || finishingRef.current) return;
+      holdingRef.current = false;
+      finishingRef.current = true;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      void finish();
+    });
   }
 
   function cancelEndHold() {
-    if (remaining === 0) return;
+    if (remaining === 0 || finishingRef.current) return;
+    holdingRef.current = false;
     holdProgress.stopAnimation();
     Animated.timing(holdProgress, { toValue: 0, duration: 160, useNativeDriver: false }).start();
-  }
-
-  function completeFromHold() {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    void finish();
   }
 
   if (!item) return <View style={[styles.root, { backgroundColor: colors.background }]} />;
@@ -79,7 +86,7 @@ export default function FocusSession() {
       <View style={styles.copy}><Text style={[styles.headline, { color: colors.foreground }]}>{headline}</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>{remaining === 0 ? 'You gave this block the attention you planned.' : `${Math.max(1, Math.round(elapsed / 60))} min protected so far.`}</Text></View>
       <View style={styles.actions}>
         <Pressable onPress={() => setPaused((value) => !value)} style={[styles.pause, { backgroundColor: colors.card, borderColor: colors.border }]}><Ionicons name={paused ? 'play' : 'pause'} size={18} color={colors.foreground} /><Text style={[styles.pauseText, { color: colors.foreground }]}>{paused ? 'Resume' : 'Pause'}</Text></Pressable>
-        <Pressable onPress={remaining === 0 ? finish : undefined} onPressIn={beginEndHold} onPressOut={cancelEndHold} onLongPress={remaining > 0 ? completeFromHold : undefined} delayLongPress={900} style={[styles.finish, { backgroundColor: colors.card, borderColor: item.color || colors.primary }]}><Animated.View pointerEvents="none" style={[styles.holdFill, { backgroundColor: item.color || colors.primary, width: holdProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]} /><View pointerEvents="none" style={styles.finishContent}><Ionicons name="checkmark" size={19} color="#fff" /><Text style={styles.finishText}>{remaining === 0 ? 'Finish' : 'Hold to end'}</Text></View></Pressable>
+        <Pressable onPress={remaining === 0 ? finish : undefined} onPressIn={beginEndHold} onPressOut={cancelEndHold} style={[styles.finish, { backgroundColor: colors.card, borderColor: item.color || colors.primary }]}><Animated.View pointerEvents="none" style={[styles.holdFill, { backgroundColor: item.color || colors.primary, width: holdProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]} /><View pointerEvents="none" style={styles.finishContent}><Ionicons name="checkmark" size={19} color="#fff" /><Text style={styles.finishText}>{remaining === 0 ? 'Finish' : 'Hold to end'}</Text></View></Pressable>
       </View>
     </View>
   </View>;
