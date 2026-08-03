@@ -16,10 +16,11 @@ export interface PlanItem {
   repeatDays?: number[];
   repeatSourceId?: string;
   durationMinutes?: number;
+  gateWindowId?: string;
   completedAt?: string;
 }
 
-type PlanItemOptions = Pick<PlanItem, 'text' | 'timeSlot' | 'chainId' | 'color' | 'reminderMinutes' | 'isPriority' | 'repeatDays' | 'durationMinutes'>;
+type PlanItemOptions = Pick<PlanItem, 'text' | 'timeSlot' | 'chainId' | 'color' | 'reminderMinutes' | 'isPriority' | 'repeatDays' | 'durationMinutes' | 'gateWindowId'>;
 
 interface PlanContextValue {
   items: PlanItem[];
@@ -90,6 +91,7 @@ function normalizeItems(raw: string | null, fallbackDate: string): PlanItem[] {
         repeatDays: Array.isArray(item.repeatDays) ? item.repeatDays.filter((day): day is number => typeof day === 'number' && day >= 0 && day <= 6) : undefined,
         repeatSourceId: typeof item.repeatSourceId === 'string' ? item.repeatSourceId : undefined,
         durationMinutes: typeof item.durationMinutes === 'number' && item.durationMinutes > 0 ? item.durationMinutes : undefined,
+        gateWindowId: typeof item.gateWindowId === 'string' ? item.gateWindowId : undefined,
         completedAt: typeof item.completedAt === 'string' ? item.completedAt : undefined,
       }];
     });
@@ -261,6 +263,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       isPriority: options.isPriority === true,
       repeatDays: options.repeatDays?.length ? options.repeatDays : undefined,
       durationMinutes: options.durationMinutes,
+      gateWindowId: options.gateWindowId,
     };
     persist([...items.map((entry) => options.isPriority ? { ...entry, isPriority: false } : entry), item]);
     return item;
