@@ -236,6 +236,9 @@ export default function GateScreen() {
   const protectedApps = APPS.filter((app) => enabled[app.id]);
   const availableApps = APPS.filter((app) => !enabled[app.id]);
   const savesForApp = (id: string) => saveEvents.filter((event) => event.appId === id).length;
+  const showPage = (page: 0 | 1) => {
+    pagerRef.current?.scrollTo({ x: page * pageWidth, animated: true });
+  };
 
   function removeProtection(app: AppEntry) {
     Alert.alert('Remove protection?', `${app.name} will no longer appear in your Pause Gate.`, [
@@ -255,8 +258,8 @@ export default function GateScreen() {
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
         <View style={{ flex: 1 }}>
           <View style={[styles.gateSwitcher, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Pressable onPress={() => pagerRef.current?.scrollTo({ x: 0, animated: true })} style={[styles.gateSegment, activePage === 0 && { backgroundColor: colors.primary + '24' }]}><Text style={[styles.headerTitle, { color: activePage === 0 ? colors.foreground : colors.mutedForeground }]}>Pause Gate</Text></Pressable>
-            <Pressable onPress={() => pagerRef.current?.scrollTo({ x: pageWidth, animated: true })} style={[styles.gateSegment, activePage === 1 && { backgroundColor: colors.primary + '24' }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
+            <Pressable onPress={() => showPage(0)} style={({ pressed }) => [styles.gateSegment, activePage === 0 && { backgroundColor: colors.primary + '24' }, { opacity: pressed ? 0.78 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 0 ? colors.foreground : colors.mutedForeground }]}>Pause Gate</Text></Pressable>
+            <Pressable onPress={() => showPage(1)} style={({ pressed }) => [styles.gateSegment, activePage === 1 && { backgroundColor: colors.primary + '24' }, { opacity: pressed ? 0.78 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
           </View>
           <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
             {activePage === 0 ? `${enabledCount} app${enabledCount !== 1 ? 's' : ''} protected · ${saveEvents.length} pauses chosen` : windowCount ? `${windowCount} scheduled guardrail${windowCount === 1 ? '' : 's'}` : 'Give important hours their own guardrail.'}
@@ -273,7 +276,18 @@ export default function GateScreen() {
         </View>
       </View>
 
-      <ScrollView ref={pagerRef} horizontal pagingEnabled decelerationRate="fast" showsHorizontalScrollIndicator={false} onMomentumScrollEnd={(event) => setActivePage(Math.round(event.nativeEvent.contentOffset.x / pageWidth))}>
+      <ScrollView
+        ref={pagerRef}
+        horizontal
+        pagingEnabled
+        decelerationRate="fast"
+        showsHorizontalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={(event) => {
+          const nextPage = Math.round(event.nativeEvent.contentOffset.x / pageWidth);
+          if (nextPage !== activePage) setActivePage(nextPage);
+        }}
+      >
       <View style={{ width: pageWidth, height: '100%' }}><ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: botPad + 32 }]} showsVerticalScrollIndicator={false}>
         <View style={[styles.savesHero, { backgroundColor: colors.primary + '14', borderColor: colors.primary + '55' }]}>
           <View style={[styles.savesIcon, { backgroundColor: colors.primary + '20' }]}><Ionicons name="shield-checkmark" size={22} color={colors.primary} /></View>
@@ -331,7 +345,7 @@ export default function GateScreen() {
           </Text>
         </View>
       </ScrollView></View>
-      <View style={{ width: pageWidth, height: '100%' }}><GateWindowsContent embedded /></View>
+      <View style={{ width: pageWidth, height: '100%' }}><GateWindowsContent embedded onWindowsChange={setWindowCount} /></View>
       </ScrollView>
     </View>
   );
@@ -435,8 +449,8 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontFamily: 'Inter_700Bold',
   },
-  gateSwitcher: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', padding: 3, borderWidth: 1, borderRadius: 18, gap: 2 },
-  gateSegment: { borderRadius: 14, paddingHorizontal: 11, paddingVertical: 6 },
+  gateSwitcher: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', padding: 4, borderWidth: 1, borderRadius: 20, gap: 3 },
+  gateSegment: { borderRadius: 15, paddingHorizontal: 12, paddingVertical: 7 },
   headerSub: {
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
