@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -17,6 +18,7 @@ import { useColors } from '@/hooks/useColors';
 import { getStreak, useChains } from '@/context/ChainsContext';
 import { GateSaveEvent, getGateSaves24h } from '@/lib/gateStats';
 import { getGateWindows } from '@/lib/gateWindows';
+import { GateWindowsContent } from '@/app/gate-windows';
 
 interface AppEntry {
   id: string;
@@ -159,6 +161,7 @@ function AppPickerModal({ apps, onPick, onClose }: { apps: AppEntry[]; onPick: (
 export default function GateScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const { width: pageWidth } = useWindowDimensions();
   const { chains } = useChains();
   const [enabled,         setEnabled]         = useState<Record<string, boolean>>({});
   const [rules,           setRules]           = useState<Record<string, GateRule>>({});
@@ -168,7 +171,8 @@ export default function GateScreen() {
   const [showTutorial,    setShowTutorial]     = useState(false);
   const [tutorialChecked, setTutorialChecked]  = useState(false);
   const [windowCount, setWindowCount] = useState(0);
-  const swipeStart = useRef<{ x: number; y: number } | null>(null);
+  const [activePage, setActivePage] = useState(0);
+  const pagerRef = useRef<ScrollView>(null);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
@@ -241,7 +245,7 @@ export default function GateScreen() {
   }
 
   return (
-    <View onTouchStart={(event) => { swipeStart.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY }; }} onTouchEnd={(event) => { const start = swipeStart.current; if (start && event.nativeEvent.pageX - start.x < -84 && Math.abs(event.nativeEvent.pageY - start.y) < 55) router.push('/gate-windows'); swipeStart.current = null; }} style={[styles.root, { backgroundColor: colors.background }]}>
+    <View style={[styles.root, { backgroundColor: colors.background }]}>
       {/* Tutorial modal */}
       {tutorialChecked && showTutorial && <TutorialModal onDone={dismissTutorial} />}
       {configuringApp && <GateRuleModal app={configuringApp} initialRule={rules[configuringApp.id] ?? DEFAULT_RULE} onSave={(rule) => saveRule(configuringApp, rule)} onClose={() => setConfiguringApp(null)} />}
@@ -250,13 +254,12 @@ export default function GateScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
         <View style={{ flex: 1 }}>
-          <View style={styles.gateSwitcher}>
-            <Text style={[styles.headerTitle, { color: colors.foreground }]}>Pause Gate</Text>
-            <View style={[styles.switchDivider, { backgroundColor: colors.border }]} />
-            <Pressable onPress={() => router.push('/gate-windows')} hitSlop={8}><Text style={[styles.headerTitle, { color: colors.mutedForeground }]}>Windows</Text></Pressable>
+          <View style={[styles.gateSwitcher, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Pressable onPress={() => pagerRef.current?.scrollTo({ x: 0, animated: true })} style={[styles.gateSegment, activePage === 0 && { backgroundColor: colors.primary + '24' }]}><Text style={[styles.headerTitle, { color: activePage === 0 ? colors.foreground : colors.mutedForeground }]}>Pause Gate</Text></Pressable>
+            <Pressable onPress={() => pagerRef.current?.scrollTo({ x: pageWidth, animated: true })} style={[styles.gateSegment, activePage === 1 && { backgroundColor: colors.primary + '24' }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
           </View>
           <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
-            {enabledCount} app{enabledCount !== 1 ? 's' : ''} protected · {saveEvents.length} pauses chosen
+            {activePage === 0 ? `${enabledCount} app${enabledCount !== 1 ? 's' : ''} protected · ${saveEvents.length} pauses chosen` : windowCount ? `${windowCount} scheduled guardrail${windowCount === 1 ? '' : 's'}` : 'Give important hours their own guardrail.'}
           </Text>
         </View>
         <View style={styles.headerRight}>
@@ -270,10 +273,8 @@ export default function GateScreen() {
         </View>
       </View>
 
-      <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: botPad + 32 }]}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView ref={pagerRef} horizontal pagingEnabled decelerationRate="fast" showsHorizontalScrollIndicator={false} onMomentumScrollEnd={(event) => setActivePage(Math.round(event.nativeEvent.contentOffset.x / pageWidth))}>
+      <View style={{ width: pageWidth, height: '100%' }}><ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: botPad + 32 }]} showsVerticalScrollIndicator={false}>
         <View style={[styles.savesHero, { backgroundColor: colors.primary + '14', borderColor: colors.primary + '55' }]}>
           <View style={[styles.savesIcon, { backgroundColor: colors.primary + '20' }]}><Ionicons name="shield-checkmark" size={22} color={colors.primary} /></View>
           <View style={styles.savesCopy}><Text style={[styles.savesNumber, { color: colors.primary }]}>{saveEvents.length}</Text><Text style={[styles.savesTitle, { color: colors.foreground }]}>times you chose the pause</Text><Text style={[styles.savesBody, { color: colors.mutedForeground }]}>Your wins in the last 24 hours.</Text></View>
@@ -329,6 +330,8 @@ export default function GateScreen() {
             . Shortcuts opens Chain’s pause; Screen Time provides the system limit.
           </Text>
         </View>
+      </ScrollView></View>
+      <View style={{ width: pageWidth, height: '100%' }}><GateWindowsContent embedded /></View>
       </ScrollView>
     </View>
   );
@@ -432,8 +435,8 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontFamily: 'Inter_700Bold',
   },
-  gateSwitcher: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  switchDivider: { width: 1, height: 22 },
+  gateSwitcher: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', padding: 3, borderWidth: 1, borderRadius: 18, gap: 2 },
+  gateSegment: { borderRadius: 14, paddingHorizontal: 11, paddingVertical: 6 },
   headerSub: {
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
