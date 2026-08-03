@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Modal,
@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { getStreak, useChains } from '@/context/ChainsContext';
 import { GateSaveEvent, getGateSaves24h } from '@/lib/gateStats';
+import { getGateWindows } from '@/lib/gateWindows';
 
 interface AppEntry {
   id: string;
@@ -166,6 +167,8 @@ export default function GateScreen() {
   const [saveEvents,      setSaveEvents]      = useState<GateSaveEvent[]>([]);
   const [showTutorial,    setShowTutorial]     = useState(false);
   const [tutorialChecked, setTutorialChecked]  = useState(false);
+  const [windowCount, setWindowCount] = useState(0);
+  const swipeStart = useRef<{ x: number; y: number } | null>(null);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
@@ -184,7 +187,8 @@ export default function GateScreen() {
   }, []);
 
   const refreshSaveEvents = useCallback(() => { void getGateSaves24h().then(setSaveEvents); }, []);
-  useFocusEffect(useCallback(() => { refreshSaveEvents(); }, [refreshSaveEvents]));
+  const refreshWindows = useCallback(() => { void getGateWindows().then((windows) => setWindowCount(windows.length)); }, []);
+  useFocusEffect(useCallback(() => { refreshSaveEvents(); refreshWindows(); }, [refreshSaveEvents, refreshWindows]));
 
   function dismissTutorial() {
     AsyncStorage.setItem(TUTORIAL_KEY, '1');
@@ -237,7 +241,7 @@ export default function GateScreen() {
   }
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <View onTouchStart={(event) => { swipeStart.current = { x: event.nativeEvent.pageX, y: event.nativeEvent.pageY }; }} onTouchEnd={(event) => { const start = swipeStart.current; if (start && event.nativeEvent.pageX - start.x < -84 && Math.abs(event.nativeEvent.pageY - start.y) < 55) router.push('/gate-windows'); swipeStart.current = null; }} style={[styles.root, { backgroundColor: colors.background }]}>
       {/* Tutorial modal */}
       {tutorialChecked && showTutorial && <TutorialModal onDone={dismissTutorial} />}
       {configuringApp && <GateRuleModal app={configuringApp} initialRule={rules[configuringApp.id] ?? DEFAULT_RULE} onSave={(rule) => saveRule(configuringApp, rule)} onClose={() => setConfiguringApp(null)} />}
@@ -272,6 +276,11 @@ export default function GateScreen() {
           <View style={[styles.savesIcon, { backgroundColor: colors.primary + '20' }]}><Ionicons name="shield-checkmark" size={22} color={colors.primary} /></View>
           <View style={styles.savesCopy}><Text style={[styles.savesNumber, { color: colors.primary }]}>{saveEvents.length}</Text><Text style={[styles.savesTitle, { color: colors.foreground }]}>times you chose the pause</Text><Text style={[styles.savesBody, { color: colors.mutedForeground }]}>Your wins in the last 24 hours.</Text></View>
         </View>
+        <Pressable onPress={() => router.push('/gate-windows')} style={({ pressed }) => [styles.windowsCard, { backgroundColor: colors.card, borderColor: colors.primary + '66', opacity: pressed ? 0.78 : 1 }]}>
+          <View style={[styles.windowsIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="calendar-outline" size={20} color={colors.primary} /></View>
+          <View style={{ flex: 1 }}><Text style={[styles.windowsEyebrow, { color: colors.primary }]}>PROTECTION WINDOWS</Text><Text style={[styles.windowsTitle, { color: colors.foreground }]}>{windowCount ? `${windowCount} scheduled guardrail${windowCount === 1 ? '' : 's'}` : 'Schedule a focused window'}</Text><Text style={[styles.windowsBody, { color: colors.mutedForeground }]}>{windowCount ? 'Apps pause around the parts of your day that matter.' : 'Set recurring hours for the apps that pull you away.'}</Text></View>
+          <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+        </Pressable>
         <Pressable onPress={openDemo} style={({ pressed }) => [styles.previewWide, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}><Text style={styles.previewWideText}>Preview your Pause Gate</Text></Pressable>
         <Pressable onPress={() => setShowTutorial(true)} style={({ pressed }) => [styles.previewNote, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}>
           <Ionicons name="flash-outline" size={15} color={colors.primary} />
@@ -463,6 +472,11 @@ const styles = StyleSheet.create({
   savesNumber: { fontSize: 34, lineHeight: 37, fontFamily: 'Inter_700Bold' },
   savesTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', marginTop: -1 },
   savesBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 3 },
+  windowsCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 18, borderWidth: 1, padding: 14 },
+  windowsIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  windowsEyebrow: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 1.1, marginBottom: 2 },
+  windowsTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  windowsBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2, lineHeight: 16 },
   previewWide: { alignItems: 'center', justifyContent: 'center', borderRadius: 18, paddingVertical: 15 },
   previewWideText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold', textAlign: 'center' },
   previewNote: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 10 },
