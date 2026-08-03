@@ -249,10 +249,12 @@ export default function GateScreen() {
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
-        <View>
-          <Text style={[styles.headerTitle, { color: colors.foreground }]}>
-            Pause Gate
-          </Text>
+        <View style={{ flex: 1 }}>
+          <View style={styles.gateSwitcher}>
+            <Text style={[styles.headerTitle, { color: colors.foreground }]}>Pause Gate</Text>
+            <View style={[styles.switchDivider, { backgroundColor: colors.border }]} />
+            <Pressable onPress={() => router.push('/gate-windows')} hitSlop={8}><Text style={[styles.headerTitle, { color: colors.mutedForeground }]}>Windows</Text></Pressable>
+          </View>
           <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
             {enabledCount} app{enabledCount !== 1 ? 's' : ''} protected · {saveEvents.length} pauses chosen
           </Text>
@@ -276,11 +278,6 @@ export default function GateScreen() {
           <View style={[styles.savesIcon, { backgroundColor: colors.primary + '20' }]}><Ionicons name="shield-checkmark" size={22} color={colors.primary} /></View>
           <View style={styles.savesCopy}><Text style={[styles.savesNumber, { color: colors.primary }]}>{saveEvents.length}</Text><Text style={[styles.savesTitle, { color: colors.foreground }]}>times you chose the pause</Text><Text style={[styles.savesBody, { color: colors.mutedForeground }]}>Your wins in the last 24 hours.</Text></View>
         </View>
-        <Pressable onPress={() => router.push('/gate-windows')} style={({ pressed }) => [styles.windowsCard, { backgroundColor: colors.card, borderColor: colors.primary + '66', opacity: pressed ? 0.78 : 1 }]}>
-          <View style={[styles.windowsIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="calendar-outline" size={20} color={colors.primary} /></View>
-          <View style={{ flex: 1 }}><Text style={[styles.windowsEyebrow, { color: colors.primary }]}>PROTECTION WINDOWS</Text><Text style={[styles.windowsTitle, { color: colors.foreground }]}>{windowCount ? `${windowCount} scheduled guardrail${windowCount === 1 ? '' : 's'}` : 'Schedule a focused window'}</Text><Text style={[styles.windowsBody, { color: colors.mutedForeground }]}>{windowCount ? 'Apps pause around the parts of your day that matter.' : 'Set recurring hours for the apps that pull you away.'}</Text></View>
-          <Ionicons name="chevron-forward" size={18} color={colors.primary} />
-        </Pressable>
         <Pressable onPress={openDemo} style={({ pressed }) => [styles.previewWide, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}><Text style={styles.previewWideText}>Preview your Pause Gate</Text></Pressable>
         <Pressable onPress={() => setShowTutorial(true)} style={({ pressed }) => [styles.previewNote, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}>
           <Ionicons name="flash-outline" size={15} color={colors.primary} />
@@ -435,6 +432,8 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontFamily: 'Inter_700Bold',
   },
+  gateSwitcher: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  switchDivider: { width: 1, height: 22 },
   headerSub: {
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
