@@ -30,6 +30,7 @@ import {
 } from '@/context/ChainsContext';
 import { FOCUS_LOG_KEY, FocusLogEntry } from '@/context/PlanContext';
 import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
+import { AmbientScreen } from '@/components/AmbientSurface';
 
 const FROZEN_COLOR = '#5B8CFF';
 const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -204,7 +205,7 @@ export default function ChainDetailScreen() {
 
   if (!chain) {
     return (
-      <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <AmbientScreen tone="today" style={styles.root}>
         <Pressable
           onPress={() => router.back()}
           style={[styles.backBtn, { top: topPad + 8, left: 16 }]}
@@ -216,7 +217,7 @@ export default function ChainDetailScreen() {
             {isReady ? 'Chain not found' : 'Loading chain…'}
           </Text>
         </View>
-      </View>
+      </AmbientScreen>
     );
   }
 
@@ -349,7 +350,7 @@ export default function ChainDetailScreen() {
   }
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <AmbientScreen color={chain.color} style={styles.root}>
       {/* Nav bar */}
       <View style={[styles.navBar, { paddingTop: topPad + 4 }]}>
         <Pressable onPress={() => router.back()} hitSlop={12} style={styles.backBtn2}>
@@ -589,7 +590,7 @@ export default function ChainDetailScreen() {
           })}
         </Text>
       </ScrollView>
-    </View>
+    </AmbientScreen>
   );
 }
 
