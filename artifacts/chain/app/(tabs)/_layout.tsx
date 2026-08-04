@@ -3,6 +3,7 @@ import { Platform, StyleSheet, useColorScheme, View } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Tabs } from 'expo-router';
 import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
@@ -53,11 +54,10 @@ function ClassicTabLayout() {
         },
         tabBarBackground: () =>
           isIOS ? (
-            <BlurView
-              intensity={80}
-              tint={isDark ? 'dark' : 'dark'}
-              style={StyleSheet.absoluteFill}
-            />
+            <View style={[StyleSheet.absoluteFill, styles.tabGlass]}>
+              <BlurView intensity={80} tint={isDark ? 'dark' : 'dark'} style={StyleSheet.absoluteFill} />
+              <LinearGradient pointerEvents="none" colors={['rgba(255,255,255,0.075)', 'rgba(255,255,255,0.018)', 'rgba(0,0,0,0.08)']} style={StyleSheet.absoluteFill} />
+            </View>
           ) : isWeb ? (
             <View
               style={[
@@ -107,6 +107,10 @@ function ClassicTabLayout() {
     </Tabs>
   );
 }
+
+const styles = StyleSheet.create({
+  tabGlass: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: 'rgba(255,255,255,0.14)' },
+});
 
 export default function TabLayout() {
   // NativeTabs is iOS-only; always fall back to ClassicTabLayout on web/Android
