@@ -6,6 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { usePlan } from '@/context/PlanContext';
+import { AmbientScreen } from '@/components/AmbientSurface';
 
 function clock(seconds: number) {
   const safe = Math.max(0, seconds);
@@ -71,8 +72,8 @@ export default function FocusSession() {
     Animated.timing(holdProgress, { toValue: 0, duration: 160, useNativeDriver: false }).start();
   }
 
-  if (!item) return <View style={[styles.root, { backgroundColor: colors.background }]} />;
-  return <View style={[styles.root, { backgroundColor: colors.background, paddingTop: topPad }]}>
+  if (!item) return <AmbientScreen tone="focus" style={styles.root} />;
+  return <AmbientScreen tone="focus" color={item.color || colors.primary} style={[styles.root, { paddingTop: topPad }]}>
     <Pressable onPress={() => router.back()} style={styles.close}><Ionicons name="close" size={24} color={colors.mutedForeground} /></Pressable>
     <View style={styles.inner}>
       <Text style={[styles.eyebrow, { color: item.color || colors.primary }]}>FOCUS SESSION</Text>
@@ -89,7 +90,7 @@ export default function FocusSession() {
         <Pressable onPress={remaining === 0 ? finish : undefined} onPressIn={beginEndHold} onPressOut={cancelEndHold} style={[styles.finish, { backgroundColor: colors.card, borderColor: item.color || colors.primary }]}><Animated.View pointerEvents="none" style={[styles.holdFill, { backgroundColor: item.color || colors.primary, width: holdProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]} /><View pointerEvents="none" style={styles.finishContent}><Ionicons name="checkmark" size={19} color="#fff" /><Text style={styles.finishText}>{remaining === 0 ? 'Finish' : 'Hold to end'}</Text></View></Pressable>
       </View>
     </View>
-  </View>;
+  </AmbientScreen>;
 }
 
 const styles = StyleSheet.create({
