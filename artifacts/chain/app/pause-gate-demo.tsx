@@ -19,6 +19,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
+import { AmbientScreen } from '@/components/AmbientSurface';
 import { getGateSaves24h, recordGateSave } from '@/lib/gateStats';
 
 const COUNTDOWN_SECONDS = 12;
@@ -133,7 +134,7 @@ export default function PauseGateDemoScreen() {
   }
 
   return (
-    <View style={[styles.root, { backgroundColor: '#050505' }]}>
+    <AmbientScreen tone="gate" color={chainColor} style={styles.root}>
       {/* Close (X) for demo purposes */}
       <Pressable
         onPress={() => router.back()}
@@ -225,7 +226,7 @@ export default function PauseGateDemoScreen() {
           <Text style={styles.demoText}>Preview mode — this is what your gate looks like</Text>
         </View>
       </View>
-    </View>
+    </AmbientScreen>
   );
 }
 
