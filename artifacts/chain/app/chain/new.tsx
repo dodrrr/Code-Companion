@@ -13,6 +13,7 @@ import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
+import { AmbientScreen } from '@/components/AmbientSurface';
 import { CHAIN_COLORS, EXTRA_CHAIN_COLORS } from '@/constants/colors';
 import { useChains } from '@/context/ChainsContext';
 
@@ -78,7 +79,7 @@ export default function NewChainScreen() {
   }
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <AmbientScreen color={selectedColor} style={styles.root}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 16 }]}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
@@ -229,7 +230,7 @@ export default function NewChainScreen() {
           <Text style={styles.createBtnText}>Start this chain</Text>
         </Pressable>
       </View>
-    </View>
+    </AmbientScreen>
   );
 }
 
