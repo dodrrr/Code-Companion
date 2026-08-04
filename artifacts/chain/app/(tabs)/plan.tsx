@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { AmbientScreen } from '@/components/AmbientSurface';
+import { AmbientScreen, GlassSurface } from '@/components/AmbientSurface';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { EXTRA_CHAIN_COLORS } from '@/constants/colors';
@@ -308,11 +308,13 @@ export default function PlanScreen() {
         {isToday && <><Text style={[styles.sectionLabel, { color: colors.mutedForeground }]}>TODAY'S CHAINS</Text>
         {chains.length === 0 ? (
           <View style={[styles.emptySection, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
             <Ionicons name="link-outline" size={22} color={colors.mutedForeground} />
             <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>Add a chain first to bring its color into your plan.</Text>
           </View>
         ) : (
           <View style={[styles.reflectCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
             {chains.map((chain, index) => {
               const done = chain.completedDates.includes(today);
               const minimum = chain.minimumDates.includes(today);
@@ -329,7 +331,7 @@ export default function PlanScreen() {
           </View>
         )}
 
-        {isToday && <View style={[styles.briefingCard, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.briefingIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sunny-outline" size={18} color={colors.primary} /></View><View style={styles.briefingCopy}><Text style={[styles.briefingTitle, { color: colors.foreground }]}>Morning briefing</Text><Text style={[styles.briefingBody, { color: colors.mutedForeground }]}>{briefingHour === null ? 'A gentle nudge to open your day.' : `Daily at ${briefingHour % 12 || 12} ${briefingHour >= 12 ? 'PM' : 'AM'}`}</Text></View><View style={styles.briefingChoices}>{[7, 8, 9].map((hour) => <Pressable key={hour} onPress={() => { void setMorningBriefing(hour); }} style={[styles.briefingHour, { backgroundColor: briefingHour === hour ? colors.primary : colors.background, borderColor: briefingHour === hour ? colors.primary : colors.border }]}><Text style={[styles.briefingHourText, { color: briefingHour === hour ? '#fff' : colors.mutedForeground }]}>{hour}</Text></Pressable>)}</View></View>}
+        {isToday && <View style={[styles.briefingCard, { backgroundColor: colors.card, borderColor: colors.border }]}><GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} /><View style={[styles.briefingIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sunny-outline" size={18} color={colors.primary} /></View><View style={styles.briefingCopy}><Text style={[styles.briefingTitle, { color: colors.foreground }]}>Morning briefing</Text><Text style={[styles.briefingBody, { color: colors.mutedForeground }]}>{briefingHour === null ? 'A gentle nudge to open your day.' : `Daily at ${briefingHour % 12 || 12} ${briefingHour >= 12 ? 'PM' : 'AM'}`}</Text></View><View style={styles.briefingChoices}>{[7, 8, 9].map((hour) => <Pressable key={hour} onPress={() => { void setMorningBriefing(hour); }} style={[styles.briefingHour, { backgroundColor: briefingHour === hour ? colors.primary : colors.background, borderColor: briefingHour === hour ? colors.primary : colors.border }]}><Text style={[styles.briefingHourText, { color: briefingHour === hour ? '#fff' : colors.mutedForeground }]}>{hour}</Text></Pressable>)}</View></View>}
 
         <View style={styles.focusHeading}>
           <View>
@@ -370,6 +372,7 @@ export default function PlanScreen() {
 
         {items.length === 0 && (
           <View style={[styles.emptyFocus, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
             <View style={[styles.moonCircle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="moon" size={22} color={colors.primary} /></View>
             <Text style={[styles.emptyFocusTitle, { color: colors.foreground }]}>{isToday ? 'Your day is clear.' : 'A calm start begins tonight.'}</Text>
             <Text style={[styles.emptyFocusBody, { color: colors.mutedForeground }]}>{isToday ? 'There are no unfinished tasks waiting for you.' : 'Choose what deserves space tomorrow, then let the plan hold the rest.'}</Text>
@@ -394,6 +397,7 @@ export default function PlanScreen() {
         )}
 
         {canEditActivePlan ? <View style={[styles.addCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
             {showInput ? (
               <>
                 <TextInput
@@ -569,6 +573,7 @@ function PlanItemRow({ item, chainName, gateWindow, highlighted, newlyAdded, isL
     Animated.spring(arrival, { toValue: 1, useNativeDriver: true, friction: 8, tension: 90 }).start();
   }, [arrival, newlyAdded]);
   return <Animated.View style={[styles.planItem, { backgroundColor, borderColor, marginBottom: isLast ? 20 : 8, opacity: arrival, transform: [{ translateY: arrival.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }, { scale: arrival.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }]}>
+    <GlassSurface pointerEvents="none" accentColor={displayAccent} style={StyleSheet.absoluteFill} />
     <View style={[styles.planBar, { backgroundColor: item.completed ? displayAccent + 'A8' : displayAccent }]} />
     <Pressable disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? displayAccent : completionLocked ? 'transparent' : displayAccent + '14', borderColor: item.completed ? displayAccent : completionLocked ? colors.mutedForeground : displayAccent, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <Ionicons name="checkmark" size={13} color="#fff" /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
     <Pressable disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
@@ -641,7 +646,7 @@ function TimePickerModal({ visible, hour, minute, setHour, setMinute, onClose, o
 }
 
 const styles = StyleSheet.create({
-  briefingCard: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 17, borderWidth: 1, padding: 12, marginTop: 14 },
+  briefingCard: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 18, borderWidth: 1, padding: 13, marginTop: 14, overflow: 'hidden' },
   briefingIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   briefingCopy: { flex: 1 },
   briefingTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },

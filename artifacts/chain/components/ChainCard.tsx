@@ -15,6 +15,7 @@ import { Chain, getStreak, getTodayStr, getWeeklyProgress, isRestDay, useChains 
 import { getProgressionStage } from '@/constants/progression';
 import WeekStrip from './WeekStrip';
 import MilestoneModal from './MilestoneModal';
+import { GlassSurface } from './AmbientSurface';
 
 interface Props {
   chain: Chain;
@@ -88,9 +89,10 @@ export default function ChainCard({ chain }: Props) {
         <Animated.View
           style={[
             styles.card,
-            { backgroundColor: colors.card, borderColor: colors.border },
+            { backgroundColor: 'transparent', borderColor: colors.border },
           ]}
         >
+          <GlassSurface pointerEvents="none" accentColor={chain.color} style={StyleSheet.absoluteFill} />
           {/* Color accent stripe */}
           <View style={[styles.stripe, { backgroundColor: chain.color }]} />
 

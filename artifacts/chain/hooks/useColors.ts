@@ -1,5 +1,21 @@
 import { useColorScheme } from 'react-native';
+import { usePathname } from 'expo-router';
 import colors from '@/constants/colors';
+
+export type SectionTone = 'today' | 'gate' | 'plan' | 'neutral';
+
+export const SECTION_ACCENTS: Record<SectionTone, string> = {
+  today: '#FF6B35',
+  gate: '#A855F7',
+  plan: '#4A8CFF',
+  neutral: '#FF6B35',
+};
+
+function toneForPath(pathname: string): SectionTone {
+  if (pathname.includes('gate') || pathname.includes('pause-gate')) return 'gate';
+  if (pathname.includes('plan')) return 'plan';
+  return 'today';
+}
 
 /**
  * Returns the design tokens for the current color scheme.
@@ -13,11 +29,22 @@ import colors from '@/constants/colors';
  * key, this hook will automatically switch palettes based on the
  * device's appearance setting.
  */
-export function useColors() {
+export function useColors(explicitTone?: SectionTone) {
   const scheme = useColorScheme();
+  const pathname = usePathname();
   const palette =
     scheme === 'dark' && 'dark' in colors
       ? ((colors as unknown) as Record<string, typeof colors.light>).dark
       : colors.light;
-  return { ...palette, radius: colors.radius };
+  const sectionTone = explicitTone ?? toneForPath(pathname);
+  const sectionAccent = SECTION_ACCENTS[sectionTone];
+  return {
+    ...palette,
+    primary: sectionAccent,
+    tint: sectionAccent,
+    accent: sectionAccent,
+    sectionTone,
+    sectionAccent,
+    radius: colors.radius,
+  };
 }

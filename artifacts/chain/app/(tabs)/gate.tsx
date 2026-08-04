@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { AmbientScreen } from '@/components/AmbientSurface';
+import { AmbientScreen, GlassSurface } from '@/components/AmbientSurface';
 import { useColors } from '@/hooks/useColors';
 import { getStreak, useChains } from '@/context/ChainsContext';
 import { GateSaveEvent, getGateSaves24h } from '@/lib/gateStats';
@@ -264,6 +264,7 @@ export default function GateScreen() {
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
         <View style={styles.switcherColumn}>
           <View style={[styles.gateSwitcher, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <GlassSurface pointerEvents="none" accentColor={colors.primary} style={StyleSheet.absoluteFill} />
             {pauseSegmentWidth > 0 && windowsSegmentWidth > 0 && <Animated.View pointerEvents="none" style={[styles.gateSwitcherPill, { width: pageProgress.interpolate({ inputRange: [0, 1], outputRange: [pauseSegmentWidth, windowsSegmentWidth] }), backgroundColor: colors.primary + '28', borderColor: colors.primary + '45', transform: [{ translateX: pageProgress.interpolate({ inputRange: [0, 1], outputRange: [0, pauseSegmentWidth + 3] }) }, { scaleX: pageProgress.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.025, 1] }) }] }]} />}
             <Pressable onLayout={(event) => setPauseSegmentWidth(event.nativeEvent.layout.width)} onPress={() => showPage(0)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 0 ? colors.foreground : colors.mutedForeground }]}>Pause Gate</Text></Pressable>
             <Pressable onLayout={(event) => setWindowsSegmentWidth(event.nativeEvent.layout.width)} onPress={() => showPage(1)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
@@ -295,6 +296,7 @@ export default function GateScreen() {
         </View>
         <Pressable onPress={openDemo} style={({ pressed }) => [styles.previewWide, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}><Text style={styles.previewWideText}>Preview your Pause Gate</Text></Pressable>
         <Pressable onPress={() => setShowTutorial(true)} style={({ pressed }) => [styles.previewNote, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}>
+          <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
           <Ionicons name="flash-outline" size={15} color={colors.primary} />
           <View style={{ flex: 1 }}><Text style={[styles.shortcutTitle, { color: colors.foreground }]}>Set up with Shortcuts</Text><Text style={[styles.previewNoteText, { color: colors.mutedForeground }]}>Open Chain’s pause when a protected app opens. Tap for the 4-step guide.</Text></View>
           <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
@@ -306,6 +308,7 @@ export default function GateScreen() {
         </Text>
 
         {protectedApps.length > 0 && <View style={[styles.appsList, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
           {protectedApps.map((app, i) => (
             <View key={app.id}>
               <View style={[styles.appRow, { backgroundColor: app.iconColor + '08' }]}>
@@ -328,6 +331,7 @@ export default function GateScreen() {
         </View>}
 
         <Pressable onPress={() => setShowAppPicker(true)} style={({ pressed }) => [styles.addAppCard, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.78 : 1 }]}>
+          <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
           <View style={[styles.addAppIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="add" size={21} color={colors.primary} /></View>
           <View style={{ flex: 1 }}><Text style={[styles.addAppTitle, { color: colors.foreground }]}>Add an app</Text><Text style={[styles.addAppBody, { color: colors.mutedForeground }]}>{protectedApps.length ? 'Choose another place to create friction.' : 'Choose where you want a pause before scrolling.'}</Text></View>
           <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
@@ -335,6 +339,7 @@ export default function GateScreen() {
 
         {/* iOS note */}
         <View style={[styles.noteCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
           <Ionicons name="information-circle-outline" size={16} color={colors.mutedForeground} />
           <Text style={[styles.noteText, { color: colors.mutedForeground }]}>
             For a stricter iOS limit, pair the Shortcut with{' '}
@@ -482,7 +487,7 @@ const styles = StyleSheet.create({
   windowsBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2, lineHeight: 16 },
   previewWide: { alignItems: 'center', justifyContent: 'center', borderRadius: 18, paddingVertical: 15 },
   previewWideText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold', textAlign: 'center' },
-  previewNote: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, paddingVertical: 10 },
+  previewNote: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, overflow: 'hidden' },
   previewNoteText: { flex: 1, fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17 },
   shortcutTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', marginBottom: 2 },
   scroll: {
@@ -546,7 +551,7 @@ const styles = StyleSheet.create({
   appSaveBadge: { minWidth: 42, alignItems: 'center', borderRadius: 12, paddingHorizontal: 7, paddingVertical: 6 },
   appSaveNumber: { fontSize: 16, lineHeight: 17, fontFamily: 'Inter_700Bold' },
   appSaveLabel: { fontSize: 8, fontFamily: 'Inter_700Bold', letterSpacing: 0.6, marginTop: 1 },
-  addAppCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 18, padding: 15 },
+  addAppCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 20, padding: 16, overflow: 'hidden' },
   addAppIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   addAppTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
   addAppBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2 },
@@ -562,6 +567,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     marginTop: 4,
+    overflow: 'hidden',
   },
   noteText: {
     flex: 1,
