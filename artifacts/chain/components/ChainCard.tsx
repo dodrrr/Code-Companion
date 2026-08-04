@@ -168,6 +168,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: 12,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 3,
   },
   stripe: {
     width: 4,
