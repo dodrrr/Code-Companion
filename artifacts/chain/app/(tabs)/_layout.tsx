@@ -13,22 +13,22 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 function NativeTabLayout() {
   return (
     <NativeTabs
-      backgroundColor="rgba(12,14,19,0.72)"
+      backgroundColor="rgba(12,12,14,0.76)"
       blurEffect="systemUltraThinMaterialDark"
       shadowColor="rgba(255,255,255,0.10)"
       disableTransparentOnScrollEdge
     >
       <NativeTabs.Trigger name="index">
         <Icon sf={{ default: 'link', selected: 'link' }} selectedColor="#FF6B35" />
-        <Label selectedStyle={{ color: '#FF6B35', fontWeight: '600' }}>Today</Label>
+        <Label selectedStyle={{ color: '#FF6B35', fontWeight: '600' }}>Chains</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="gate">
-        <Icon sf={{ default: 'shield', selected: 'shield.fill' }} selectedColor="#A855F7" />
-        <Label selectedStyle={{ color: '#A855F7', fontWeight: '600' }}>Gate</Label>
+        <Icon sf={{ default: 'shield', selected: 'shield.fill' }} selectedColor="#FF6B35" />
+        <Label selectedStyle={{ color: '#FF6B35', fontWeight: '600' }}>Gate</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="plan">
-        <Icon sf={{ default: 'moon', selected: 'moon.fill' }} selectedColor="#4A8CFF" />
-        <Label selectedStyle={{ color: '#4A8CFF', fontWeight: '600' }}>Plan</Label>
+        <Icon sf={{ default: 'moon', selected: 'moon.fill' }} selectedColor="#FF6B35" />
+        <Label selectedStyle={{ color: '#FF6B35', fontWeight: '600' }}>Plan</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -75,7 +75,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Today',
+          title: 'Chains',
           tabBarActiveTintColor: '#FF6B35',
           tabBarIcon: ({ color }) =>
             isIOS ? (
@@ -89,7 +89,7 @@ function ClassicTabLayout() {
         name="gate"
         options={{
           title: 'Gate',
-          tabBarActiveTintColor: '#A855F7',
+          tabBarActiveTintColor: '#FF6B35',
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="shield.fill" tintColor={color} size={22} />
@@ -102,7 +102,7 @@ function ClassicTabLayout() {
         name="plan"
         options={{
           title: 'Plan',
-          tabBarActiveTintColor: '#4A8CFF',
+          tabBarActiveTintColor: '#FF6B35',
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="moon.fill" tintColor={color} size={22} />

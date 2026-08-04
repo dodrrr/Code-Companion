@@ -264,7 +264,7 @@ export default function GateScreen() {
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
         <View style={styles.switcherColumn}>
           <View style={[styles.gateSwitcher, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <GlassSurface pointerEvents="none" accentColor={colors.primary} style={StyleSheet.absoluteFill} />
+            <GlassSurface pointerEvents="none" elevated style={StyleSheet.absoluteFill} />
             {pauseSegmentWidth > 0 && windowsSegmentWidth > 0 && <Animated.View pointerEvents="none" style={[styles.gateSwitcherPill, { width: pageProgress.interpolate({ inputRange: [0, 1], outputRange: [pauseSegmentWidth, windowsSegmentWidth] }), backgroundColor: colors.primary + '28', borderColor: colors.primary + '45', transform: [{ translateX: pageProgress.interpolate({ inputRange: [0, 1], outputRange: [0, pauseSegmentWidth + 3] }) }, { scaleX: pageProgress.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.025, 1] }) }] }]} />}
             <Pressable onLayout={(event) => setPauseSegmentWidth(event.nativeEvent.layout.width)} onPress={() => showPage(0)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 0 ? colors.foreground : colors.mutedForeground }]}>Pause Gate</Text></Pressable>
             <Pressable onLayout={(event) => setWindowsSegmentWidth(event.nativeEvent.layout.width)} onPress={() => showPage(1)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
@@ -453,9 +453,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   switcherColumn: { alignSelf: 'stretch' },
-  gateSwitcher: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', padding: 4, borderWidth: 1, borderRadius: 20, gap: 3, position: 'relative', overflow: 'hidden' },
-  gateSwitcherPill: { position: 'absolute', left: 4, top: 4, bottom: 4, borderRadius: 15, borderWidth: 1, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
-  gateSegment: { flex: 1, alignItems: 'center', borderRadius: 15, paddingHorizontal: 4, paddingVertical: 7, zIndex: 1 },
+  gateSwitcher: { flexDirection: 'row', alignItems: 'center', alignSelf: 'stretch', padding: 4, borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, gap: 3, position: 'relative', overflow: 'hidden' },
+  gateSwitcherPill: { position: 'absolute', left: 4, top: 4, bottom: 4, borderRadius: 17, borderWidth: StyleSheet.hairlineWidth, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2 },
+  gateSegment: { flex: 1, alignItems: 'center', borderRadius: 17, paddingHorizontal: 4, paddingVertical: 9, zIndex: 1 },
   headerSub: {
     fontSize: 13,
     fontFamily: 'Inter_400Regular',
@@ -474,7 +474,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Inter_600SemiBold',
   },
-  savesHero: { flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: 1, borderRadius: 22, padding: 18 },
+  savesHero: { flexDirection: 'row', alignItems: 'center', gap: 14, borderWidth: StyleSheet.hairlineWidth, borderRadius: 24, padding: 19 },
   savesIcon: { width: 46, height: 46, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   savesCopy: { flex: 1 },
   savesNumber: { fontSize: 34, lineHeight: 37, fontFamily: 'Inter_700Bold' },
@@ -485,7 +485,7 @@ const styles = StyleSheet.create({
   windowsEyebrow: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 1.1, marginBottom: 2 },
   windowsTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold' },
   windowsBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2, lineHeight: 16 },
-  previewWide: { alignItems: 'center', justifyContent: 'center', borderRadius: 18, paddingVertical: 15 },
+  previewWide: { alignItems: 'center', justifyContent: 'center', borderRadius: 20, paddingVertical: 16 },
   previewWideText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold', textAlign: 'center' },
   previewNote: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, overflow: 'hidden' },
   previewNoteText: { flex: 1, fontSize: 12, fontFamily: 'Inter_400Regular', lineHeight: 17 },
@@ -551,7 +551,7 @@ const styles = StyleSheet.create({
   appSaveBadge: { minWidth: 42, alignItems: 'center', borderRadius: 12, paddingHorizontal: 7, paddingVertical: 6 },
   appSaveNumber: { fontSize: 16, lineHeight: 17, fontFamily: 'Inter_700Bold' },
   appSaveLabel: { fontSize: 8, fontFamily: 'Inter_700Bold', letterSpacing: 0.6, marginTop: 1 },
-  addAppCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderRadius: 20, padding: 16, overflow: 'hidden' },
+  addAppCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, padding: 17, overflow: 'hidden' },
   addAppIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   addAppTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },
   addAppBody: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: 2 },

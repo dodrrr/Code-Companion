@@ -6,8 +6,8 @@ export type SectionTone = 'today' | 'gate' | 'plan' | 'neutral';
 
 export const SECTION_ACCENTS: Record<SectionTone, string> = {
   today: '#FF6B35',
-  gate: '#A855F7',
-  plan: '#4A8CFF',
+  gate: '#FF6B35',
+  plan: '#FF6B35',
   neutral: '#FF6B35',
 };
 

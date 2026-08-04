@@ -16,34 +16,34 @@ export const EXTRA_CHAIN_COLORS = [
 ];
 
 const palette = {
-  text: '#F7F8FA',
+  text: '#F5F5F7',
   tint: '#FF6B35',
-  background: '#07080B',
-  foreground: '#F7F8FA',
-  card: 'rgba(20,22,28,0.68)',
-  cardForeground: '#F7F8FA',
+  background: '#060607',
+  foreground: '#F5F5F7',
+  card: 'rgba(18,18,20,0.94)',
+  cardForeground: '#F5F5F7',
   primary: '#FF6B35',
   primaryForeground: '#FFFFFF',
-  secondary: 'rgba(25,27,34,0.62)',
-  secondaryForeground: '#F7F8FA',
-  muted: 'rgba(24,26,32,0.58)',
-  mutedForeground: '#8E939F',
+  secondary: 'rgba(28,28,31,0.82)',
+  secondaryForeground: '#F5F5F7',
+  muted: 'rgba(30,30,33,0.72)',
+  mutedForeground: '#8E8E95',
   accent: '#FF6B35',
   accentForeground: '#FFFFFF',
   destructive: '#FF3B30',
   destructiveForeground: '#FFFFFF',
-  border: 'rgba(255,255,255,0.105)',
-  input: 'rgba(255,255,255,0.135)',
-  glass: 'rgba(17,19,25,0.66)',
-  glassStrong: 'rgba(20,22,28,0.78)',
-  glassBorder: 'rgba(255,255,255,0.115)',
-  glassHighlight: 'rgba(255,255,255,0.075)',
+  border: 'rgba(255,255,255,0.075)',
+  input: 'rgba(255,255,255,0.095)',
+  glass: 'rgba(16,16,18,0.78)',
+  glassStrong: 'rgba(22,22,24,0.88)',
+  glassBorder: 'rgba(255,255,255,0.09)',
+  glassHighlight: 'rgba(255,255,255,0.05)',
 };
 
 const colors = {
   light: palette,
   dark: palette,
-  radius: 20,
+  radius: 22,
 };
 
 export default colors;

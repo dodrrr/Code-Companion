@@ -35,7 +35,7 @@ function getGreeting(): string {
 
 const quote = getDailyQuote();
 
-export default function TodayScreen() {
+export default function ChainsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { chains, isReady, setDayStatus, isProtectedToday, isFrozenToday } = useChains();
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
   },
   dateStr: {
-    fontSize: 24,
+    fontSize: 30,
     fontFamily: 'Inter_700Bold',
   },
   addBtn: {
@@ -249,16 +249,16 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
     letterSpacing: 0.3,
   },
-  focusCard: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 18, borderWidth: 1, padding: 13, marginBottom: 16 },
+  focusCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, padding: 16, marginBottom: 18 },
   focusIcon: { width: 36, height: 36, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   focusEyebrow: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
   focusTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', marginTop: 2 },
   focusBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
-  protectedCard: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 18, borderWidth: 1, padding: 13, marginBottom: 16 },
+  protectedCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, padding: 16, marginBottom: 18 },
   protectedIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   rescue: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderRadius: 15, paddingVertical: 10, marginTop: -7, marginBottom: 16 },
   rescueText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-  recoveryCard: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 18, borderWidth: 1, padding: 13, marginBottom: 10 },
+  recoveryCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, padding: 16, marginBottom: 12 },
   empty: {
     flex: 1,
     alignItems: 'center',

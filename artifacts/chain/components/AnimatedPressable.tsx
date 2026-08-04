@@ -11,7 +11,7 @@ import Animated, {
 interface Props extends Omit<PressableProps, 'style'> {
   /** Style applied to the inner Animated.View — use for layout, borders, bg, etc. */
   style?: StyleProp<ViewStyle>;
-  /** Scale target on press-in. Default 0.975: tactile, never bouncy. */
+  /** Scale target on press-in. Default 0.985: subtle and tactile. */
   scaleTo?: number;
   children: React.ReactNode;
 }
@@ -23,7 +23,7 @@ interface Props extends Omit<PressableProps, 'style'> {
 export default function AnimatedPressable({
   children,
   style,
-  scaleTo = 0.975,
+  scaleTo = 0.985,
   onPressIn: externalPressIn,
   onPressOut: externalPressOut,
   ...rest
@@ -42,7 +42,7 @@ export default function AnimatedPressable({
       if (reducedMotion) {
         opacity.value = withTiming(0.7, { duration: 60 });
       } else {
-        scale.value = withTiming(scaleTo, { duration: 85 });
+        scale.value = withTiming(scaleTo, { duration: 120 });
       }
       externalPressIn?.(e);
     },
@@ -54,7 +54,7 @@ export default function AnimatedPressable({
       if (reducedMotion) {
         opacity.value = withTiming(1, { duration: 120 });
       } else {
-        scale.value = withSpring(1, { damping: 18, stiffness: 310, mass: 0.65 });
+        scale.value = withSpring(1, { damping: 22, stiffness: 260, mass: 0.7 });
       }
       externalPressOut?.(e);
     },

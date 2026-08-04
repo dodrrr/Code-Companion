@@ -67,8 +67,8 @@ export default function ChainCard({ chain }: Props) {
     if (!done) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       checkScale.value = withSequence(
-        withTiming(1.14, { duration: 115 }),
-        withSpring(1, { damping: 15, stiffness: 260 }),
+        withTiming(1.07, { duration: 120 }),
+        withSpring(1, { damping: 22, stiffness: 260 }),
       );
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -92,7 +92,7 @@ export default function ChainCard({ chain }: Props) {
             { backgroundColor: 'transparent', borderColor: colors.border },
           ]}
         >
-          <GlassSurface pointerEvents="none" accentColor={chain.color} style={StyleSheet.absoluteFill} />
+          <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
           {/* Color accent stripe */}
           <View style={[styles.stripe, { backgroundColor: chain.color }]} />
 
@@ -166,24 +166,24 @@ export default function ChainCard({ chain }: Props) {
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
-    borderRadius: 18,
-    borderWidth: 1,
-    marginBottom: 12,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 14,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 3,
+    shadowOpacity: 0.12,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 9 },
+    elevation: 2,
   },
   stripe: {
-    width: 4,
+    width: 3,
   },
   body: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    gap: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 17,
+    gap: 14,
   },
   topRow: {
     flexDirection: 'row',
@@ -191,7 +191,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   name: {
-    fontSize: 16,
+    fontSize: 17,
     fontFamily: 'Inter_600SemiBold',
   },
   nameBlock: { flex: 1, marginRight: 12, gap: 3 },
@@ -199,7 +199,7 @@ const styles = StyleSheet.create({
   rightSide: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 18,
+    gap: 16,
     flexShrink: 0,
   },
   streakBlock: {
@@ -223,9 +223,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   checkBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',

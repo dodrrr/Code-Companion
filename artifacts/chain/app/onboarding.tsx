@@ -38,7 +38,7 @@ const SLIDES: Slide[] = [
   {
     id: '2',
     icon: 'shield-checkmark',
-    iconColor: '#A855F7',
+    iconColor: '#FF6B35',
     title: 'Protect your time',
     body:
       "The Pause Gate adds a moment of friction before you open a distracting app. You see your streak. You decide if it\u2019s worth breaking.",
@@ -46,7 +46,7 @@ const SLIDES: Slide[] = [
   {
     id: '3',
     icon: 'moon',
-    iconColor: '#3B82F6',
+    iconColor: '#FF6B35',
     title: 'Plan tonight, win tomorrow',
     body:
       'Spend 60 seconds each evening reflecting on today and making space for what matters tomorrow. The day starts before it starts.',
