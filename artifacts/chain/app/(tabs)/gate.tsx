@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { AmbientScreen } from '@/components/AmbientSurface';
 import { useColors } from '@/hooks/useColors';
 import { getStreak, useChains } from '@/context/ChainsContext';
 import { GateSaveEvent, getGateSaves24h } from '@/lib/gateStats';
@@ -253,7 +254,7 @@ export default function GateScreen() {
   }
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <AmbientScreen tone="gate" style={styles.root}>
       {/* Tutorial modal */}
       {tutorialChecked && showTutorial && <TutorialModal onDone={dismissTutorial} />}
       {configuringApp && <GateRuleModal app={configuringApp} initialRule={rules[configuringApp.id] ?? DEFAULT_RULE} onSave={(rule) => saveRule(configuringApp, rule)} onClose={() => setConfiguringApp(null)} />}
@@ -346,7 +347,7 @@ export default function GateScreen() {
       </ScrollView></View>
       <View style={{ width: pageWidth, height: '100%' }}><GateWindowsContent embedded onWindowsChange={setWindowCount} /></View>
       </ScrollView>
-    </View>
+    </AmbientScreen>
   );
 }
 
