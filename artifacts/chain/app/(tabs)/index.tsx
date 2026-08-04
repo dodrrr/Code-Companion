@@ -15,6 +15,7 @@ import { useColors } from '@/hooks/useColors';
 import { Chain, getStreak, getTodayStr, isRestDay, toLocalDateString, useChains } from '@/context/ChainsContext';
 import { usePlan } from '@/context/PlanContext';
 import ChainCard from '@/components/ChainCard';
+import { AmbientScreen } from '@/components/AmbientSurface';
 import { getDailyQuote } from '@/constants/quotes';
 
 function formatDate(): string {
@@ -112,7 +113,7 @@ export default function TodayScreen() {
   );
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <AmbientScreen tone="today" style={styles.root}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
         <View style={styles.headerLeft}>
@@ -191,7 +192,7 @@ export default function TodayScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
-    </View>
+    </AmbientScreen>
   );
 }
 
