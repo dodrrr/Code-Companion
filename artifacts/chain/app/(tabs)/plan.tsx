@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { AmbientScreen } from '@/components/AmbientSurface';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { EXTRA_CHAIN_COLORS } from '@/constants/colors';
@@ -291,7 +292,7 @@ export default function PlanScreen() {
   }
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <AmbientScreen tone="plan" style={styles.root}>
       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
         <Text style={[styles.headerEyebrow, { color: colors.primary }]}>{isToday ? 'ONE THING AT A TIME' : 'MAKE TOMORROW LIGHTER'}</Text>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>{isToday ? "Today's Plan" : "Tonight's Plan"}</Text>
@@ -479,7 +480,7 @@ export default function PlanScreen() {
         onEdit={() => { if (taskMenuItem) startEditing(taskMenuItem); setTaskMenuItem(null); }}
         onDelete={() => { if (taskMenuItem) { void cancelPlanReminder(taskMenuItem.notificationId); removeItem(taskMenuItem.id); } setTaskMenuItem(null); }}
       />
-    </View>
+    </AmbientScreen>
   );
 }
 
