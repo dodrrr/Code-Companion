@@ -121,7 +121,12 @@ export default function ChainsScreen() {
           <Text style={[styles.greeting, { color: colors.mutedForeground }]}>
             {getGreeting()}
           </Text>
-          <Text style={[styles.dateStr, { color: colors.foreground }]}>
+          <Text
+            style={[styles.dateStr, { color: colors.foreground }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.76}
+          >
             {formatDate()}
           </Text>
         </View>
@@ -209,6 +214,8 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
   },
   headerLeft: {
+    flex: 1,
+    minWidth: 0,
     gap: 3,
   },
   greeting: {
@@ -228,7 +235,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 9, marginLeft: 12 },
   settingsBtn: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   list: {
     paddingHorizontal: 20,
