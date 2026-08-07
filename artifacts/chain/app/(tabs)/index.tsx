@@ -12,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
 import { Chain, getStreak, getTodayStr, isRestDay, toLocalDateString, useChains } from '@/context/ChainsContext';
 import { usePlan } from '@/context/PlanContext';
@@ -49,7 +50,7 @@ export default function ChainsScreen() {
     // first tap from paying the cost of loading and mounting the editor.
     let preloadTimer: ReturnType<typeof setTimeout> | undefined;
     const interaction = InteractionManager.runAfterInteractions(() => {
-      preloadTimer = setTimeout(() => router.prefetch('/chain/new'), 350);
+      preloadTimer = setTimeout(() => router.prefetch('/chain/new'), 80);
     });
     return () => {
       interaction.cancel();
@@ -149,7 +150,10 @@ export default function ChainsScreen() {
             <Ionicons name="settings-outline" size={19} color={colors.mutedForeground} />
           </Pressable>
           {chains.length < 5 && <Pressable
-            onPressIn={() => router.prefetch('/chain/new')}
+            onPressIn={() => {
+              router.prefetch('/chain/new');
+              void Haptics.selectionAsync();
+            }}
             onPress={() => router.push('/chain/new')}
             style={({ pressed }) => [styles.addBtn, { backgroundColor: colors.primary, transform: [{ scale: pressed ? 0.94 : 1 }] }]}
           ><Ionicons name="add" size={24} color="#fff" /></Pressable>}
@@ -178,7 +182,10 @@ export default function ChainsScreen() {
             Pick one habit. Show up daily.{'\n'}Don't break the chain.
           </Text>
           <Pressable
-            onPressIn={() => router.prefetch('/chain/new')}
+            onPressIn={() => {
+              router.prefetch('/chain/new');
+              void Haptics.selectionAsync();
+            }}
             onPress={() => router.push('/chain/new')}
             style={({ pressed }) => [
               styles.emptyBtn,

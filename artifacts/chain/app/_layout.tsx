@@ -24,15 +24,31 @@ const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   return (
-    <Stack>
+    <Stack
+      screenOptions={{
+        animation: 'simple_push',
+        animationDuration: 360,
+        gestureEnabled: true,
+        fullScreenGestureEnabled: true,
+      }}
+    >
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false, animation: 'fade' }} />
-      <Stack.Screen name="chain/new" options={{ headerShown: false, presentation: 'modal' }} />
-      <Stack.Screen name="chain/[id]" options={{ headerShown: false }} />
-      <Stack.Screen name="pause-gate-demo" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
-      <Stack.Screen name="gate-windows" options={{ headerShown: false, animation: 'slide_from_right' }} />
-      <Stack.Screen name="focus/[id]" options={{ headerShown: false, presentation: 'fullScreenModal' }} />
-      <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal' }} />
+      <Stack.Screen
+        name="chain/new"
+        options={{
+          headerShown: false,
+          presentation: 'modal',
+          animation: 'slide_from_bottom',
+          animationDuration: 420,
+          gestureDirection: 'vertical',
+        }}
+      />
+      <Stack.Screen name="chain/[id]" options={{ headerShown: false, animationDuration: 380 }} />
+      <Stack.Screen name="pause-gate-demo" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade', animationDuration: 360 }} />
+      <Stack.Screen name="gate-windows" options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 380 }} />
+      <Stack.Screen name="focus/[id]" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade', animationDuration: 360 }} />
+      <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', animationDuration: 420, gestureDirection: 'vertical' }} />
     </Stack>
   );
 }
