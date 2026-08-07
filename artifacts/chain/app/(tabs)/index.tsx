@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   AppState,
   FlatList,
+  InteractionManager,
   Platform,
   Pressable,
   StyleSheet,
@@ -42,6 +43,19 @@ export default function ChainsScreen() {
   const { items } = usePlan();
   const [localDay, setLocalDay] = useState(getTodayStr());
   const [currentTime, setCurrentTime] = useState(() => new Date());
+
+  useEffect(() => {
+    // Warm the creation route once the Chains screen has settled. This keeps the
+    // first tap from paying the cost of loading and mounting the editor.
+    let preloadTimer: ReturnType<typeof setTimeout> | undefined;
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      preloadTimer = setTimeout(() => router.prefetch('/chain/new'), 350);
+    });
+    return () => {
+      interaction.cancel();
+      if (preloadTimer) clearTimeout(preloadTimer);
+    };
+  }, []);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -135,6 +149,7 @@ export default function ChainsScreen() {
             <Ionicons name="settings-outline" size={19} color={colors.mutedForeground} />
           </Pressable>
           {chains.length < 5 && <Pressable
+            onPressIn={() => router.prefetch('/chain/new')}
             onPress={() => router.push('/chain/new')}
             style={({ pressed }) => [styles.addBtn, { backgroundColor: colors.primary, transform: [{ scale: pressed ? 0.94 : 1 }] }]}
           ><Ionicons name="add" size={24} color="#fff" /></Pressable>}
@@ -163,6 +178,7 @@ export default function ChainsScreen() {
             Pick one habit. Show up daily.{'\n'}Don't break the chain.
           </Text>
           <Pressable
+            onPressIn={() => router.prefetch('/chain/new')}
             onPress={() => router.push('/chain/new')}
             style={({ pressed }) => [
               styles.emptyBtn,

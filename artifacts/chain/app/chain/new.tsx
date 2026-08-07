@@ -1,5 +1,6 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
+  InteractionManager,
   Platform,
   Pressable,
   ScrollView,
@@ -11,7 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { AmbientScreen } from '@/components/AmbientSurface';
 import { CHAIN_COLORS, EXTRA_CHAIN_COLORS } from '@/constants/colors';
@@ -64,6 +65,22 @@ export default function NewChainScreen() {
   const [weeklyTarget, setWeeklyTarget] = useState(3);
   const [showMoreSuggestions, setShowMoreSuggestions] = useState(false);
   const inputRef = useRef<TextInput>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      // Let the native modal finish its first frames before asking iOS to mount
+      // the keyboard. Running both animations together made the editor appear late.
+      let focusTimer: ReturnType<typeof setTimeout> | undefined;
+      const interaction = InteractionManager.runAfterInteractions(() => {
+        focusTimer = setTimeout(() => inputRef.current?.focus(), 80);
+      });
+
+      return () => {
+        interaction.cancel();
+        if (focusTimer) clearTimeout(focusTimer);
+      };
+    }, []),
+  );
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
@@ -134,7 +151,6 @@ export default function NewChainScreen() {
             maxLength={40}
             returnKeyType="done"
             onSubmitEditing={handleCreate}
-            autoFocus
           />
         </View>
 
