@@ -1,8 +1,8 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
-  InteractionManager,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -12,7 +12,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useColors } from '@/hooks/useColors';
 import { CHAIN_COLORS, EXTRA_CHAIN_COLORS } from '@/constants/colors';
 import { useChains } from '@/context/ChainsContext';
@@ -67,16 +66,13 @@ export default function NewChainScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      // Let the native modal finish its first frames before asking iOS to mount
-      // the keyboard. Running both animations together made the editor appear late.
-      let focusTimer: ReturnType<typeof setTimeout> | undefined;
-      const interaction = InteractionManager.runAfterInteractions(() => {
-        focusTimer = setTimeout(() => inputRef.current?.focus(), 180);
-      });
+      // InteractionManager does not reliably include the native-stack transition.
+      // Keep the keyboard out of the modal's trajectory, then introduce it as a
+      // separate, native movement once the screen has settled.
+      const focusTimer = setTimeout(() => inputRef.current?.focus(), 620);
 
       return () => {
-        interaction.cancel();
-        if (focusTimer) clearTimeout(focusTimer);
+        clearTimeout(focusTimer);
       };
     }, []),
   );
@@ -97,16 +93,15 @@ export default function NewChainScreen() {
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       {/* Header */}
-      <Animated.View entering={FadeIn.duration(220).delay(70)} style={[styles.header, { paddingTop: topPad + 16 }]}>
+      <View style={[styles.header, { paddingTop: topPad + 16 }]}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
           <Ionicons name="close" size={24} color={colors.mutedForeground} />
         </Pressable>
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>New Chain</Text>
         <View style={{ width: 24 }} />
-      </Animated.View>
+      </View>
 
-      <Animated.ScrollView
-        entering={FadeInDown.duration(420).delay(80).withInitialValues({ opacity: 0, transform: [{ translateY: 14 }] })}
+      <ScrollView
         style={styles.scrollRoot}
         contentContainerStyle={styles.body}
         keyboardShouldPersistTaps="handled"
@@ -228,10 +223,10 @@ export default function NewChainScreen() {
           })}
           <View style={[styles.swatchRing, { borderColor: colors.border, borderWidth: 2.5 }]}><Pressable onPress={() => setShowMoreColors((open) => !open)} style={[styles.colorSwatch, { backgroundColor: colors.card }]}><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} /></Pressable></View>
         </View>
-      </Animated.ScrollView>
+      </ScrollView>
 
       {/* Create button */}
-      <Animated.View entering={FadeInDown.duration(360).delay(150).withInitialValues({ opacity: 0, transform: [{ translateY: 10 }] })} style={[styles.footer, { paddingBottom: botPad + 24 }]}>
+      <View style={[styles.footer, { paddingBottom: botPad + 24 }]}>
         <Pressable
           onPress={handleCreate}
           style={({ pressed }) => [
@@ -245,7 +240,7 @@ export default function NewChainScreen() {
           <Ionicons name="link" size={20} color="#fff" />
           <Text style={styles.createBtnText}>Start this chain</Text>
         </Pressable>
-      </Animated.View>
+      </View>
     </View>
   );
 }

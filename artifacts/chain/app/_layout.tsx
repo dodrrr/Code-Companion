@@ -38,9 +38,9 @@ function RootLayoutNav() {
         name="chain/new"
         options={{
           headerShown: false,
-          presentation: 'modal',
+          presentation: 'fullScreenModal',
           animation: 'slide_from_bottom',
-          animationDuration: 420,
+          animationDuration: 380,
           gestureDirection: 'vertical',
         }}
       />
