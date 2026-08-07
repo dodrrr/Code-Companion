@@ -1,6 +1,5 @@
 import React from 'react';
 import { Platform, StyleSheet, View, ViewProps } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
 
@@ -66,9 +65,6 @@ export function AmbientScreen({ tone = 'neutral', color: colorOverride, children
           style={StyleSheet.absoluteFill}
         />
       </View>
-      {Platform.OS !== 'web' && (
-        <BlurView pointerEvents="none" intensity={100} tint="dark" style={StyleSheet.absoluteFill} />
-      )}
       <LinearGradient
         pointerEvents="none"
         colors={['rgba(4,4,5,0.30)', 'rgba(6,6,7,0.68)', 'rgba(4,4,5,0.84)']}
@@ -81,21 +77,14 @@ export function AmbientScreen({ tone = 'neutral', color: colorOverride, children
 }
 
 /** A restrained glass surface for high-level cards, sheets and section groups. */
-export function GlassSurface({ children, style, intensity = 42, accentColor, elevated = false, ...props }: ViewProps & { intensity?: number; accentColor?: string; elevated?: boolean }) {
+export function GlassSurface({ children, style, accentColor, elevated = false, ...props }: ViewProps & { intensity?: number; accentColor?: string; elevated?: boolean }) {
   const useNativeGlass = elevated && Platform.OS === 'ios' && isGlassEffectAPIAvailable();
   return (
     <View {...props} style={[styles.glass, elevated && styles.glassElevated, style]}>
       {useNativeGlass ? (
         <GlassView pointerEvents="none" glassEffectStyle="regular" colorScheme="dark" tintColor="#11141B" style={StyleSheet.absoluteFill} />
-      ) : elevated && Platform.OS !== 'web' ? (
-        <BlurView pointerEvents="none" intensity={intensity} tint="dark" style={StyleSheet.absoluteFill} />
       ) : null}
-      <LinearGradient
-        pointerEvents="none"
-        colors={['rgba(255,255,255,0.045)', 'rgba(255,255,255,0.008)', 'rgba(0,0,0,0.11)']}
-        locations={[0, 0.28, 1]}
-        style={StyleSheet.absoluteFill}
-      />
+      <View pointerEvents="none" style={styles.glassSheen} />
       {accentColor ? <View pointerEvents="none" style={[styles.accentVeil, { backgroundColor: alpha(accentColor, '05') }]} /> : null}
       {children}
     </View>
@@ -120,6 +109,12 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.16,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 12 },
+  },
+  glassSheen: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,255,255,0.018)',
+    borderTopColor: 'rgba(255,255,255,0.035)',
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   accentVeil: { ...StyleSheet.absoluteFillObject },
 });

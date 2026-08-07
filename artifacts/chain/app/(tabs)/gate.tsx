@@ -174,6 +174,7 @@ export default function GateScreen() {
   const [tutorialChecked, setTutorialChecked]  = useState(false);
   const [windowCount, setWindowCount] = useState(0);
   const [activePage, setActivePage] = useState(0);
+  const [screenFocused, setScreenFocused] = useState(false);
   const [pauseSegmentWidth, setPauseSegmentWidth] = useState(0);
   const [windowsSegmentWidth, setWindowsSegmentWidth] = useState(0);
   const pagerRef = useRef<ScrollView>(null);
@@ -197,7 +198,12 @@ export default function GateScreen() {
 
   const refreshSaveEvents = useCallback(() => { void getGateSaves24h().then(setSaveEvents); }, []);
   const refreshWindows = useCallback(() => { void getGateWindows().then((windows) => setWindowCount(windows.length)); }, []);
-  useFocusEffect(useCallback(() => { refreshSaveEvents(); refreshWindows(); }, [refreshSaveEvents, refreshWindows]));
+  useFocusEffect(useCallback(() => {
+    setScreenFocused(true);
+    refreshSaveEvents();
+    refreshWindows();
+    return () => setScreenFocused(false);
+  }, [refreshSaveEvents, refreshWindows]));
 
   function dismissTutorial() {
     AsyncStorage.setItem(TUTORIAL_KEY, '1');
@@ -350,7 +356,7 @@ export default function GateScreen() {
           </Text>
         </View>
       </ScrollView></View>
-      <View style={{ width: pageWidth, height: '100%' }}><GateWindowsContent embedded onWindowsChange={setWindowCount} /></View>
+      <View style={{ width: pageWidth, height: '100%' }}><GateWindowsContent embedded live={screenFocused && activePage === 1} onWindowsChange={setWindowCount} /></View>
       </ScrollView>
     </AmbientScreen>
   );

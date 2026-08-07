@@ -77,7 +77,7 @@ function ProtectedUsageSheet({ appIds, onClose }: { appIds: string[]; onClose: (
   return <Modal transparent animationType="slide" onRequestClose={onClose}><View style={styles.shade}><View style={[styles.usageSheet, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={styles.sheetHeader}><View><Text style={[styles.editorEyebrow, { color: colors.primary }]}>WEEKLY SCREEN TIME</Text><Text style={[styles.sheetTitle, { color: colors.foreground }]}>Your protected apps</Text></View><Pressable onPress={onClose} hitSlop={12}><Ionicons name="close" size={23} color={colors.mutedForeground} /></Pressable></View>{nativeReady ? <><Text style={[styles.usageTotal, { color: colors.primary }]}>{format(total)}</Text><Text style={[styles.usageLead, { color: colors.foreground }]}>used across the apps you chose to protect.</Text>{usage?.map((app) => <View key={app.id} style={[styles.usageApp, { borderColor: colors.border }]}><Text style={[styles.usageAppName, { color: colors.foreground }]}>{app.label}</Text><Text style={[styles.usageAppMinutes, { color: colors.primary }]}>{format(app.minutes)}</Text></View>)}</> : <><View style={[styles.usageIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="chart-bar-outline" size={25} color={colors.primary} /></View><Text style={[styles.usageLead, { color: colors.foreground }]}>See only the apps you chose to guard.</Text><Text style={[styles.usageBody, { color: colors.mutedForeground }]}>This weekly view is wired for Apple Screen Time. In a native build it will use your private selection and show a short, honest report — not a feed of every app on your phone.</Text><Text style={[styles.usageQuote, { color: colors.primary }]}>Less time pulled away is time you can put somewhere you care about.</Text></>}<Pressable onPress={onClose} style={[styles.usageDone, { backgroundColor: colors.primary }]}><Text style={styles.confirmTimeText}>Keep protecting your time</Text></Pressable></View></View></Modal>;
 }
 
-export function GateWindowsContent({ embedded = false, onWindowsChange }: { embedded?: boolean; onWindowsChange?: (count: number) => void }) {
+export function GateWindowsContent({ embedded = false, live = true, onWindowsChange }: { embedded?: boolean; live?: boolean; onWindowsChange?: (count: number) => void }) {
   const colors = useColors(); const insets = useSafeAreaInsets();
   const [windows, setWindows] = useState<GateWindow[]>([]); const [editing, setEditing] = useState<GateWindow | undefined>(); const [creating, setCreating] = useState(false);
   const [showUsage, setShowUsage] = useState(false);
@@ -85,7 +85,21 @@ export function GateWindowsContent({ embedded = false, onWindowsChange }: { embe
   const lastTap = useRef<{ id: string; at: number } | undefined>(undefined); const toggleScale = useRef(new Animated.Value(1)).current;
   const topPad = embedded ? 0 : Platform.OS === 'web' ? 50 : insets.top + 8;
   useEffect(() => { void getGateWindows().then((saved) => { const synced = syncGateWindowProgress(saved); setWindows(synced); onWindowsChange?.(synced.length); if (synced !== saved) void saveGateWindows(synced); }); void getGateSaves24h().then(setSaveEvents); }, [onWindowsChange]);
-  useEffect(() => { const timer = setInterval(() => { const tick = new Date(); setNow(tick); setWindows((current) => { const next = syncGateWindowProgress(current, tick); if (next !== current) void saveGateWindows(next); return next; }); }, 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => {
+    if (!live) return;
+    const refresh = () => {
+      const tick = new Date();
+      setNow(tick);
+      setWindows((current) => {
+        const next = syncGateWindowProgress(current, tick);
+        if (next !== current) void saveGateWindows(next);
+        return next;
+      });
+    };
+    refresh();
+    const timer = setInterval(refresh, 1000);
+    return () => clearInterval(timer);
+  }, [live]);
   const save = async (window: GateWindow) => { const next = windows.some((item) => item.id === window.id) ? windows.map((item) => item.id === window.id ? window : item) : [...windows, window]; const synced = syncGateWindowProgress(next, now); setWindows(synced); onWindowsChange?.(synced.length); await saveGateWindows(synced); setEditing(undefined); setCreating(false); };
   const remove = (window: GateWindow) => Alert.alert('Remove window?', `${window.name} will no longer schedule a Gate pause.`, [{ text: 'Cancel', style: 'cancel' }, { text: 'Remove', style: 'destructive', onPress: () => { const next = windows.filter((item) => item.id !== window.id); setWindows(next); onWindowsChange?.(next.length); void saveGateWindows(next); } }]);
   const animateWindow = (window: GateWindow) => { setToggledWindowId(window.id); void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); Animated.sequence([Animated.timing(toggleScale, { toValue: 0.975, duration: 90, useNativeDriver: true }), Animated.spring(toggleScale, { toValue: 1, friction: 5, tension: 170, useNativeDriver: true })]).start(() => setToggledWindowId(undefined)); };

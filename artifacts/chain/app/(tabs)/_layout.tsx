@@ -59,7 +59,7 @@ function ClassicTabLayout() {
         tabBarBackground: () =>
           isIOS ? (
             <View style={[StyleSheet.absoluteFill, styles.tabGlass]}>
-              <BlurView intensity={80} tint={isDark ? 'dark' : 'dark'} style={StyleSheet.absoluteFill} />
+              <BlurView intensity={48} tint={isDark ? 'dark' : 'dark'} style={StyleSheet.absoluteFill} />
               <LinearGradient pointerEvents="none" colors={['rgba(255,255,255,0.075)', 'rgba(255,255,255,0.018)', 'rgba(0,0,0,0.08)']} style={StyleSheet.absoluteFill} />
             </View>
           ) : isWeb ? (
