@@ -176,7 +176,6 @@ export default function ChainDetailScreen() {
     isCompletedToday,
     isFrozenToday,
     getRemainingFreezeTokens,
-    seedChainRhythm,
     isReady,
   } = useChains();
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
@@ -293,26 +292,6 @@ export default function ChainDetailScreen() {
       return;
     }
     Alert.alert('Your minimum version', `Currently: ${chain.minimumLabel}`);
-  }
-
-  function enableGodMode() {
-    if (!chain) return;
-    seedChainRhythm(chain.id);
-    const now = new Date();
-    const entries: FocusLogEntry[] = Array.from({ length: 18 }, (_, index) => {
-      const date = new Date(now);
-      date.setDate(now.getDate() - index - 1);
-      date.setHours(8 + (date.getDay() === 3 ? 0 : 1), date.getDay() === 3 ? 42 : 18, 0, 0);
-      return { itemId: `god-${chain.id}-${index}`, chainId: chain.id, date: toLocalDateString(date), minutes: date.getDay() === 3 ? 120 : 60, completedAt: date.toISOString() };
-    });
-    void AsyncStorage.getItem(FOCUS_LOG_KEY).then((raw) => {
-      let existing: FocusLogEntry[] = [];
-      try { const parsed: unknown = raw ? JSON.parse(raw) : []; existing = Array.isArray(parsed) ? parsed as FocusLogEntry[] : []; } catch { /* use empty log */ }
-      const next = [...existing.filter((entry) => !entry.itemId.startsWith(`god-${chain.id}-`)), ...entries];
-      void AsyncStorage.setItem(FOCUS_LOG_KEY, JSON.stringify(next));
-      setFocusLog(next);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    });
   }
 
   function toggleRestDay(day: number) {
@@ -443,8 +422,6 @@ export default function ChainDetailScreen() {
           <View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>RHYTHM</Text><Text style={[styles.rhythmTitle, { color: colors.foreground }]}>{rhythm.samples >= 3 ? `You usually protect this around ${readableHour(rhythm.hour)}.` : 'Your rhythm is still forming.'}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{rhythm.samples >= 3 ? `${DAY_LABELS[rhythm.day ?? 1]} is your strongest day${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of planned focus logged` : ''}.` : `Complete it a few more times and Chain will spot your best window${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of focus logged so far` : ''}.`}</Text></View>
         </View>
         <View style={[styles.weekReflection, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={chain.color} /></View><View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: chain.color }]}>THIS WEEK</Text><Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m focused on ${chain.name}` : `${totalProtected} days kept on ${chain.name}.`}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{weeklyFocus.length ? `${weeklyFocus.length} focus block${weeklyFocus.length === 1 ? '' : 's'} logged · You showed up for yourself.` : stage.key === 'starting-line' ? 'Your reflection becomes meaningful with your next session.' : stage.copy}</Text></View></View>
-        <Pressable onPress={enableGodMode} style={({ pressed }) => [styles.godMode, { borderColor: chain.color + '44', opacity: pressed ? 0.7 : 1 }]}><Ionicons name="sparkles-outline" size={13} color={chain.color} /><Text style={[styles.godModeText, { color: chain.color }]}>God mode · simulate 3 weeks of rhythm</Text></Pressable>
-
         {/* Today's action */}
         {restingToday ? <View style={[styles.restBanner, { backgroundColor: colors.card, borderColor: colors.border }]}><Ionicons name="moon-outline" size={18} color={chain.color} /><View style={{ flex: 1 }}><Text style={[styles.restTitle, { color: colors.foreground }]}>Rest day</Text><Text style={[styles.restBody, { color: colors.mutedForeground }]}>Your streak is safe. Come back tomorrow.</Text></View></View> : <View style={styles.actionRow}>
           <Pressable
@@ -742,8 +719,6 @@ const styles = StyleSheet.create({
   rhythmEyebrow: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 1.1 },
   rhythmTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', lineHeight: 19, marginTop: 3 },
   rhythmBody: { fontSize: 11, fontFamily: 'Inter_400Regular', lineHeight: 16, marginTop: 3 },
-  godMode: { flexDirection: 'row', alignSelf: 'center', alignItems: 'center', gap: 6, borderWidth: 1, borderRadius: 13, paddingHorizontal: 10, paddingVertical: 7, marginTop: -5 },
-  godModeText: { fontSize: 10, fontFamily: 'Inter_600SemiBold' },
   actionRow: {
     flexDirection: 'row',
     gap: 10,
