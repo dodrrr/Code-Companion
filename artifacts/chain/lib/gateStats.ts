@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getGateWindowStatus, getGateWindows } from './gateWindows';
+import { reportDiagnostic } from './diagnostics';
 
 const GATE_SAVE_EVENTS_KEY = '@chain_gate_save_events';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -14,7 +15,8 @@ async function readRecentEvents(): Promise<GateSaveEvent[]> {
     return Array.isArray(parsed)
       ? parsed.filter((entry): entry is GateSaveEvent => Boolean(entry) && typeof entry.appId === 'string' && typeof entry.at === 'number' && entry.at >= cutoff)
       : [];
-  } catch {
+  } catch (error) {
+    reportDiagnostic({ area: 'gate', operation: 'stats.read', severity: 'error', error });
     return [];
   }
 }

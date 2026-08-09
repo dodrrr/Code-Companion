@@ -146,10 +146,12 @@ export default function ChainsScreen() {
           </Text>
         </View>
         <View style={styles.headerActions}>
-          <Pressable onPress={() => router.push('/settings')} style={[styles.settingsBtn, { borderColor: colors.border }]} hitSlop={8}>
+          <Pressable onPress={() => router.push('/settings')} style={[styles.settingsBtn, { borderColor: colors.border }]} hitSlop={8} accessibilityRole="button" accessibilityLabel="Open settings">
             <Ionicons name="settings-outline" size={19} color={colors.mutedForeground} />
           </Pressable>
           {chains.length < 5 && <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Add a new chain"
             onPressIn={() => {
               router.prefetch('/chain/new');
               void Haptics.selectionAsync();
@@ -182,6 +184,8 @@ export default function ChainsScreen() {
             Pick one habit. Show up daily.{'\n'}Don't break the chain.
           </Text>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Add your first chain"
             onPressIn={() => {
               router.prefetch('/chain/new');
               void Haptics.selectionAsync();

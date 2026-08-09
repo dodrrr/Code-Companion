@@ -1,4 +1,5 @@
 import { NativeModules } from 'react-native';
+import { reportDiagnostic } from './diagnostics';
 
 /**
  * The JS-facing contract for Chain's future Screen Time native module.
@@ -29,7 +30,8 @@ function module(): ChainScreenTimeModule | undefined {
 export async function isNativeScreenTimeAvailable(): Promise<boolean> {
   try {
     return Boolean(module()?.isAvailable && await module()!.isAvailable!());
-  } catch {
+  } catch (error) {
+    reportDiagnostic({ area: 'native', operation: 'screenTime.available', severity: 'warning', error });
     return false;
   }
 }
@@ -39,7 +41,8 @@ export async function pickProtectedApps(): Promise<ScreenTimeApp[] | undefined> 
   if (!bridge?.pickApps) return undefined;
   try {
     return await bridge.pickApps();
-  } catch {
+  } catch (error) {
+    reportDiagnostic({ area: 'native', operation: 'screenTime.pickApps', severity: 'error', error });
     return undefined;
   }
 }
@@ -49,7 +52,8 @@ export async function getProtectedAppsWeeklyUsage(appIds: string[]): Promise<Pro
   if (!bridge?.getWeeklyUsage) return undefined;
   try {
     return await bridge.getWeeklyUsage(appIds);
-  } catch {
+  } catch (error) {
+    reportDiagnostic({ area: 'native', operation: 'screenTime.weeklyUsage', severity: 'error', error });
     return undefined;
   }
 }

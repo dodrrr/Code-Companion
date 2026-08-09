@@ -3,10 +3,10 @@ import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { usePlan } from '@/context/PlanContext';
+import { getPlanNotificationIntent } from '@/domain/plan';
+import { reportDiagnostic } from '@/lib/diagnostics';
 import {
   configurePlanNotificationActions,
-  PLAN_TASK_DONE_ACTION,
-  PLAN_TASK_SNOOZE_ACTION,
   schedulePlanSnooze,
 } from '@/lib/planNotifications';
 
@@ -24,18 +24,18 @@ export function PlanNotificationResponseHandler() {
       if (response.notification.request.identifier === handledResponseId) return;
       handledResponseId = response.notification.request.identifier;
       const data = response.notification.request.content.data as PlanNotificationData;
-      if (data.openPlan) {
+      const intent = getPlanNotificationIntent(response.actionIdentifier, data);
+      if (intent === 'open' && data.openPlan) {
         router.push('/(tabs)/plan');
         await Notifications.clearLastNotificationResponseAsync();
         return;
       }
       if (!data.planItemId || !data.planDate) return;
 
-      const action = response.actionIdentifier;
-      if (action === PLAN_TASK_DONE_ACTION) {
+      if (intent === 'complete') {
         await completeItemForDate(data.planItemId, data.planDate);
       }
-      if (action === PLAN_TASK_SNOOZE_ACTION) {
+      if (intent === 'snooze') {
         const items = await showDate(data.planDate);
         const item = items.find((entry) => entry.id === data.planItemId);
         if (item && !item.completed) {
@@ -47,10 +47,15 @@ export function PlanNotificationResponseHandler() {
       await Notifications.clearLastNotificationResponseAsync();
     };
 
-    const subscription = Notifications.addNotificationResponseReceivedListener((response) => { void handleResponse(response); });
+    const safelyHandle = (response: Notifications.NotificationResponse) => {
+      void handleResponse(response).catch((error) => {
+        reportDiagnostic({ area: 'notifications', operation: 'response.handle', severity: 'error', error });
+      });
+    };
+    const subscription = Notifications.addNotificationResponseReceivedListener(safelyHandle);
     void Notifications.getLastNotificationResponseAsync().then((response) => {
-      if (response) void handleResponse(response);
-    });
+      if (response) safelyHandle(response);
+    }).catch((error) => reportDiagnostic({ area: 'notifications', operation: 'response.restore', severity: 'error', error }));
     return () => subscription.remove();
   }, [completeItemForDate, showDate, updateReminderForDate]);
 

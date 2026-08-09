@@ -84,6 +84,9 @@ export default function ChainCard({ chain }: Props) {
     <>
       <Pressable
         onPress={handleCardPress}
+        accessibilityRole="button"
+        accessibilityLabel={`${chain.name}, ${streak} ${chain.cadence === 'weekly' ? 'week' : 'day'} streak`}
+        accessibilityHint="Opens chain details"
         style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
       >
         <Animated.View
@@ -118,7 +121,14 @@ export default function ChainCard({ chain }: Props) {
                   </Text>
                 </View>
                 <View style={chain.cadence === 'weekly' ? styles.weeklyCheckBlock : undefined}>
-                  <Pressable onPress={handleCheck} disabled={restingToday} hitSlop={14}>
+                  <Pressable
+                    onPress={handleCheck}
+                    disabled={restingToday}
+                    hitSlop={14}
+                    accessibilityRole="checkbox"
+                    accessibilityLabel={`${protectedToday ? 'Unmark' : 'Mark'} ${chain.name} for today`}
+                    accessibilityState={{ checked: protectedToday, disabled: restingToday }}
+                  >
                     <Animated.View style={checkStyle}>
                       <View
                         style={[

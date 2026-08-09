@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { reportDiagnostic } from './diagnostics';
 
 export type GateWindow = {
   id: string;
@@ -59,7 +60,8 @@ export async function getGateWindows(): Promise<GateWindow[]> {
     const raw = await AsyncStorage.getItem(GATE_WINDOWS_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed.map(normalize).filter((entry): entry is GateWindow => Boolean(entry)) : [];
-  } catch {
+  } catch (error) {
+    reportDiagnostic({ area: 'gate', operation: 'windows.read', severity: 'error', error });
     return [];
   }
 }
