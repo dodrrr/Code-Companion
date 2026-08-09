@@ -348,18 +348,6 @@ export default function GateScreen() {
           <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
         </Pressable>
 
-        {/* iOS note */}
-        <View style={[styles.noteCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
-          <Ionicons name="information-circle-outline" size={16} color={colors.mutedForeground} />
-          <Text style={[styles.noteText, { color: colors.mutedForeground }]}>
-            For a stricter iOS limit, pair the Shortcut with{' '}
-            <Text style={{ fontFamily: 'Inter_600SemiBold', color: colors.foreground }}>
-              Settings → Screen Time → App Limits
-            </Text>
-            . Shortcuts opens Chain’s pause; Screen Time provides the system limit.
-          </Text>
-        </View>
       </ScrollView></View>
       <View style={{ width: pageWidth, height: '100%' }}><GateWindowsContent embedded live={screenFocused && activePage === 1} onWindowsChange={setWindowCount} /></View>
       </ScrollView>
@@ -559,11 +547,11 @@ const styles = StyleSheet.create({
   },
   appCopy: { flex: 1 },
   appRule: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
-  appSaveBadge: { minWidth: 42, alignItems: 'center', borderRadius: 12, paddingHorizontal: 7, paddingVertical: 6 },
+  appSaveBadge: { width: 44, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12 },
   appSaveNumber: { fontSize: 16, lineHeight: 17, fontFamily: 'Inter_700Bold' },
   appSaveLabel: { fontSize: 8, fontFamily: 'Inter_700Bold', letterSpacing: 0.6, marginTop: 1 },
   appOutcomeGroup: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  appOutcomeBadge: { minWidth: 42, alignItems: 'center', borderRadius: 12, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 5 },
+  appOutcomeBadge: { width: 44, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1 },
   appOutcomeNumber: { fontSize: 14, lineHeight: 16, fontFamily: 'Inter_700Bold' },
   appOutcomeLabel: { fontSize: 7, fontFamily: 'Inter_700Bold', letterSpacing: 0.45, marginTop: 1 },
   addAppCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, padding: 17, overflow: 'hidden' },

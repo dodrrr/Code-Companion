@@ -85,7 +85,12 @@ export const gateDateKey = (date = new Date()) => {
   return `${year}-${month}-${day}`;
 };
 
-export const gateWindowDurationMinutes = (window: GateWindow) => Math.max(0, (window.endHour * 60 + window.endMinute) - (window.startHour * 60 + window.startMinute));
+export const gateWindowDurationMinutes = (window: GateWindow) => {
+  const start = window.startHour * 60 + window.startMinute;
+  const end = window.endHour * 60 + window.endMinute;
+  if (start === end) return 0;
+  return end > start ? end - start : (24 * 60 - start) + end;
+};
 export const formatGateWindowMinutes = (minutes: number) => minutes >= 60 ? `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}` : `${minutes}m`;
 
 export type GateWindowStatus = {
@@ -111,7 +116,11 @@ export function getGateWindowStatus(window: GateWindow, date = new Date()): Gate
   const nowMinutes = date.getHours() * 60 + date.getMinutes();
   const start = window.startHour * 60 + window.startMinute;
   const end = window.endHour * 60 + window.endMinute;
-  const scheduledToday = !onDemand && window.days.includes(date.getDay());
+  const crossesMidnight = end <= start && end !== start;
+  const previousDay = (date.getDay() + 6) % 7;
+  const startsToday = !onDemand && window.days.includes(date.getDay());
+  const continuesFromYesterday = !onDemand && crossesMidnight && window.days.includes(previousDay) && nowMinutes < end;
+  const scheduledToday = startsToday || continuesFromYesterday;
   const hasManualOverride = window.manualDate === dayKey;
 
   if (onDemand && !hasManualOverride) return { active: false, manual: false, scheduledToday: false, skippedToday: false, completedToday: false, remainingMinutes: 0, remainingSeconds: 0, elapsedSeconds: 0, unbounded, protectedMinutesToday: 0 };
@@ -128,11 +137,27 @@ export function getGateWindowStatus(window: GateWindow, date = new Date()): Gate
 
   const startSeconds = start * 60;
   const endSeconds = end * 60;
-  const active = scheduledToday && nowSeconds >= startSeconds && nowSeconds < endSeconds;
-  const completedToday = scheduledToday && nowMinutes >= end;
-  const protectedMinutesToday = !scheduledToday || nowMinutes < start ? 0 : completedToday ? duration : Math.max(0, nowMinutes - start);
-  const remainingSeconds = active ? Math.max(1, endSeconds - nowSeconds) : 0;
-  return { active, manual: false, scheduledToday, skippedToday: false, completedToday, remainingMinutes: remainingSeconds ? Math.ceil(remainingSeconds / 60) : 0, remainingSeconds, elapsedSeconds: active ? Math.max(0, nowSeconds - startSeconds) : 0, unbounded: false, protectedMinutesToday };
+  const activeFromToday = startsToday && nowMinutes >= start && (!crossesMidnight ? nowMinutes < end : true);
+  const active = activeFromToday || continuesFromYesterday;
+  const completedToday = !crossesMidnight
+    ? startsToday && nowMinutes >= end
+    : window.days.includes(previousDay) && nowMinutes >= end && nowMinutes < start;
+  const elapsedSeconds = active
+    ? continuesFromYesterday
+      ? Math.max(0, (24 * 60 - start) * 60 + nowSeconds)
+      : Math.max(0, nowSeconds - startSeconds)
+    : 0;
+  const remainingSeconds = active
+    ? Math.max(1, durationSeconds - elapsedSeconds)
+    : 0;
+  const protectedMinutesToday = active
+    ? continuesFromYesterday
+      ? Math.floor(nowSeconds / 60)
+      : Math.floor(elapsedSeconds / 60)
+    : completedToday
+      ? crossesMidnight ? end : duration
+      : 0;
+  return { active, manual: false, scheduledToday, skippedToday: false, completedToday, remainingMinutes: remainingSeconds ? Math.ceil(remainingSeconds / 60) : 0, remainingSeconds, elapsedSeconds, unbounded: false, protectedMinutesToday };
 }
 
 export function toggleGateWindowSkipToday(window: GateWindow, date = new Date()): GateWindow {

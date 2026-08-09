@@ -15,7 +15,7 @@ const Ionicons = IconSource as React.ComponentType<any>;
 const DAY_OPTIONS = [{ label: 'M', id: 1 }, { label: 'T', id: 2 }, { label: 'W', id: 3 }, { label: 'T', id: 4 }, { label: 'F', id: 5 }, { label: 'S', id: 6 }, { label: 'S', id: 0 }];
 const HOURS = Array.from({ length: 24 }, (_, index) => index);
 const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
-const PRESETS = [{ name: 'Deep work', startHour: 9, endHour: 11, icon: 'laptop-outline' as const }, { name: 'Morning reset', startHour: 7, endHour: 9, icon: 'sunny-outline' as const }, { name: 'Wind down', startHour: 22, endHour: 23, icon: 'moon-outline' as const }];
+const PRESETS = [{ name: 'Deep work', startHour: 9, endHour: 11, icon: 'laptop-outline' as const }, { name: 'Morning reset', startHour: 7, endHour: 9, icon: 'sunny-outline' as const }, { name: 'Wind down', startHour: 22, endHour: 0, icon: 'moon-outline' as const }];
 
 function freshWindow(): GateWindow { return { id: '', name: 'Deep work', startHour: 9, startMinute: 0, endHour: 11, endMinute: 0, days: [1, 2, 3, 4, 5], appIds: [], mode: 'scheduled', onDemandDurationMinutes: 60 }; }
 const totalMinutes = (hour: number, minute: number) => hour * 60 + minute;
@@ -44,7 +44,7 @@ function WindowEditor({ initial, onSave, onClose }: { initial?: GateWindow; onSa
   const [picker, setPicker] = useState<'start' | 'end' | null>(null);
   const create = !initial;
   const scheduled = window.mode !== 'onDemand';
-  const canSave = window.name.trim().length > 0 && (!scheduled || totalMinutes(window.endHour, window.endMinute) > totalMinutes(window.startHour, window.startMinute));
+  const canSave = window.name.trim().length > 0 && (!scheduled || totalMinutes(window.endHour, window.endMinute) !== totalMinutes(window.startHour, window.startMinute));
   const toggleDay = (day: number) => setWindow((value) => ({ ...value, days: value.days.includes(day) ? value.days.filter((item) => item !== day) : [...value.days, day] }));
   const updateTime = (kind: 'start' | 'end', hour: number, minute: number) => { setWindow((value) => kind === 'start' ? { ...value, startHour: hour, startMinute: minute } : { ...value, endHour: hour, endMinute: minute }); setPicker(null); };
   const chooseApps = async () => {
