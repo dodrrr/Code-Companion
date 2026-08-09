@@ -20,7 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { AmbientScreen } from '@/components/AmbientSurface';
-import { getGateSaves24h, recordGateSave } from '@/lib/gateStats';
+import { getGateSaves24h, recordGateOpenAnyway, recordGateSave } from '@/lib/gateStats';
 
 const COUNTDOWN_SECONDS = 12;
 
@@ -128,8 +128,9 @@ export default function PauseGateDemoScreen() {
     router.back();
   }
 
-  function handleOpenAnyway() {
+  async function handleOpenAnyway() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    await recordGateOpenAnyway(appId);
     router.back();
   }
 

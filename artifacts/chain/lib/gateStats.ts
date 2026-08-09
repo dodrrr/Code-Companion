@@ -4,7 +4,7 @@ import { getGateWindowStatus, getGateWindows } from './gateWindows';
 const GATE_SAVE_EVENTS_KEY = '@chain_gate_save_events';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export type GateSaveEvent = { appId: string; at: number; windowId?: string };
+export type GateSaveEvent = { appId: string; at: number; windowId?: string; outcome?: 'saved' | 'opened' };
 
 async function readRecentEvents(): Promise<GateSaveEvent[]> {
   try {
@@ -22,6 +22,12 @@ async function readRecentEvents(): Promise<GateSaveEvent[]> {
 export async function getGateSaves24h(): Promise<GateSaveEvent[]> {
   const events = await readRecentEvents();
   await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
+  return events.filter((event) => event.outcome !== 'opened');
+}
+
+export async function getGateAttempts24h(): Promise<GateSaveEvent[]> {
+  const events = await readRecentEvents();
+  await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
   return events;
 }
 
@@ -29,7 +35,12 @@ export async function recordGateSave(appId: string): Promise<GateSaveEvent[]> {
   const now = new Date();
   const windows = await getGateWindows();
   const activeWindow = windows.find((window) => window.appIds.includes(appId) && getGateWindowStatus(window, now).active);
-  const events = [...await readRecentEvents(), { appId, at: now.getTime(), ...(activeWindow ? { windowId: activeWindow.id } : {}) }];
+  const events = [...await readRecentEvents(), { appId, at: now.getTime(), outcome: 'saved' as const, ...(activeWindow ? { windowId: activeWindow.id } : {}) }];
   await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
-  return events;
+  return events.filter((event) => event.outcome !== 'opened');
+}
+
+export async function recordGateOpenAnyway(appId: string): Promise<void> {
+  const events = [...await readRecentEvents(), { appId, at: Date.now(), outcome: 'opened' as const }];
+  await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
 }

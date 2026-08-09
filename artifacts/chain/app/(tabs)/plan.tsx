@@ -29,7 +29,7 @@ import { GateWindow, getGateWindows } from '@/lib/gateWindows';
 const QUICK_TIMES = ['7 AM', '9 AM', '12 PM', '3 PM', '6 PM', '8 PM'];
 const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
 const MINUTES = ['00', '05', '10', '15', '20', '30', '40', '45', '50', '55'];
-const REMINDER_OPTIONS = [5, 15, 30, 60];
+const REMINDER_OPTIONS = [0, 5, 15, 30, 60];
 const DURATION_OPTIONS = [30, 60, 90, 120, 180, 240];
 const UNLINKED_TASK_COLOR = '#8FA2B3';
 const TASK_ACCENTS = ['#8FA2B3', ...EXTRA_CHAIN_COLORS];
@@ -96,7 +96,7 @@ export default function PlanScreen() {
   const orderedItems = [...items].sort((a, b) => timeSortValue(a.timeSlot) - timeSortValue(b.timeSlot));
   const hasPendingItems = items.some((item) => !item.completed);
   const plannedFocusMinutes = items.reduce((total, item) => total + (item.durationMinutes || 0), 0);
-  const reminderCount = items.filter((item) => item.reminderMinutes).length;
+  const reminderCount = items.filter((item) => item.reminderMinutes !== undefined).length;
   const canEditActivePlan = !isToday || !isActiveDayClosed;
 
   useEffect(() => { void AsyncStorage.getItem(MORNING_BRIEFING_KEY).then((raw) => { try { const value = raw ? JSON.parse(raw) : null; if (typeof value?.hour === 'number') setBriefingHour(value.hour); } catch {} }); }, []);
@@ -154,7 +154,7 @@ export default function PlanScreen() {
     const item = isEditing ? updateItem(editingItem!.id, options) : addItem(options);
     if (!item) return;
     if (editingItem?.notificationId) void cancelPlanReminder(editingItem.notificationId);
-    if (scheduleReminder && selectedTime && selectedReminder) {
+    if (scheduleReminder && selectedTime && selectedReminder !== undefined) {
       void schedulePlanReminder(item, selectedReminder).then((result) => {
         if (result.status === 'scheduled') updateReminderMetadata(item.id, selectedReminder, result.notificationId);
         if (result.status === 'denied') setReminderNotice('Notifications are off. You can enable them in iPhone Settings.');
@@ -169,7 +169,7 @@ export default function PlanScreen() {
 
   async function handleAdd() {
     if (!inputText.trim()) return;
-    if (selectedTime && selectedReminder) {
+    if (selectedTime && selectedReminder !== undefined) {
       const permission = await getPlanNotificationPermission();
       if (permission === 'undetermined') {
         setShowReminderPermission(true);
@@ -181,7 +181,7 @@ export default function PlanScreen() {
         return;
       }
     }
-    savePlanItem(Boolean(selectedTime && selectedReminder));
+    savePlanItem(Boolean(selectedTime && selectedReminder !== undefined));
   }
 
   async function enableRemindersAndSave() {
@@ -202,13 +202,13 @@ export default function PlanScreen() {
     setSelectedChainId(item.chainId);
     setSelectedTaskColor(item.chainId ? undefined : item.color);
     setSelectedReminder(item.reminderMinutes);
-    setShowReminderOptions(Boolean(item.reminderMinutes));
+    setShowReminderOptions(item.reminderMinutes !== undefined);
     setIsPriority(item.isPriority === true);
     setSelectedRepeatDays(item.repeatDays || []);
     setSelectedDuration(item.durationMinutes);
     setSelectedGateWindowId(item.gateWindowId);
     setShowInput(true);
-    setShowAdvancedOptions(Boolean(item.repeatDays?.length || item.durationMinutes || item.reminderMinutes || (!item.chainId && item.color)));
+    setShowAdvancedOptions(Boolean(item.repeatDays?.length || item.durationMinutes || item.reminderMinutes !== undefined || (!item.chainId && item.color)));
   }
 
   function handleToggle(item: PlanItem) {
@@ -243,7 +243,7 @@ export default function PlanScreen() {
     const copied = await copyItemToTomorrow(item.id);
     if (!copied) return;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    if (copied.timeSlot && copied.reminderMinutes) {
+    if (copied.timeSlot && copied.reminderMinutes !== undefined) {
       const result = await schedulePlanReminder(copied, copied.reminderMinutes);
       if (result.status === 'scheduled') {
         await updateReminderForDate(copied.id, copied.planDate, copied.reminderMinutes, result.notificationId);
@@ -546,14 +546,14 @@ function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, sel
           </Pressable>
           {showGateOptions && <FlatList data={[{ id: '', name: 'No window' }, ...gateWindows]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(window) => window.id || 'none'} contentContainerStyle={styles.chainChoices} renderItem={({ item: window }) => { const selected = window.id === selectedGateWindowId; return <Pressable onPress={() => setSelectedGateWindowId(selected ? undefined : (window.id || undefined))} style={[styles.chainChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Ionicons name={window.id ? 'shield-checkmark-outline' : 'remove-outline'} size={13} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{window.name}</Text></Pressable>; }} />}
         </>}
-        <Pressable onPress={() => setShowReminderOptions(!showReminderOptions)} style={[styles.priorityPick, { borderColor: selectedReminder ? colors.primary : colors.border, backgroundColor: selectedReminder ? colors.primary + '1A' : colors.background }]}>
+        <Pressable onPress={() => setShowReminderOptions(!showReminderOptions)} style={[styles.priorityPick, { borderColor: selectedReminder !== undefined ? colors.primary : colors.border, backgroundColor: selectedReminder !== undefined ? colors.primary + '1A' : colors.background }]}>
           <View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="notifications-outline" size={15} color={colors.primary} /></View>
-          <View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>{selectedReminder ? `Reminder · ${selectedReminder} min before` : 'Add a reminder'}</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{selectedReminder ? 'Tap to change or remove it.' : 'A gentle nudge before this task starts.'}</Text></View>
-          <Ionicons name={showReminderOptions ? 'chevron-up' : 'chevron-down'} size={18} color={selectedReminder ? colors.primary : colors.mutedForeground} />
+          <View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>{selectedReminder !== undefined ? `Reminder · ${selectedReminder === 0 ? 'at start' : `${selectedReminder} min before`}` : 'Add a reminder'}</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{selectedReminder !== undefined ? 'Tap to change or remove it.' : 'A gentle nudge before this task starts.'}</Text></View>
+          <Ionicons name={showReminderOptions ? 'chevron-up' : 'chevron-down'} size={18} color={selectedReminder !== undefined ? colors.primary : colors.mutedForeground} />
         </Pressable>
         {showReminderOptions && <>
           <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>REMIND ME</Text>
-          <FlatList data={REMINDER_OPTIONS} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(minutes) => String(minutes)} contentContainerStyle={styles.chainChoices} renderItem={({ item: minutes }) => { const selected = selectedReminder === minutes; return <Pressable onPress={() => setSelectedReminder(selected ? undefined : minutes)} style={[styles.chainChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Ionicons name="notifications-outline" size={13} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{minutes} min before</Text></Pressable>; }} />
+          <FlatList data={REMINDER_OPTIONS} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(minutes) => String(minutes)} contentContainerStyle={styles.chainChoices} renderItem={({ item: minutes }) => { const selected = selectedReminder === minutes; return <Pressable onPress={() => setSelectedReminder(selected ? undefined : minutes)} style={[styles.chainChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Ionicons name="notifications-outline" size={13} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{minutes === 0 ? 'At start' : `${minutes} min before`}</Text></Pressable>; }} />
         </>}
       </>}
     </View>}
@@ -577,7 +577,7 @@ function PlanItemRow({ item, chainName, gateWindow, highlighted, newlyAdded, isL
     <View style={[styles.planBar, { backgroundColor: item.completed ? displayAccent + 'A8' : displayAccent }]} />
     <Pressable disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? displayAccent : completionLocked ? 'transparent' : displayAccent + '14', borderColor: item.completed ? displayAccent : completionLocked ? colors.mutedForeground : displayAccent, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <Ionicons name="checkmark" size={13} color="#fff" /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
     <Pressable disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
-      <View style={styles.planMeta}>{item.isPriority && <View style={[styles.priorityBadge, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="sparkles" size={10} color={colors.primary} /><Text style={[styles.priorityBadgeText, { color: colors.primary }]}>ONE THING</Text></View>}{completionLocked && !locked && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 8, backgroundColor: colors.mutedForeground + '18' }}><Ionicons name="lock-closed-outline" size={9} color={colors.mutedForeground} /><Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.6 }}>TOMORROW</Text></View>}{item.timeSlot ? <Text style={[styles.planTime, { color: displayAccent }]}>{item.timeSlot}{item.durationMinutes ? `  ·  ${formatDurationLabel(item.durationMinutes)}` : ''}{item.reminderMinutes ? `  ·  ${item.reminderMinutes} MIN REMINDER` : ''}</Text> : <Text style={[styles.planTime, { color: item.isPriority ? colors.primary : colors.mutedForeground }]}>{item.durationMinutes ? `${formatDurationLabel(item.durationMinutes)} BLOCK` : 'ANYTIME'}</Text>}{chainName && <View style={[styles.linkBadge, { backgroundColor: accentColor + '1A' }]}><Ionicons name="link-outline" size={10} color={accentColor} /><Text style={[styles.linkBadgeText, { color: accentColor }]}>{chainName}</Text></View>}</View>
+      <View style={styles.planMeta}>{item.isPriority && <View style={[styles.priorityBadge, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="sparkles" size={10} color={colors.primary} /><Text style={[styles.priorityBadgeText, { color: colors.primary }]}>ONE THING</Text></View>}{completionLocked && !locked && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 8, backgroundColor: colors.mutedForeground + '18' }}><Ionicons name="lock-closed-outline" size={9} color={colors.mutedForeground} /><Text style={{ color: colors.mutedForeground, fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.6 }}>TOMORROW</Text></View>}{item.timeSlot ? <Text style={[styles.planTime, { color: displayAccent }]}>{item.timeSlot}{item.durationMinutes ? `  ·  ${formatDurationLabel(item.durationMinutes)}` : ''}{item.reminderMinutes !== undefined ? `  ·  ${item.reminderMinutes === 0 ? 'AT START' : `${item.reminderMinutes} MIN REMINDER`}` : ''}</Text> : <Text style={[styles.planTime, { color: item.isPriority ? colors.primary : colors.mutedForeground }]}>{item.durationMinutes ? `${formatDurationLabel(item.durationMinutes)} BLOCK` : 'ANYTIME'}</Text>}{chainName && <View style={[styles.linkBadge, { backgroundColor: accentColor + '1A' }]}><Ionicons name="link-outline" size={10} color={accentColor} /><Text style={[styles.linkBadgeText, { color: accentColor }]}>{chainName}</Text></View>}</View>
       <Text style={[styles.planText, { color: item.completed ? colors.foreground + 'A6' : colors.foreground, textDecorationLine: item.completed ? 'line-through' : 'none', textDecorationColor: item.completed ? colors.primary : undefined, textDecorationStyle: 'solid' }]} numberOfLines={2}>{item.text}</Text>
     </Pressable>
     {gateWindow && <View style={{ width: 28, height: 28, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginLeft: -5, backgroundColor: colors.primary + '18', borderColor: colors.primary + '48' }}><Ionicons name="shield-checkmark" size={14} color={colors.primary} /></View>}
@@ -610,7 +610,7 @@ function CompletionMoment({ visible, onClose, onPrepareTomorrow }: { visible: bo
 
 function ReminderPermissionMoment({ visible, minutes, onSkip, onAllow }: { visible: boolean; minutes?: number; onSkip: () => void; onAllow: () => void }) {
   const colors = useColors();
-  return <Modal transparent visible={visible} animationType="fade" onRequestClose={onSkip}><View style={completionStyles.shade}><View style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[completionStyles.icon, { backgroundColor: colors.primary + '20' }]}><Ionicons name="notifications-outline" size={28} color={colors.primary} /></View><Text style={[completionStyles.title, { color: colors.foreground }]}>Stay on time</Text><Text style={[completionStyles.body, { color: colors.mutedForeground, textAlign: 'center', lineHeight: 20 }]}>Chain can remind you {minutes} minutes before this task. You can change this anytime in iPhone Settings.</Text><Pressable onPress={onAllow} style={[completionStyles.primaryButton, { backgroundColor: colors.primary }]}><Text style={completionStyles.primaryText}>Allow reminders</Text></Pressable><Pressable onPress={onSkip} style={completionStyles.secondaryButton}><Text style={[completionStyles.secondaryText, { color: colors.mutedForeground }]}>Not now</Text></Pressable></View></View></Modal>;
+  return <Modal transparent visible={visible} animationType="fade" onRequestClose={onSkip}><View style={completionStyles.shade}><View style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={[completionStyles.icon, { backgroundColor: colors.primary + '20' }]}><Ionicons name="notifications-outline" size={28} color={colors.primary} /></View><Text style={[completionStyles.title, { color: colors.foreground }]}>Stay on time</Text><Text style={[completionStyles.body, { color: colors.mutedForeground, textAlign: 'center', lineHeight: 20 }]}>Chain can remind you {minutes === 0 ? 'when this task starts' : `${minutes} minutes before this task`}. You can change this anytime in iPhone Settings.</Text><Pressable onPress={onAllow} style={[completionStyles.primaryButton, { backgroundColor: colors.primary }]}><Text style={completionStyles.primaryText}>Allow reminders</Text></Pressable><Pressable onPress={onSkip} style={completionStyles.secondaryButton}><Text style={[completionStyles.secondaryText, { color: colors.mutedForeground }]}>Not now</Text></Pressable></View></View></Modal>;
 }
 
 function ChainCompletionMoment({ visible, item, chain, onConfirm, onClose }: { visible: boolean; item?: PlanItem; chain?: Chain; onConfirm: () => void; onClose: () => void }) {

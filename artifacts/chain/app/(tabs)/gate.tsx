@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { AmbientScreen, GlassSurface } from '@/components/AmbientSurface';
 import { useColors } from '@/hooks/useColors';
 import { getStreak, useChains } from '@/context/ChainsContext';
-import { GateSaveEvent, getGateSaves24h } from '@/lib/gateStats';
+import { GateSaveEvent, getGateAttempts24h } from '@/lib/gateStats';
 import { getGateWindows } from '@/lib/gateWindows';
 import { GateWindowsContent } from '@/app/gate-windows';
 
@@ -196,7 +196,7 @@ export default function GateScreen() {
     });
   }, []);
 
-  const refreshSaveEvents = useCallback(() => { void getGateSaves24h().then(setSaveEvents); }, []);
+  const refreshSaveEvents = useCallback(() => { void getGateAttempts24h().then(setSaveEvents); }, []);
   const refreshWindows = useCallback(() => { void getGateWindows().then((windows) => setWindowCount(windows.length)); }, []);
   useFocusEffect(useCallback(() => {
     setScreenFocused(true);
@@ -246,7 +246,9 @@ export default function GateScreen() {
   const enabledCount = Object.values(enabled).filter(Boolean).length;
   const protectedApps = APPS.filter((app) => enabled[app.id]);
   const availableApps = APPS.filter((app) => !enabled[app.id]);
-  const savesForApp = (id: string) => saveEvents.filter((event) => event.appId === id).length;
+  const savesForApp = (id: string) => saveEvents.filter((event) => event.appId === id && event.outcome !== 'opened').length;
+  const opensForApp = (id: string) => saveEvents.filter((event) => event.appId === id && event.outcome === 'opened').length;
+  const savedEvents = saveEvents.filter((event) => event.outcome !== 'opened');
   const showPage = (page: 0 | 1) => {
     setActivePage(page);
     pagerRef.current?.scrollTo({ x: page * pageWidth, animated: true });
@@ -276,7 +278,7 @@ export default function GateScreen() {
             <Pressable onLayout={(event) => setWindowsSegmentWidth(event.nativeEvent.layout.width)} onPress={() => showPage(1)} style={({ pressed }) => [styles.gateSegment, { opacity: pressed ? 0.76 : 1 }]}><Text style={[styles.headerTitle, { color: activePage === 1 ? colors.foreground : colors.mutedForeground }]}>Windows</Text></Pressable>
           </View>
           <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>
-            {activePage === 0 ? `${enabledCount} app${enabledCount !== 1 ? 's' : ''} protected · ${saveEvents.length} pauses chosen` : windowCount ? `${windowCount} protection window${windowCount === 1 ? '' : 's'} saved` : 'Give important hours their own guardrail.'}
+            {activePage === 0 ? `${enabledCount} app${enabledCount !== 1 ? 's' : ''} protected · ${savedEvents.length} pauses chosen` : windowCount ? `${windowCount} protection window${windowCount === 1 ? '' : 's'} saved` : 'Give important hours their own guardrail.'}
           </Text>
         </View>
       </View>
@@ -298,7 +300,7 @@ export default function GateScreen() {
       <View style={{ width: pageWidth, height: '100%' }}><ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: botPad + 32 }]} showsVerticalScrollIndicator={false}>
         <View style={[styles.savesHero, { backgroundColor: colors.primary + '14', borderColor: colors.primary + '55' }]}>
           <View style={[styles.savesIcon, { backgroundColor: colors.primary + '20' }]}><Ionicons name="shield-checkmark" size={22} color={colors.primary} /></View>
-          <View style={styles.savesCopy}><Text style={[styles.savesNumber, { color: colors.primary }]}>{saveEvents.length}</Text><Text style={[styles.savesTitle, { color: colors.foreground }]}>times you chose the pause</Text><Text style={[styles.savesBody, { color: colors.mutedForeground }]}>Your wins in the last 24 hours.</Text></View>
+          <View style={styles.savesCopy}><Text style={[styles.savesNumber, { color: colors.primary }]}>{savedEvents.length}</Text><Text style={[styles.savesTitle, { color: colors.foreground }]}>times you chose the pause</Text><Text style={[styles.savesBody, { color: colors.mutedForeground }]}>Your wins in the last 24 hours.</Text></View>
         </View>
         <Pressable onPress={openDemo} style={({ pressed }) => [styles.previewWide, { backgroundColor: colors.primary, opacity: pressed ? 0.82 : 1 }]}><Text style={styles.previewWideText}>Preview your Pause Gate</Text></Pressable>
         <Pressable onPress={() => setShowTutorial(true)} style={({ pressed }) => [styles.previewNote, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.72 : 1 }]}>
@@ -326,7 +328,10 @@ export default function GateScreen() {
                   )}
                 </View>
                 <Pressable onPress={() => setConfiguringApp(app)} style={styles.appCopy}><Text style={[styles.appName, { color: colors.foreground }]}>{app.name}</Text><Text style={[styles.appRule, { color: colors.mutedForeground }]}>{rules[app.id]?.mode === 'daily_limit' ? `${rules[app.id]?.dailyLimitMinutes ?? 30} min daily limit` : 'Pause every opening'}</Text></Pressable>
-                <View style={[styles.appSaveBadge, { backgroundColor: app.iconColor + '20' }]}><Text style={[styles.appSaveNumber, { color: app.iconColor }]}>{savesForApp(app.id)}</Text><Text style={[styles.appSaveLabel, { color: app.iconColor }]}>SAVED</Text></View>
+                <View style={styles.appOutcomeGroup}>
+                  <View style={[styles.appOutcomeBadge, { borderColor: app.iconColor + '35' }]}><Text style={[styles.appOutcomeNumber, { color: colors.mutedForeground }]}>{opensForApp(app.id)}</Text><Text style={[styles.appOutcomeLabel, { color: colors.mutedForeground }]}>OPENED</Text></View>
+                  <View style={[styles.appSaveBadge, { backgroundColor: app.iconColor + '20' }]}><Text style={[styles.appSaveNumber, { color: app.iconColor }]}>{savesForApp(app.id)}</Text><Text style={[styles.appSaveLabel, { color: app.iconColor }]}>SAVED</Text></View>
+                </View>
                 <Pressable onPress={() => removeProtection(app)} hitSlop={12}><Ionicons name="ellipsis-horizontal" size={20} color={colors.mutedForeground} /></Pressable>
               </View>
               {i < APPS.length - 1 && (
@@ -557,6 +562,10 @@ const styles = StyleSheet.create({
   appSaveBadge: { minWidth: 42, alignItems: 'center', borderRadius: 12, paddingHorizontal: 7, paddingVertical: 6 },
   appSaveNumber: { fontSize: 16, lineHeight: 17, fontFamily: 'Inter_700Bold' },
   appSaveLabel: { fontSize: 8, fontFamily: 'Inter_700Bold', letterSpacing: 0.6, marginTop: 1 },
+  appOutcomeGroup: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  appOutcomeBadge: { minWidth: 42, alignItems: 'center', borderRadius: 12, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 5 },
+  appOutcomeNumber: { fontSize: 14, lineHeight: 16, fontFamily: 'Inter_700Bold' },
+  appOutcomeLabel: { fontSize: 7, fontFamily: 'Inter_700Bold', letterSpacing: 0.45, marginTop: 1 },
   addAppCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: StyleSheet.hairlineWidth, borderRadius: 22, padding: 17, overflow: 'hidden' },
   addAppIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   addAppTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold' },

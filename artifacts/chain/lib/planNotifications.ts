@@ -72,12 +72,18 @@ export async function schedulePlanReminder(item: PlanItem, minutesBefore: number
   await configurePlanNotificationActions();
   const notificationId = await Notifications.scheduleNotificationAsync({
     content: {
-      title: item.isPriority ? 'Your one thing is up next' : `Up next · ${item.text}`,
-      body: item.isPriority
-        ? `Starts in ${minutesBefore} min. Protect some space for what matters most.`
-        : item.chainId
-          ? `Starts in ${minutesBefore} min. One small step protects your chain.`
-          : `Starts in ${minutesBefore} min. Leave a little room for it.`,
+      title: minutesBefore === 0 ? (item.isPriority ? 'Your one thing starts now' : `Time to begin · ${item.text}`) : (item.isPriority ? 'Your one thing is up next' : `Up next · ${item.text}`),
+      body: minutesBefore === 0
+        ? item.isPriority
+          ? 'This is the space you chose for what matters most.'
+          : item.chainId
+            ? 'One small step now protects your chain.'
+            : 'The time you set aside is here.'
+        : item.isPriority
+          ? `Starts in ${minutesBefore} min. Protect some space for what matters most.`
+          : item.chainId
+            ? `Starts in ${minutesBefore} min. One small step protects your chain.`
+            : `Starts in ${minutesBefore} min. Leave a little room for it.`,
       sound: 'default',
       categoryIdentifier: PLAN_TASK_CATEGORY,
       data: { planItemId: item.id, planDate: item.planDate },
