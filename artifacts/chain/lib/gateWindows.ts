@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { reportDiagnostic } from './diagnostics';
+export { removeGateWindow } from '../domain/gateWindows';
 
 export type GateWindow = {
   id: string;

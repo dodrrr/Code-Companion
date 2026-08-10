@@ -9,7 +9,8 @@
     "serve": "node server/serve.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --no-warnings --experimental-strip-types --test tests/*.test.mjs",
-    "check": "pnpm run typecheck && pnpm run test"
+    "check": "pnpm run typecheck && pnpm run test",
+    "release:doctor": "node scripts/release-doctor.js"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

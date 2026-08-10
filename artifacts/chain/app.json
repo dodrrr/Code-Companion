@@ -14,7 +14,8 @@
       "backgroundColor": "#0D0D0D"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.dodrrr.chain"
     },
     "android": {},
     "web": {

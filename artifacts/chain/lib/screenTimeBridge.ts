@@ -19,9 +19,13 @@ export type ProtectedAppUsage = ScreenTimeApp & {
 
 type ChainScreenTimeModule = {
   isAvailable?: () => Promise<boolean>;
+  authorizationStatus?: () => Promise<ScreenTimeAuthorizationStatus>;
+  requestAuthorization?: () => Promise<ScreenTimeAuthorizationStatus>;
   pickApps?: () => Promise<ScreenTimeApp[]>;
   getWeeklyUsage?: (appIds: string[]) => Promise<ProtectedAppUsage[]>;
 };
+
+export type ScreenTimeAuthorizationStatus = 'notDetermined' | 'denied' | 'approved' | 'unavailable';
 
 function module(): ChainScreenTimeModule | undefined {
   return NativeModules.ChainScreenTime as ChainScreenTimeModule | undefined;
@@ -33,6 +37,30 @@ export async function isNativeScreenTimeAvailable(): Promise<boolean> {
   } catch (error) {
     reportDiagnostic({ area: 'native', operation: 'screenTime.available', severity: 'warning', error });
     return false;
+  }
+}
+
+export async function getScreenTimeAuthorizationStatus(): Promise<ScreenTimeAuthorizationStatus> {
+  const bridge = module();
+  if (!bridge?.authorizationStatus) return 'unavailable';
+  try {
+    const status = await bridge.authorizationStatus();
+    return ['notDetermined', 'denied', 'approved'].includes(status) ? status : 'unavailable';
+  } catch (error) {
+    reportDiagnostic({ area: 'native', operation: 'screenTime.authorizationStatus', severity: 'warning', error });
+    return 'unavailable';
+  }
+}
+
+export async function requestScreenTimeAuthorization(): Promise<ScreenTimeAuthorizationStatus> {
+  const bridge = module();
+  if (!bridge?.requestAuthorization) return 'unavailable';
+  try {
+    const status = await bridge.requestAuthorization();
+    return ['notDetermined', 'denied', 'approved'].includes(status) ? status : 'unavailable';
+  } catch (error) {
+    reportDiagnostic({ area: 'native', operation: 'screenTime.requestAuthorization', severity: 'error', error });
+    return 'unavailable';
   }
 }
 
