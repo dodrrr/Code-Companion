@@ -13,9 +13,13 @@ This phase prepares Chain for native Apple services without making Expo Go prete
 
 The policy lives in `domain/entitlements.ts` so StoreKit transport and product access cannot drift apart. Trial and active subscriptions unlock Plus; unknown, unavailable and expired states fail closed to the free policy. Enforcement remains disabled during early access and must only be enabled with the paywall release.
 
+The Plus preview now exercises the exact monthly and annual product identifiers, purchase and restore boundaries without pretending Expo Go can charge anyone. Native responses are normalized before they can affect access.
+
 ## Build preparation
 
-`eas.json` defines development, internal preview and production profiles. `pnpm release:doctor` validates structural App Store requirements. It intentionally fails until real privacy and support URLs replace missing configuration.
+`eas.json` defines development, internal preview and production profiles. `pnpm release:doctor` validates everything that can be completed before Developer enrolment; external URLs are reported separately. `pnpm release:doctor:app-store` becomes strict and fails until the real privacy and support pages are hosted.
+
+Publication-ready drafts live in `docs/privacy-policy-draft.md` and `docs/support-page-draft.md`. They deliberately avoid invented operator details or URLs.
 
 ## Remaining Apple work
 
@@ -23,6 +27,6 @@ The policy lives in `domain/entitlements.ts` so StoreKit transport and product a
 2. Request the Family Controls entitlement and document the user benefit for review.
 3. Implement `ChainScreenTime` with FamilyControls, ManagedSettings and DeviceActivity.
 4. Implement `ChainStore` with StoreKit 2 products and transaction verification.
-5. Publish real privacy/support pages and add their URLs to Expo config.
+5. Review and publish the drafted privacy/support pages, then add their HTTPS URLs to Expo config.
 6. Create the EAS project, signing credentials, App Store Connect record and TestFlight group.
 7. Run the physical-device release audit from Phase 1 before enabling entitlements or the paywall.

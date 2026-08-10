@@ -49,6 +49,7 @@ function RootLayoutNav() {
       <Stack.Screen name="gate-windows" options={{ headerShown: false, animation: 'slide_from_right', animationDuration: 380 }} />
       <Stack.Screen name="focus/[id]" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade', animationDuration: 360 }} />
       <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', animationDuration: 420, gestureDirection: 'vertical' }} />
+      <Stack.Screen name="paywall" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', animationDuration: 420, gestureDirection: 'vertical' }} />
     </Stack>
   );
 }

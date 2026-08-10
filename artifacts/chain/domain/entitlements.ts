@@ -1,4 +1,4 @@
-import type { SubscriptionStatus } from '../lib/subscriptionBridge';
+import type { SubscriptionStatus } from './subscriptions';
 
 export type ProductEntitlements = {
   plus: boolean;

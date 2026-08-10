@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --no-warnings --experimental-strip-types --test tests/*.test.mjs",
     "check": "pnpm run typecheck && pnpm run test",
-    "release:doctor": "node scripts/release-doctor.js"
+    "release:doctor": "node scripts/release-doctor.js",
+    "release:doctor:app-store": "node scripts/release-doctor.js --app-store"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

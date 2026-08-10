@@ -1,28 +1,23 @@
 import { NativeModules } from 'react-native';
 import { reportDiagnostic } from './diagnostics';
+import {
+  normalizeSubscriptionSnapshot,
+  type ChainProductId,
+  type SubscriptionSnapshot,
+  type SubscriptionStatus,
+} from '@/domain/subscriptions';
 
-export type SubscriptionStatus = 'unavailable' | 'unknown' | 'trial' | 'active' | 'expired';
-
-export type SubscriptionSnapshot = {
-  status: SubscriptionStatus;
-  productId?: string;
-  expirationDate?: string;
-};
+export type { SubscriptionSnapshot, SubscriptionStatus } from '@/domain/subscriptions';
 
 type ChainStoreModule = {
   isAvailable?: () => Promise<boolean>;
   getSubscription?: () => Promise<SubscriptionSnapshot>;
-  purchase?: (productId: string) => Promise<SubscriptionSnapshot>;
+  purchase?: (productId: ChainProductId) => Promise<SubscriptionSnapshot>;
   restore?: () => Promise<SubscriptionSnapshot>;
   openManagement?: () => Promise<void>;
 };
 
 const nativeStore = () => NativeModules.ChainStore as ChainStoreModule | undefined;
-
-function normalizeSnapshot(value?: SubscriptionSnapshot): SubscriptionSnapshot {
-  if (!value || !['unknown', 'trial', 'active', 'expired'].includes(value.status)) return { status: 'unavailable' };
-  return value;
-}
 
 export async function isNativeStoreAvailable(): Promise<boolean> {
   try {
@@ -37,18 +32,18 @@ export async function getSubscriptionSnapshot(): Promise<SubscriptionSnapshot> {
   const bridge = nativeStore();
   if (!bridge?.getSubscription) return { status: 'unavailable' };
   try {
-    return normalizeSnapshot(await bridge.getSubscription());
+    return normalizeSubscriptionSnapshot(await bridge.getSubscription());
   } catch (error) {
     reportDiagnostic({ area: 'native', operation: 'store.subscription', severity: 'error', error });
     return { status: 'unknown' };
   }
 }
 
-export async function purchaseSubscription(productId: string): Promise<SubscriptionSnapshot> {
+export async function purchaseSubscription(productId: ChainProductId): Promise<SubscriptionSnapshot> {
   const bridge = nativeStore();
   if (!bridge?.purchase) return { status: 'unavailable' };
   try {
-    return normalizeSnapshot(await bridge.purchase(productId));
+    return normalizeSubscriptionSnapshot(await bridge.purchase(productId));
   } catch (error) {
     reportDiagnostic({ area: 'native', operation: 'store.purchase', severity: 'error', error });
     return { status: 'unknown' };
@@ -59,7 +54,7 @@ export async function restoreSubscription(): Promise<SubscriptionSnapshot> {
   const bridge = nativeStore();
   if (!bridge?.restore) return { status: 'unavailable' };
   try {
-    return normalizeSnapshot(await bridge.restore());
+    return normalizeSubscriptionSnapshot(await bridge.restore());
   } catch (error) {
     reportDiagnostic({ area: 'native', operation: 'store.restore', severity: 'error', error });
     return { status: 'unknown' };
