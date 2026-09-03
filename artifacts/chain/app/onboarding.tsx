@@ -1,27 +1,34 @@
-import React, { useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
-  Dimensions,
+  BackHandler,
   FlatList,
   Platform,
-  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
-  ViewToken,
+  type ViewToken,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { AmbientScreen } from '@/components/AmbientSurface';
+import { AppButton, Surface } from '@/components/ui/AppUI';
+import { CONTROL, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+import type { AmbientTone } from '@/constants/sectionTheme';
+import { reportDiagnostic } from '@/lib/diagnostics';
+import { playFeedback } from '@/lib/feedback';
 import { useColors } from '@/hooks/useColors';
 
-const { width: W } = Dimensions.get('window');
 const ONBOARDED_KEY = '@chain_onboarded';
 
 interface Slide {
   id: string;
   icon: keyof typeof Ionicons.glyphMap;
   iconColor: string;
+  tone: AmbientTone;
   title: string;
   body: string;
 }
@@ -31,39 +38,53 @@ const SLIDES: Slide[] = [
     id: '1',
     icon: 'link',
     iconColor: '#FF6B35',
-    title: "Don't break the chain",
+    tone: 'today',
+    title: 'Choose what matters',
     body:
-      'Pick up to 5 habits that matter. Mark them done each day. Watch the chain grow — one link at a time. Missing a day breaks it.',
+      'Create one commitment worth keeping. Chain helps you show up consistently, with minimum versions and rest days when life changes.',
   },
   {
     id: '2',
     icon: 'shield-checkmark',
-    iconColor: '#FF6B35',
-    title: 'Protect your time',
+    iconColor: '#A970FF',
+    tone: 'gate',
+    title: 'Create a pause',
     body:
-      "The Pause Gate adds a moment of friction before you open a distracting app. You see your streak. You decide if it\u2019s worth breaking.",
+      'Preview the moment of friction that Gate can place before a distraction. Real app protection requires a future native build and Apple’s Screen Time permission.',
   },
   {
     id: '3',
     icon: 'moon',
-    iconColor: '#FF6B35',
-    title: 'Plan tonight, win tomorrow',
+    iconColor: '#5B8CFF',
+    tone: 'plan',
+    title: 'Make tomorrow lighter',
     body:
-      'Spend 60 seconds each evening reflecting on today and making space for what matters tomorrow. The day starts before it starts.',
+      'Choose what matters before the day gets noisy. A short plan gives your priorities somewhere real to live.',
   },
 ];
 
 export default function OnboardingScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
   const [currentIndex, setCurrentIndex] = useState(0);
-  const flatRef = useRef<FlatList>(null);
+  const [isFinishing, setIsFinishing] = useState(false);
+  const flatRef = useRef<FlatList<Slide>>(null);
+  const finishingRef = useRef(false);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'android') return;
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => true);
+      return () => subscription.remove();
+    }, []),
+  );
+
   const onViewChange = useRef(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    ({ viewableItems }: { viewableItems: ViewToken<Slide>[] }) => {
       if (viewableItems[0]) setCurrentIndex(viewableItems[0].index ?? 0);
     },
   ).current;
@@ -71,138 +92,124 @@ export default function OnboardingScreen() {
   const viewConfig = useRef({ viewAreaCoveragePercentThreshold: 50 }).current;
 
   async function handleNext() {
+    if (finishingRef.current) return;
+    playFeedback('selection');
     if (currentIndex < SLIDES.length - 1) {
-      flatRef.current?.scrollToIndex({ index: currentIndex + 1 });
-    } else {
+      flatRef.current?.scrollToIndex({ index: currentIndex + 1, animated: true });
+      return;
+    }
+
+    finishingRef.current = true;
+    setIsFinishing(true);
+    try {
       await AsyncStorage.setItem(ONBOARDED_KEY, 'true');
+    } catch (error) {
+      reportDiagnostic({ area: 'storage', operation: 'onboarding.writeState', severity: 'warning', error });
+    } finally {
       router.replace('/(tabs)');
     }
   }
 
   const isLast = currentIndex === SLIDES.length - 1;
+  const activeSlide = SLIDES[currentIndex] ?? SLIDES[0];
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <AmbientScreen tone={activeSlide.tone} style={styles.root}>
       <FlatList
         ref={flatRef}
         data={SLIDES}
-        keyExtractor={(s) => s.id}
+        keyExtractor={(slide) => slide.id}
         horizontal
         pagingEnabled
+        scrollEnabled={!isFinishing}
         showsHorizontalScrollIndicator={false}
         onViewableItemsChanged={onViewChange}
         viewabilityConfig={viewConfig}
-        scrollEventThrottle={16}
+        getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
         renderItem={({ item }) => (
-          <View style={[styles.slide, { paddingTop: topPad + 60, width: W }]}>
-            <View style={[styles.iconWrap, { backgroundColor: item.iconColor + '20' }]}>
+          <ScrollView
+            style={{ width }}
+            contentContainerStyle={[
+              styles.slide,
+              { paddingTop: topPad + SPACE.xxxl, paddingBottom: SPACE.xl },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
+            <Surface accentColor={item.iconColor} elevated style={styles.iconWrap}>
               <Ionicons name={item.icon} size={48} color={item.iconColor} />
-            </View>
-            <Text style={[styles.title, { color: colors.foreground }]}>
-              {item.title}
-            </Text>
-            <Text style={[styles.body, { color: colors.mutedForeground }]}>
-              {item.body}
-            </Text>
-          </View>
+            </Surface>
+            <Text style={[styles.title, { color: colors.foreground }]}>{item.title}</Text>
+            <Text style={[styles.body, { color: colors.mutedForeground }]}>{item.body}</Text>
+          </ScrollView>
         )}
       />
 
-      {/* Progress dots */}
-      <View style={styles.dots}>
-        {SLIDES.map((_, i) => (
+      <View
+        accessible
+        accessibilityLabel={`Step ${currentIndex + 1} of ${SLIDES.length}`}
+        style={styles.dots}
+      >
+        {SLIDES.map((slide, index) => (
           <View
-            key={i}
+            key={slide.id}
             style={[
               styles.dot,
               {
-                backgroundColor:
-                  i === currentIndex ? colors.primary : colors.border,
-                width: i === currentIndex ? 24 : 8,
+                backgroundColor: index === currentIndex ? activeSlide.iconColor : colors.border,
+                width: index === currentIndex ? SPACE.xl : SPACE.xs,
               },
             ]}
           />
         ))}
       </View>
 
-      {/* CTA button */}
-      <View style={[styles.footer, { paddingBottom: botPad + 24 }]}>
-        <Pressable
+      <View style={[styles.footer, { paddingBottom: botPad + SPACE.xl }]}>
+        <AppButton
+          label={isFinishing ? 'Opening Chain…' : isLast ? 'Start using Chain' : 'Continue'}
           onPress={handleNext}
-          style={({ pressed }) => [
-            styles.btn,
-            { backgroundColor: colors.primary, opacity: pressed ? 0.85 : 1 },
-          ]}
-        >
-          <Text style={styles.btnText}>
-            {isLast ? 'Start building your chain' : 'Next'}
-          </Text>
-          <Ionicons
-            name={isLast ? 'arrow-forward' : 'chevron-forward'}
-            size={18}
-            color="#fff"
-          />
-        </Pressable>
+          accentColor={activeSlide.iconColor}
+          busy={isFinishing}
+          style={styles.button}
+        />
       </View>
-    </View>
+    </AmbientScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
+  root: { flex: 1 },
   slide: {
-    flex: 1,
+    flexGrow: 1,
     alignItems: 'center',
-    paddingHorizontal: 40,
-    gap: 24,
+    justifyContent: 'center',
+    paddingHorizontal: SPACE.xxxl,
+    gap: SPACE.xl,
   },
   iconWrap: {
     width: 100,
     height: 100,
-    borderRadius: 32,
+    borderRadius: RADIUS.large,
+    borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: SPACE.xs,
   },
-  title: {
-    fontSize: 28,
-    fontFamily: 'Inter_700Bold',
-    textAlign: 'center',
-    lineHeight: 34,
-  },
+  title: { ...TYPE.screenTitle, textAlign: 'center' },
   body: {
-    fontSize: 16,
+    fontSize: 15,
+    lineHeight: 23,
     fontFamily: 'Inter_400Regular',
     textAlign: 'center',
-    lineHeight: 25,
+    maxWidth: 420,
   },
   dots: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    marginBottom: 24,
+    gap: SPACE.xs,
+    marginBottom: SPACE.xl,
   },
-  dot: {
-    height: 8,
-    borderRadius: 4,
-  },
-  footer: {
-    paddingHorizontal: 24,
-  },
-  btn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 18,
-    borderRadius: 32,
-    gap: 8,
-  },
-  btnText: {
-    color: '#fff',
-    fontSize: 17,
-    fontFamily: 'Inter_600SemiBold',
-  },
+  dot: { height: SPACE.xs, borderRadius: RADIUS.capsule },
+  footer: { paddingHorizontal: SPACE.xl },
+  button: { minHeight: CONTROL.prominentButtonHeight },
 });

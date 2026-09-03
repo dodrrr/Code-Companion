@@ -1,0 +1,15 @@
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index d61d3fd..000e23d 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -117,7 +117,9 @@ export default function ChainsScreen() {
+   );
+ 
+   const interventionChain = recoveryChain ?? focusChain;
+-  const interventionTask = interventionChain?.id === focusTask?.chainId ? focusTask.text : undefined;
++  const interventionTask = focusTask && interventionChain?.id === focusTask.chainId
++    ? focusTask.text
++    : undefined;
+ 
+   const handleAdd = useCallback(() => {
+     playFeedback('selection');

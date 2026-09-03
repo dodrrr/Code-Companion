@@ -1,24 +1,34 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  AppState,
+  Alert,
   FlatList,
   InteractionManager,
   Platform,
-  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { useColors } from '@/hooks/useColors';
-import { Chain, getStreak, getTodayStr, isRestDay, toLocalDateString, useChains } from '@/context/ChainsContext';
-import { usePlan } from '@/context/PlanContext';
+import {
+  Chain,
+  getTodayStr,
+  isRestDay,
+  toLocalDateString,
+  useChains,
+} from '@/context/ChainsContext';
+import { type PlanItem, usePlan } from '@/context/PlanContext';
 import ChainCard from '@/components/ChainCard';
-import { AmbientScreen, GlassSurface } from '@/components/AmbientSurface';
-import { getDailyQuote } from '@/constants/quotes';
+import { AmbientScreen } from '@/components/AmbientSurface';
+import { AppButton, IconButton, Surface } from '@/components/ui/AppUI';
+import { CONTROL, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+import { readableAccentColor } from '@/constants/sectionTheme';
+import { playFeedback } from '@/lib/feedback';
+
+const GLASS_SURFACE_COLOR = '#121214';
 
 function formatDate(): string {
   return new Date().toLocaleDateString('en-US', {
@@ -28,35 +38,41 @@ function formatDate(): string {
   });
 }
 
-function getGreeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
-}
-
-const quote = getDailyQuote();
-
 export default function ChainsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { chains, isReady, setDayStatus, isProtectedToday, isFrozenToday } = useChains();
-  const { items } = usePlan();
+  const { items, activeDate, readItemsForDate } = usePlan();
   const [localDay, setLocalDay] = useState(getTodayStr());
-  const [currentTime, setCurrentTime] = useState(() => new Date());
+  const [todayItems, setTodayItems] = useState<PlanItem[]>([]);
+  const [savingMinimumId, setSavingMinimumId] = useState<string>();
 
   useEffect(() => {
-    // Warm the creation route once the Chains screen has settled. This keeps the
-    // first tap from paying the cost of loading and mounting the editor.
     let preloadTimer: ReturnType<typeof setTimeout> | undefined;
     const interaction = InteractionManager.runAfterInteractions(() => {
-      preloadTimer = setTimeout(() => router.prefetch('/chain/new'), 80);
+      preloadTimer = setTimeout(() => {
+        router.prefetch('/chain/new');
+      }, 80);
     });
     return () => {
       interaction.cancel();
       if (preloadTimer) clearTimeout(preloadTimer);
     };
   }, []);
+
+  useFocusEffect(useCallback(() => {
+    let cancelled = false;
+    void readItemsForDate(localDay).then((snapshot) => {
+      if (!cancelled) setTodayItems(snapshot.filter((item) => item.planDate === localDay));
+    });
+    return () => { cancelled = true; };
+  }, [localDay, readItemsForDate]));
+
+  useEffect(() => {
+    if (activeDate === localDay) {
+      setTodayItems(items.filter((item) => item.planDate === localDay));
+    }
+  }, [activeDate, items, localDay]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -73,154 +89,130 @@ export default function ChainsScreen() {
     return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    const refresh = () => setCurrentTime(new Date());
-    const interval = setInterval(refresh, 60_000);
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') refresh();
-    });
-    return () => {
-      clearInterval(interval);
-      subscription.remove();
-    };
-  }, []);
-
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
-  const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
-  const focusTask = items.find((item) => item.isPriority && !item.completed);
-  const focusChain = chains.find((chain) => chain.id === focusTask?.chainId && !isProtectedToday(chain) && !isFrozenToday(chain)) || chains.find((chain) => !isProtectedToday(chain) && !isFrozenToday(chain) && !isRestDay(chain, localDay));
-  const frozenChains = chains.filter((chain) => isFrozenToday(chain));
-  // A weekly target is a weekly minimum, not a reason to hide today's win.
-  // Logging it today protects today's chain even if the weekly target is still in progress.
-  const allProtected = chains.length > 0 && chains.every((chain) => isRestDay(chain, localDay) || isProtectedToday(chain) || isFrozenToday(chain));
-  const protectedCount = chains.filter((chain) => isRestDay(chain, localDay) || isProtectedToday(chain) || isFrozenToday(chain)).length;
-  const completedChains = chains.filter((chain) => isProtectedToday(chain)).length;
-  const nowHour = currentTime.getHours();
-  const hoursLeft = Math.max(1, 24 - nowHour);
+  const bottomSafe = Platform.OS === 'web' ? 0 : insets.bottom;
+  const focusTask = todayItems.find((item) => item.isPriority && !item.completed);
+  const dueChains = chains.filter((chain) => !isRestDay(chain, localDay));
+  const eligibleChains = dueChains.filter(
+    (chain) => !isProtectedToday(chain) && !isFrozenToday(chain),
+  );
+  const taskChain = focusTask
+    ? eligibleChains.find((chain) => chain.id === focusTask.chainId)
+    : undefined;
+  const focusChain = taskChain ?? eligibleChains[0];
+  const frozenChains = dueChains.filter((chain) => isFrozenToday(chain));
+  const keptCount = dueChains.filter((chain) => isProtectedToday(chain) && !isFrozenToday(chain)).length;
+  const allProtected = chains.length > 0 && eligibleChains.length === 0;
+  const allResting = chains.length > 0 && dueChains.length === 0;
+
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayKey = toLocalDateString(yesterday);
-  const recoveryChain = chains.find((chain) => chain.createdAt < localDay && !isRestDay(chain, yesterdayKey) && !chain.completedDates.includes(yesterdayKey) && !chain.minimumDates.includes(yesterdayKey) && !chain.frozenDates.includes(yesterdayKey) && !isProtectedToday(chain) && !isFrozenToday(chain));
+  const recoveryChain = eligibleChains.find(
+    (chain) => chain.createdAt < localDay
+      && !isRestDay(chain, yesterdayKey)
+      && !chain.completedDates.includes(yesterdayKey)
+      && !chain.minimumDates.includes(yesterdayKey)
+      && !chain.frozenDates.includes(yesterdayKey),
+  );
+
+  const interventionChain = recoveryChain ?? focusChain;
+  const interventionTask = focusTask && interventionChain?.id === focusTask.chainId
+    ? focusTask.text
+    : undefined;
+
+  const handleAdd = useCallback(() => {
+    playFeedback('selection');
+    router.push('/chain/new');
+  }, []);
 
   const renderChain = useCallback(
     ({ item }: { item: Chain }) => <ChainCard chain={item} />,
-    [localDay],
+    [],
   );
 
-  const ListHeader = (
-    <>
-      {/* Daily quote */}
-      <View style={styles.quoteWrap}>
-        <Text style={[styles.quoteText, { color: colors.mutedForeground }]}>
-          "{quote.text}"
-        </Text>
-        <Text style={[styles.quoteAuthor, { color: colors.mutedForeground + 'aa' }]}>
-          — {quote.author}
-        </Text>
-      </View>
-      {recoveryChain && <Pressable onPress={() => setDayStatus(recoveryChain.id, localDay, 'minimum')} style={({ pressed }) => [styles.recoveryCard, { backgroundColor: 'transparent', borderColor: recoveryChain.color + '55', opacity: pressed ? 0.8 : 1, overflow: 'hidden' }]}><GlassSurface pointerEvents="none" accentColor={recoveryChain.color} style={StyleSheet.absoluteFill} /><Ionicons name="refresh-outline" size={18} color={recoveryChain.color} /><View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: recoveryChain.color }]}>START AGAIN TODAY</Text><Text style={[styles.focusTitle, { color: colors.foreground }]}>One miss does not end {recoveryChain.name}.</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>Protect it with {recoveryChain.minimumLabel}.</Text></View></Pressable>}
-      {allProtected && frozenChains.length > 0 ? <View style={[styles.protectedCard, { backgroundColor: 'transparent', borderColor: '#5B8CFF88', overflow: 'hidden' }]}><GlassSurface pointerEvents="none" accentColor="#5B8CFF" style={StyleSheet.absoluteFill} /><View style={[styles.protectedIcon, { backgroundColor: '#5B8CFF24' }]}><Ionicons name="shield-checkmark-outline" size={21} color="#5B8CFF" /></View><View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: '#5B8CFF' }]}>TODAY IS PROTECTED</Text><Text style={[styles.focusTitle, { color: colors.foreground }]}>Your day is covered.</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>{completedChains} completed · {frozenChains.length} safely frozen.</Text></View></View> : allProtected ? <View style={[styles.protectedCard, { backgroundColor: 'transparent', borderColor: colors.primary + '58', overflow: 'hidden' }]}><GlassSurface pointerEvents="none" accentColor={colors.primary} style={StyleSheet.absoluteFill} /><View style={[styles.protectedIcon, { backgroundColor: colors.primary + '22' }]}><Ionicons name="shield-checkmark-outline" size={21} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: colors.primary }]}>ALL PROTECTED</Text><Text style={[styles.focusTitle, { color: colors.foreground }]}>Today’s work is done.</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>{protectedCount} chain{protectedCount === 1 ? '' : 's'} kept · Let that count.</Text></View></View> : focusChain && <><Pressable onPress={() => router.push({ pathname: '/chain/[id]', params: { id: focusChain.id } })} style={({ pressed }) => [styles.focusCard, { backgroundColor: 'transparent', borderColor: focusChain.color + '55', opacity: pressed ? 0.8 : 1, overflow: 'hidden' }]}>
-        <GlassSurface pointerEvents="none" accentColor={focusChain.color} style={StyleSheet.absoluteFill} />
-        <View style={[styles.focusIcon, { backgroundColor: focusChain.color + '22' }]}><Ionicons name="flame-outline" size={19} color={focusChain.color} /></View>
-        <View style={{ flex: 1 }}><Text style={[styles.focusEyebrow, { color: focusChain.color }]}>CHAIN AT RISK · {hoursLeft}H LEFT</Text><Text style={[styles.focusTitle, { color: colors.foreground }]} numberOfLines={1}>{focusTask?.text || `Protect ${focusChain.name}`}</Text><Text style={[styles.focusBody, { color: colors.mutedForeground }]}>Protect your {getStreak(focusChain)}-{focusChain.cadence === 'weekly' ? 'week' : 'day'} {focusChain.name} chain.</Text></View>
-        <Ionicons name="chevron-forward" size={18} color={focusChain.color} />
-      </Pressable><Pressable onPress={() => { setDayStatus(focusChain.id, localDay, 'minimum'); }} style={({ pressed }) => [styles.rescue, { borderColor: focusChain.color + '55', opacity: pressed ? 0.7 : 1 }]}><Ionicons name="leaf-outline" size={15} color={focusChain.color} /><Text style={[styles.rescueText, { color: focusChain.color }]}>Rescue mode · {focusChain.minimumLabel}</Text></Pressable></>}
-    </>
+  const listHeader = (
+    <View accessibilityLiveRegion="polite">
+      {allProtected ? (
+        <ProtectedSummary
+          allResting={allResting}
+          dueCount={dueChains.length}
+          keptCount={keptCount}
+          frozenCount={frozenChains.length}
+        />
+      ) : interventionChain ? (
+        <ChainIntervention
+          chain={interventionChain}
+          taskText={interventionTask}
+          recovering={interventionChain.id === recoveryChain?.id}
+          minimumBusy={savingMinimumId === interventionChain.id}
+          onMinimum={async () => {
+            if (savingMinimumId) return;
+            setSavingMinimumId(interventionChain.id);
+            const result = await setDayStatus(interventionChain.id, localDay, 'minimum');
+            setSavingMinimumId(undefined);
+            if (result.status !== 'persisted') {
+              playFeedback('error');
+              Alert.alert('Chain not updated', 'Chain couldn’t save the minimum version. Try again.');
+              return;
+            }
+            playFeedback('light');
+          }}
+        />
+      ) : null}
+    </View>
   );
 
   return (
     <AmbientScreen tone="today" style={styles.root}>
-      {/* Header */}
-      <View style={[styles.header, { paddingTop: topPad + 12 }]}>
-        <View style={styles.headerLeft}>
-          <Text style={[styles.greeting, { color: colors.mutedForeground }]}>
-            {getGreeting()}
-          </Text>
-          <Text
-            style={[styles.dateStr, { color: colors.foreground }]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.76}
-          >
-            {formatDate()}
-          </Text>
+      <View style={[styles.header, { paddingTop: topPad + SPACE.sm }]}>
+        <View style={styles.headerCopy}>
+          <Text style={[styles.screenTitle, { color: colors.foreground }]}>Chains</Text>
+          <Text style={[styles.date, { color: colors.mutedForeground }]}>{formatDate()}</Text>
         </View>
         <View style={styles.headerActions}>
-          <Pressable onPress={() => router.push('/settings')} style={[styles.settingsBtn, { borderColor: colors.border }]} hitSlop={8} accessibilityRole="button" accessibilityLabel="Open settings">
-            <Ionicons name="settings-outline" size={19} color={colors.mutedForeground} />
-          </Pressable>
-          {chains.length < 5 && <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Add a new chain"
-            onPressIn={() => {
-              router.prefetch('/chain/new');
-              void Haptics.selectionAsync();
-            }}
-            onPress={() => router.push('/chain/new')}
-            style={({ pressed }) => [styles.addBtn, { backgroundColor: colors.primary, transform: [{ scale: pressed ? 0.94 : 1 }] }]}
-          ><Ionicons name="add" size={24} color="#fff" /></Pressable>}
+          <IconButton icon="settings-outline" label="Open settings" onPress={() => router.push('/settings')} />
+          <IconButton
+            icon="add"
+            label="Add a new Chain"
+            onPress={handleAdd}
+            accentColor={colors.primary}
+            filled
+          />
         </View>
       </View>
 
-      {/* Chain list or empty state */}
       {!isReady ? (
         <View style={styles.loading}>
-          <Text style={[styles.loadingText, { color: colors.mutedForeground }]}>Loading your chains…</Text>
+          <Text style={[TYPE.body, { color: colors.mutedForeground }]}>Loading your chains…</Text>
         </View>
       ) : chains.length === 0 ? (
-        <View style={styles.empty}>
-          <View
-            style={[
-              styles.emptyIconWrap,
-              { backgroundColor: colors.primary + '18' },
-            ]}
-          >
-            <Ionicons name="link" size={40} color={colors.primary} />
+        <ScrollView
+          contentContainerStyle={[
+            styles.empty,
+            { paddingBottom: bottomSafe + CONTROL.tabContentInset },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={[styles.emptyIcon, { backgroundColor: colors.primary + '18' }]}>
+            <Ionicons name="link" size={34} color={colors.primary} />
           </View>
-          <Text style={[styles.emptyTitle, { color: colors.foreground }]}>
-            Start your first chain
-          </Text>
-          <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>
-            Pick one habit. Show up daily.{'\n'}Don't break the chain.
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Add your first chain"
-            onPressIn={() => {
-              router.prefetch('/chain/new');
-              void Haptics.selectionAsync();
-            }}
-            onPress={() => router.push('/chain/new')}
-            style={({ pressed }) => [
-              styles.emptyBtn,
-              {
-                backgroundColor: colors.primary,
-                transform: [{ scale: pressed ? 0.96 : 1 }],
-              },
-            ]}
-          >
-            <Text style={styles.emptyBtnText}>Add your first chain</Text>
-          </Pressable>
-          {/* Quote in empty state */}
-          <View style={styles.emptyQuote}>
-            <Text style={[styles.quoteText, { color: colors.mutedForeground, textAlign: 'center' }]}>
-              "{quote.text}"
-            </Text>
-            <Text style={[styles.quoteAuthor, { color: colors.mutedForeground + '99', textAlign: 'center' }]}>
-              — {quote.author}
-            </Text>
+          <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+          <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+          <View style={styles.emptyAction}>
+            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
           </View>
-        </View>
+        </ScrollView>
       ) : (
         <FlatList
           data={chains}
           extraData={localDay}
-          keyExtractor={(c) => c.id}
+          keyExtractor={(chain) => chain.id}
           renderItem={renderChain}
-          ListHeaderComponent={ListHeader}
+          ListHeaderComponent={listHeader}
           contentContainerStyle={[
             styles.list,
-            { paddingBottom: botPad + 80 },
+            { paddingBottom: bottomSafe + CONTROL.tabContentInset },
           ]}
           showsVerticalScrollIndicator={false}
         />
@@ -229,119 +221,131 @@ export default function ChainsScreen() {
   );
 }
 
+function ChainIntervention({
+  chain,
+  taskText,
+  recovering,
+  minimumBusy,
+  onMinimum,
+}: {
+  chain: Chain;
+  taskText?: string;
+  recovering: boolean;
+  minimumBusy: boolean;
+  onMinimum: () => void;
+}) {
+  const colors = useColors();
+  const readableAccent = readableAccentColor(chain.color, GLASS_SURFACE_COLOR, 4.8);
+  return (
+    <Surface accentColor={chain.color} style={styles.intervention}>
+      <View style={styles.interventionHeader}>
+        <View style={[styles.interventionIcon, { backgroundColor: chain.color + '1C' }]}>
+          <Ionicons name={recovering ? 'refresh-outline' : 'link-outline'} size={20} color={readableAccent} />
+        </View>
+        <View style={styles.interventionCopy}>
+          <Text style={[TYPE.eyebrow, { color: readableAccent }]}>{recovering ? 'RETURN TODAY' : taskText ? 'TODAY’S PRIORITY' : 'KEEP TODAY'}</Text>
+          <Text style={[TYPE.cardTitle, { color: colors.foreground }]} numberOfLines={2}>
+            {recovering ? `One miss does not end ${chain.name}.` : taskText ?? `Keep ${chain.name} moving.`}
+          </Text>
+          <Text
+            ellipsizeMode="tail"
+            numberOfLines={2}
+            style={[TYPE.caption, { color: colors.mutedForeground, flexShrink: 1 }]}
+          >
+            {recovering
+              ? `${chain.minimumLabel} is enough to return today.`
+              : `On a hard day, ${chain.minimumLabel} still keeps the promise.`}
+          </Text>
+        </View>
+      </View>
+      <AppButton
+        label="Log minimum"
+        icon="leaf-outline"
+        onPress={onMinimum}
+        accentColor={chain.color}
+        busy={minimumBusy}
+      />
+    </Surface>
+  );
+}
+
+function ProtectedSummary({
+  allResting,
+  dueCount,
+  keptCount,
+  frozenCount,
+}: {
+  allResting: boolean;
+  dueCount: number;
+  keptCount: number;
+  frozenCount: number;
+}) {
+  const colors = useColors();
+  const accent = allResting ? colors.mutedForeground : frozenCount > 0 ? '#5B8CFF' : colors.primary;
+  const readableAccent = readableAccentColor(accent, GLASS_SURFACE_COLOR, 4.8);
+  const detail = allResting
+    ? 'Rest is part of the rhythm.'
+    : `${keptCount} kept${frozenCount ? ` · ${frozenCount} safely frozen` : ''} · ${dueCount} due today.`;
+  return (
+    <Surface accentColor={accent} style={styles.summary}>
+      <View style={[styles.interventionIcon, { backgroundColor: accent + '1C' }]}>
+        <Ionicons name={allResting ? 'moon-outline' : 'shield-checkmark-outline'} size={20} color={readableAccent} />
+      </View>
+      <View style={styles.interventionCopy}>
+        <Text style={[TYPE.eyebrow, { color: readableAccent }]}>{allResting ? 'REST DAY' : 'TODAY IS KEPT'}</Text>
+        <Text style={[TYPE.cardTitle, { color: colors.foreground }]}>{allResting ? 'Nothing is due today.' : 'Your promises are covered.'}</Text>
+        <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>{detail}</Text>
+      </View>
+    </Surface>
+  );
+}
+
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-  },
+  root: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingHorizontal: CONTROL.screenHorizontal,
+    paddingBottom: SPACE.md,
+    gap: SPACE.sm,
   },
-  headerLeft: {
-    flex: 1,
-    minWidth: 0,
-    gap: 3,
-  },
-  greeting: {
-    fontSize: 12,
-    fontFamily: 'Inter_500Medium',
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-  },
-  dateStr: {
-    fontSize: 30,
-    fontFamily: 'Inter_700Bold',
-  },
-  addBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  headerCopy: { flex: 1, minWidth: 0, gap: SPACE.hairline },
+  screenTitle: { ...TYPE.screenTitle },
+  date: { ...TYPE.caption },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: SPACE.xs, flexShrink: 0 },
+  list: { paddingHorizontal: CONTROL.screenHorizontal, paddingTop: SPACE.xxs },
+  intervention: { padding: SPACE.md, gap: SPACE.md, marginBottom: SPACE.md },
+  interventionHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACE.sm },
+  interventionIcon: {
+    width: CONTROL.minimumTarget,
+    height: CONTROL.minimumTarget,
+    borderRadius: RADIUS.control,
+    borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
-  headerActions: { flexDirection: 'row', alignItems: 'center', flexShrink: 0, gap: 9, marginLeft: 12 },
-  settingsBtn: { width: 38, height: 38, borderRadius: 19, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  list: {
-    paddingHorizontal: 20,
-    paddingTop: 4,
-  },
-  quoteWrap: {
-    marginBottom: 20,
-    gap: 4,
-  },
-  quoteText: {
-    fontSize: 13,
-    fontFamily: 'Inter_400Regular',
-    lineHeight: 20,
-    fontStyle: 'italic',
-  },
-  quoteAuthor: {
-    fontSize: 11,
-    fontFamily: 'Inter_500Medium',
-    letterSpacing: 0.3,
-  },
-  focusCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, padding: 16, marginBottom: 18 },
-  focusIcon: { width: 36, height: 36, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  focusEyebrow: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
-  focusTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', marginTop: 2 },
-  focusBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
-  protectedCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, padding: 16, marginBottom: 18 },
-  protectedIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
-  rescue: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderRadius: 15, paddingVertical: 10, marginTop: -7, marginBottom: 16 },
-  rescueText: { fontSize: 12, fontFamily: 'Inter_600SemiBold' },
-  recoveryCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, padding: 16, marginBottom: 12 },
+  interventionCopy: { flex: 1, minWidth: 0, gap: SPACE.hairline },
+  summary: { flexDirection: 'row', alignItems: 'center', padding: SPACE.md, gap: SPACE.sm, marginBottom: SPACE.md },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   empty: {
-    flex: 1,
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 40,
-    gap: 14,
+    paddingHorizontal: 36,
+    paddingTop: SPACE.xl,
   },
-  loading: {
-    flex: 1,
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: RADIUS.hero,
+    borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: SPACE.md,
   },
-  loadingText: {
-    fontSize: 15,
-    fontFamily: 'Inter_500Medium',
-  },
-  emptyIconWrap: {
-    width: 88,
-    height: 88,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  emptyTitle: {
-    fontSize: 24,
-    fontFamily: 'Inter_700Bold',
-    textAlign: 'center',
-  },
-  emptyBody: {
-    fontSize: 15,
-    fontFamily: 'Inter_400Regular',
-    textAlign: 'center',
-    lineHeight: 23,
-  },
-  emptyBtn: {
-    marginTop: 8,
-    paddingHorizontal: 28,
-    paddingVertical: 16,
-    borderRadius: 32,
-  },
-  emptyBtnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  emptyQuote: {
-    marginTop: 24,
-    gap: 6,
-    paddingHorizontal: 8,
-  },
+  emptyTitle: { ...TYPE.modalTitle, textAlign: 'center' },
+  emptyBody: { ...TYPE.body, textAlign: 'center', marginTop: SPACE.xs, maxWidth: 310 },
+  emptyAction: { width: '100%', maxWidth: 310, marginTop: SPACE.xl },
 });

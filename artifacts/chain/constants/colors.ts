@@ -21,6 +21,7 @@ const palette = {
   background: '#060607',
   foreground: '#F5F5F7',
   card: 'rgba(18,18,20,0.94)',
+  cardSolid: '#121214',
   cardForeground: '#F5F5F7',
   primary: '#FF6B35',
   primaryForeground: '#FFFFFF',
@@ -36,6 +37,7 @@ const palette = {
   input: 'rgba(255,255,255,0.095)',
   glass: 'rgba(16,16,18,0.78)',
   glassStrong: 'rgba(22,22,24,0.88)',
+  surfaceRaised: '#17171A',
   glassBorder: 'rgba(255,255,255,0.09)',
   glassHighlight: 'rgba(255,255,255,0.05)',
 };

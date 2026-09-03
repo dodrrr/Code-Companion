@@ -1,0 +1,957 @@
+diff --git a/artifacts/chain/app/focus/[id].tsx b/artifacts/chain/app/focus/[id].tsx
+index e8b0b5e..8f9d3b0 100644
+--- a/artifacts/chain/app/focus/[id].tsx
++++ b/artifacts/chain/app/focus/[id].tsx
+@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useReducedMotion } from 'react-native-reanimated';
+ import { Ionicons } from '@expo/vector-icons';
+ import { router, useLocalSearchParams } from 'expo-router';
++import Svg, { Circle } from 'react-native-svg';
+ import { useColors } from '@/hooks/useColors';
+ import { type PlanItem, usePlan } from '@/context/PlanContext';
+ import { AmbientScreen } from '@/components/AmbientSurface';
+@@ -20,24 +21,47 @@ import { CONTROL, MOTION, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/desig
+ import { playFeedback } from '@/lib/feedback';
+ 
+ function clock(seconds: number) {
+-  const safe = Math.max(0, seconds);
+-  const minutes = Math.floor(safe / 60);
+-  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')}:${String(safe % 60).padStart(2, '0')}`;
++  const safe = Math.max(0, Math.floor(seconds));
++  const hours = Math.floor(safe / 3600);
++  const minutes = Math.floor((safe % 3600) / 60);
++  const secondsLeft = safe % 60;
++  if (hours > 0) {
++    return `${hours}:${String(minutes).padStart(2, '0')}:${String(secondsLeft).padStart(2, '0')}`;
++  }
++  return `${String(minutes).padStart(2, '0')}:${String(secondsLeft).padStart(2, '0')}`;
++}
++
++function minutesLeft(seconds: number) {
++  const totalMinutes = Math.max(1, Math.ceil(seconds / 60));
++  if (totalMinutes < 60) return `${totalMinutes} min left`;
++  const hours = Math.floor(totalMinutes / 60);
++  const minutes = totalMinutes % 60;
++  return minutes === 0 ? `${hours} hr left` : `${hours} hr ${minutes} min left`;
++}
++
++function endTime(session: FocusSessionSnapshot) {
++  if (session.runningSince === undefined) return null;
++  const remainingAtResume = Math.max(0, session.targetSeconds - session.accumulatedSeconds);
++  return new Date(session.runningSince + remainingAtResume * 1000).toLocaleTimeString(undefined, {
++    hour: 'numeric',
++    minute: '2-digit',
++  });
+ }
+ 
+ const FocusClock = React.memo(function FocusClock({
+   session,
+   accentColor,
+   completed,
++  diameter,
+   onComplete,
+ }: {
+   session: FocusSessionSnapshot;
+   accentColor: string;
+   completed: boolean;
++  diameter: number;
+   onComplete: () => void;
+ }) {
+   const colors = useColors();
+-  const reduceMotion = useReducedMotion();
+   const [now, setNow] = useState(Date.now);
+   const onCompleteRef = useRef(onComplete);
+   onCompleteRef.current = onComplete;
+@@ -48,7 +72,7 @@ const FocusClock = React.memo(function FocusClock({
+ 
+   const elapsed = getFocusElapsedSeconds(session, now);
+   const remaining = completed ? 0 : Math.max(0, session.targetSeconds - elapsed);
+-  const progress = Math.min(1, elapsed / session.targetSeconds);
++  const progress = completed ? 1 : Math.min(1, elapsed / session.targetSeconds);
+ 
+   useEffect(() => {
+     if (session.runningSince === undefined || remaining <= 0) return;
+@@ -62,29 +86,128 @@ const FocusClock = React.memo(function FocusClock({
+   }, [remaining, session.runningSince]);
+ 
+   const paused = session.runningSince === undefined;
+-  const headline = remaining === 0 ? 'Block complete' : paused ? 'Focus is paused' : 'Stay with it.';
++  const complete = remaining === 0;
++  const headline = complete ? 'Block complete' : paused ? 'Paused' : 'In focus';
++  const metadata = complete
++    ? 'Ready to finish'
++    : paused
++      ? minutesLeft(remaining)
++      : `Ends at ${endTime(session)}`;
++  const radius = (diameter - 16) / 2;
++  const circumference = 2 * Math.PI * radius;
++  const innerDiameter = diameter - 46;
+ 
+   return <>
+-    <View style={[styles.ring, { borderColor: accentColor + '55' }]}>
+-      <View style={[
+-        styles.ringFill,
+-        {
+-          backgroundColor: accentColor + '14',
+-          borderColor: accentColor,
+-          transform: [{ scale: reduceMotion ? 1 : 0.9 + progress * 0.1 }],
+-        },
+-      ]}>
+-        <Text adjustsFontSizeToFit minimumFontScale={0.7} numberOfLines={1} style={[styles.clock, { color: colors.foreground }]}>{clock(remaining)}</Text>
+-        <Text style={[styles.remaining, { color: colors.mutedForeground }]}>{remaining === 0 ? 'well held' : 'remaining'}</Text>
++    <View
++      accessible
++      accessibilityRole="text"
++      accessibilityLabel={complete ? 'Focus block complete.' : `${clock(remaining)} remaining. ${headline}. ${metadata}.`}
++      style={[styles.dial, { width: diameter, height: diameter }]}
++    >
++      <View
++        pointerEvents="none"
++        style={[
++          styles.dialHalo,
++          {
++            width: diameter + 64,
++            height: diameter + 64,
++            borderRadius: (diameter + 64) / 2,
++            backgroundColor: accentColor + (paused && !complete ? '08' : '0D'),
++          },
++        ]}
++      />
++      <Svg pointerEvents="none" width={diameter} height={diameter} viewBox={`0 0 ${diameter} ${diameter}`} style={styles.progressSvg}>
++        <Circle
++          cx={diameter / 2}
++          cy={diameter / 2}
++          r={radius}
++          fill="none"
++          stroke={accentColor + '24'}
++          strokeWidth={5}
++        />
++        <Circle
++          cx={diameter / 2}
++          cy={diameter / 2}
++          r={radius}
++          fill="none"
++          stroke={accentColor}
++          strokeWidth={5}
++          strokeLinecap="round"
++          strokeDasharray={[circumference, circumference]}
++          strokeDashoffset={circumference * (1 - progress)}
++          opacity={paused && !complete ? 0.62 : 1}
++          transform={`rotate(-90 ${diameter / 2} ${diameter / 2})`}
++        />
++      </Svg>
++      <View style={[styles.dialCore, { width: innerDiameter, height: innerDiameter, borderRadius: innerDiameter / 2, borderColor: accentColor + '20' }]}>
++        {complete ? (
++          <View style={[styles.completeGlyph, { backgroundColor: accentColor + '18', borderColor: accentColor + '40' }]}>
++            <Ionicons name="checkmark" size={31} color={accentColor} />
++          </View>
++        ) : (
++          <Text adjustsFontSizeToFit minimumFontScale={0.7} numberOfLines={1} style={[styles.clock, { color: colors.foreground }]}>{clock(remaining)}</Text>
++        )}
++        <Text style={[styles.remaining, { color: complete ? accentColor : colors.mutedForeground }]}>{complete ? 'complete' : paused ? 'paused' : 'remaining'}</Text>
+       </View>
+     </View>
+-    <View style={styles.copy}>
+-      <Text style={[styles.headline, { color: colors.foreground }]}>{headline}</Text>
+-      <Text style={[styles.body, { color: colors.mutedForeground }]}>{remaining === 0 ? 'You completed the block you planned.' : `${Math.max(0, Math.round(elapsed / 60))} min in this session.`}</Text>
++    <View accessibilityLiveRegion="polite" style={styles.statusCopy}>
++      <Text style={[styles.statusHeadline, { color: colors.foreground }]}>{headline}</Text>
++      <View style={styles.statusMetadata}>
++        <View style={[styles.statusDot, { backgroundColor: complete || !paused ? accentColor : colors.mutedForeground }]} />
++        <Text style={[styles.statusBody, { color: colors.mutedForeground }]}>{metadata}</Text>
++      </View>
+     </View>
+   </>;
+ });
+ 
++function PreparingClock({ accentColor, diameter }: { accentColor: string; diameter: number }) {
++  const colors = useColors();
++  const radius = (diameter - 16) / 2;
++  const innerDiameter = diameter - 46;
++  return <>
++    <View
++      accessible
++      accessibilityRole="text"
++      accessibilityLabel="Preparing focus session."
++      style={[styles.dial, { width: diameter, height: diameter }]}
++    >
++      <View
++        pointerEvents="none"
++        style={[
++          styles.dialHalo,
++          {
++            width: diameter + 64,
++            height: diameter + 64,
++            borderRadius: (diameter + 64) / 2,
++            backgroundColor: accentColor + '08',
++          },
++        ]}
++      />
++      <Svg pointerEvents="none" width={diameter} height={diameter} viewBox={`0 0 ${diameter} ${diameter}`} style={styles.progressSvg}>
++        <Circle
++          cx={diameter / 2}
++          cy={diameter / 2}
++          r={radius}
++          fill="none"
++          stroke={accentColor + '24'}
++          strokeWidth={5}
++        />
++      </Svg>
++      <View style={[styles.dialCore, { width: innerDiameter, height: innerDiameter, borderRadius: innerDiameter / 2, borderColor: accentColor + '20' }]}>
++        <Text style={[styles.clock, { color: colors.foreground }]}>--:--</Text>
++        <Text style={[styles.remaining, { color: colors.mutedForeground }]}>preparing</Text>
++      </View>
++    </View>
++    <View accessibilityLiveRegion="polite" style={styles.statusCopy}>
++      <Text style={[styles.statusHeadline, { color: colors.foreground }]}>Preparing focus…</Text>
++      <View style={styles.statusMetadata}>
++        <View style={[styles.statusDot, { backgroundColor: colors.mutedForeground }]} />
++        <Text style={[styles.statusBody, { color: colors.mutedForeground }]}>Restoring your session safely</Text>
++      </View>
++    </View>
++  </>;
++}
++
+ export default function FocusSession() {
+   const colors = useColors();
+   const insets = useSafeAreaInsets();
+@@ -122,6 +245,7 @@ export default function FocusSession() {
+   const paused = !sessionMatchesItem || session?.runningSince === undefined;
+   const topPad = Platform.OS === 'web' ? 40 : insets.top + 8;
+   const compactLayout = width < 360;
++  const dialDiameter = compactLayout ? 210 : 232;
+ 
+   useEffect(() => {
+     if (liveItem) setRetainedItem(liveItem);
+@@ -445,16 +569,22 @@ export default function FocusSession() {
+   return <AmbientScreen tone="focus" color={item.color || colors.primary} style={[styles.root, { paddingTop: topPad }]}>
+     <Pressable disabled={sessionControlsDisabled} accessibilityRole="button" accessibilityLabel="Close focus session" accessibilityHint="Pauses and saves this session." accessibilityState={{ disabled: sessionControlsDisabled }} onPress={() => { void closeSession(); }} style={[styles.close, { opacity: sessionControlsDisabled ? OPACITY.disabled : 1 }]}><Ionicons name="close" size={24} color={colors.mutedForeground} /></Pressable>
+     <ScrollView style={styles.scroller} contentContainerStyle={[styles.inner, { paddingBottom: insets.bottom + SPACE.lg }]} showsVerticalScrollIndicator={false}>
+-      <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>FOCUS SESSION</Text>
+-      <Text style={[styles.task, { color: colors.foreground }]}>{item.text}</Text>
+-      {sessionMatchesItem && session ? <FocusClock session={session} accentColor={accentColor} completed={timerCompleted} onComplete={completeTimer} /> : <>
+-        <View style={[styles.ring, { borderColor: accentColor + '55' }]}><View style={[styles.ringFill, { backgroundColor: accentColor + '14', borderColor: accentColor }]}><Text style={[styles.clock, { color: colors.foreground }]}>--:--:--</Text><Text style={[styles.remaining, { color: colors.mutedForeground }]}>preparing</Text></View></View>
+-        <View style={styles.copy}><Text style={[styles.headline, { color: colors.foreground }]}>Preparing focus…</Text><Text style={[styles.body, { color: colors.mutedForeground }]}>Your session is being restored safely.</Text></View>
+-      </>}
+-      {sessionSaveError && <Text accessibilityLiveRegion="polite" style={[styles.saveError, { color: colors.destructive }]}>Completion isn’t saved yet. Close to retry.</Text>}
+-      <View style={[styles.actions, compactLayout && styles.actionsCompact]}>
+-        <Pressable disabled={pauseDisabled} accessibilityRole="button" accessibilityLabel={timerCompleted ? 'Focus session complete' : paused ? 'Resume focus session' : 'Pause focus session'} accessibilityState={{ disabled: pauseDisabled }} onPress={() => { void togglePause(); }} style={[styles.pause, compactLayout && styles.actionCompact, { backgroundColor: colors.card, borderColor: colors.border, opacity: pauseDisabled ? OPACITY.disabled : 1 }]}><Ionicons name={timerCompleted ? 'checkmark' : paused ? 'play' : 'pause'} size={18} color={colors.foreground} /><Text style={[styles.pauseText, { color: colors.foreground }]}>{saving ? 'Saving…' : finishing ? 'Finishing…' : timerCompleted ? 'Complete' : paused ? 'Resume' : 'Pause'}</Text></Pressable>
+-        <Pressable disabled={sessionControlsDisabled} accessibilityRole="button" accessibilityLabel="End focus session" accessibilityHint={timerCompleted ? 'Completes the task and closes this session.' : 'Hold visually, or use the accessibility activate action, to end early.'} accessibilityState={{ disabled: sessionControlsDisabled }} accessibilityActions={[{ name: 'activate', label: 'End focus session' }]} onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'activate') void finish(); }} onPress={timerCompleted ? finish : undefined} onPressIn={beginEndHold} onPressOut={cancelEndHold} style={[styles.finish, compactLayout && styles.actionCompact, { backgroundColor: reduceMotion && holdingVisual ? accentColor + '22' : colors.card, borderColor: accentColor, opacity: sessionControlsDisabled ? OPACITY.disabled : 1 }]}>{!reduceMotion && <Animated.View pointerEvents="none" style={[styles.holdFill, { backgroundColor: accentColor, width: holdProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]}><View style={styles.holdScrim} /></Animated.View>}<View pointerEvents="none" style={styles.finishContent}><Ionicons name="checkmark" size={19} color="#fff" /><Text style={styles.finishText}>{saving ? 'Saving…' : finishing ? 'Finishing…' : timerCompleted ? 'Finish' : reduceMotion && holdingVisual ? 'Keep holding…' : 'Hold to end'}</Text></View></Pressable>
++      <View style={styles.sessionHeader}>
++        <View style={styles.eyebrowRow}>
++          <View style={[styles.eyebrowDot, { backgroundColor: accentColor }]} />
++          <Text style={[styles.eyebrow, { color: colors.mutedForeground }]}>FOCUS SESSION</Text>
++        </View>
++        <Text numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.78} style={[styles.task, { color: colors.foreground }]}>{item.text}</Text>
++      </View>
++      <View style={[styles.focusStage, compactLayout && styles.focusStageCompact]}>
++        {sessionMatchesItem && session
++          ? <FocusClock session={session} accentColor={accentColor} completed={timerCompleted} diameter={dialDiameter} onComplete={completeTimer} />
++          : <PreparingClock accentColor={accentColor} diameter={dialDiameter} />}
++        {sessionSaveError && <Text accessibilityLiveRegion="polite" style={[styles.saveError, { color: colors.destructive }]}>Completion isn’t saved yet. Close to retry.</Text>}
++      </View>
++      <View style={[styles.actionsDock, compactLayout && styles.actionsDockCompact, { backgroundColor: colors.glassStrong, borderColor: colors.glassBorder }]}>
++        <Pressable disabled={pauseDisabled} accessibilityRole="button" accessibilityLabel={timerCompleted ? 'Focus session complete' : paused ? 'Resume focus session' : 'Pause focus session'} accessibilityState={{ disabled: pauseDisabled }} onPress={() => { void togglePause(); }} style={({ pressed }) => [styles.pause, compactLayout && styles.actionCompact, { backgroundColor: colors.glassHighlight, opacity: pauseDisabled ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}><Ionicons name={timerCompleted ? 'checkmark' : paused ? 'play' : 'pause'} size={18} color={colors.foreground} /><Text style={[styles.pauseText, { color: colors.foreground }]}>{saving ? 'Saving…' : finishing ? 'Finishing…' : timerCompleted ? 'Complete' : paused ? 'Resume' : 'Pause'}</Text></Pressable>
++        <Pressable disabled={sessionControlsDisabled} accessibilityRole="button" accessibilityLabel="End focus session" accessibilityHint={timerCompleted ? 'Completes the task and closes this session.' : 'Hold visually, or use the accessibility activate action, to end early.'} accessibilityState={{ disabled: sessionControlsDisabled }} accessibilityActions={[{ name: 'activate', label: 'End focus session' }]} onAccessibilityAction={(event) => { if (event.nativeEvent.actionName === 'activate') void finish(); }} onPress={timerCompleted ? finish : undefined} onPressIn={beginEndHold} onPressOut={cancelEndHold} style={({ pressed }) => [styles.finish, compactLayout && styles.actionCompact, { backgroundColor: reduceMotion && holdingVisual ? accentColor + '24' : accentColor + '14', borderColor: accentColor + '52', opacity: sessionControlsDisabled ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}>{!reduceMotion && <Animated.View pointerEvents="none" style={[styles.holdFill, { backgroundColor: accentColor, width: holdProgress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }) }]}><View style={styles.holdScrim} /></Animated.View>}<View pointerEvents="none" style={styles.finishContent}><Ionicons name="checkmark" size={19} color={colors.foreground} /><Text style={[styles.finishText, { color: colors.foreground }]}>{saving ? 'Saving…' : finishing ? 'Finishing…' : timerCompleted ? 'Finish' : reduceMotion && holdingVisual ? 'Keep holding…' : 'Hold to end'}</Text></View></Pressable>
+       </View>
+     </ScrollView>
+   </AmbientScreen>;
+@@ -464,27 +594,37 @@ const styles = StyleSheet.create({
+   root: { flex: 1, paddingHorizontal: CONTROL.screenHorizontal },
+   close: { alignSelf: 'flex-end', minWidth: CONTROL.minimumTarget, minHeight: CONTROL.minimumTarget, alignItems: 'center', justifyContent: 'center' },
+   scroller: { flex: 1, width: '100%' },
+-  inner: { flexGrow: 1, alignItems: 'center', paddingTop: SPACE.lg },
++  inner: { flexGrow: 1, alignItems: 'center', paddingTop: SPACE.sm },
++  sessionHeader: { alignItems: 'center', width: '100%' },
++  eyebrowRow: { minHeight: 20, flexDirection: 'row', alignItems: 'center', gap: SPACE.xs },
++  eyebrowDot: { width: 6, height: 6, borderRadius: 3 },
+   eyebrow: { ...TYPE.eyebrow, fontSize: 11, lineHeight: 15 },
+-  task: { ...TYPE.screenTitle, fontSize: 28, lineHeight: 34, textAlign: 'center', marginTop: SPACE.sm, maxWidth: 330 },
+-  ring: { width: 244, height: 244, borderRadius: 122, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center', marginTop: SPACE.xxl },
+-  ringFill: { width: 194, height: 194, borderRadius: 97, borderWidth: 2, alignItems: 'center', justifyContent: 'center' },
+-  clock: { fontSize: 37, lineHeight: 44, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'], letterSpacing: -1 },
+-  remaining: { ...TYPE.metadata, marginTop: SPACE.xxs },
+-  copy: { alignItems: 'center', marginTop: SPACE.xl },
+-  headline: { ...TYPE.modalTitle, textAlign: 'center' },
+-  body: { ...TYPE.body, marginTop: SPACE.xs, textAlign: 'center' },
++  task: { ...TYPE.screenTitle, fontSize: 28, lineHeight: 34, textAlign: 'center', marginTop: SPACE.xs, maxWidth: 330 },
++  focusStage: { flexGrow: 1, minHeight: 354, width: '100%', alignItems: 'center', justifyContent: 'center', paddingVertical: SPACE.xl },
++  focusStageCompact: { minHeight: 320, paddingVertical: SPACE.lg },
++  dial: { alignItems: 'center', justifyContent: 'center' },
++  dialHalo: { position: 'absolute' },
++  progressSvg: { position: 'absolute' },
++  dialCore: { alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(11,11,13,0.88)', borderWidth: StyleSheet.hairlineWidth },
++  clock: { fontSize: 39, lineHeight: 46, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'], letterSpacing: -1.1 },
++  remaining: { ...TYPE.metadata, marginTop: SPACE.xxs, letterSpacing: 0.2 },
++  completeGlyph: { width: 58, height: 58, borderRadius: 29, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
++  statusCopy: { alignItems: 'center', marginTop: SPACE.lg },
++  statusHeadline: { ...TYPE.sectionTitle, textAlign: 'center' },
++  statusMetadata: { minHeight: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xs, marginTop: SPACE.xxs },
++  statusDot: { width: 5, height: 5, borderRadius: 3 },
++  statusBody: { ...TYPE.caption, textAlign: 'center' },
+   saveError: { ...TYPE.caption, marginTop: SPACE.sm, textAlign: 'center' },
+-  actions: { flexDirection: 'row', gap: SPACE.sm, width: '100%', marginTop: 'auto', paddingTop: SPACE.xxl },
+-  actionsCompact: { flexDirection: 'column' },
++  actionsDock: { flexDirection: 'row', gap: SPACE.xs, width: '100%', borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.hero, borderCurve: 'continuous', padding: SPACE.xxs },
++  actionsDockCompact: { flexDirection: 'column' },
+   actionCompact: { flex: undefined, width: '100%' },
+-  pause: { minHeight: CONTROL.buttonHeight, flex: 0.78, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xs, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.button, borderCurve: 'continuous', paddingHorizontal: SPACE.sm },
++  pause: { minHeight: CONTROL.buttonHeight, flex: 0.78, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xs, borderRadius: RADIUS.button, borderCurve: 'continuous', paddingHorizontal: SPACE.sm },
+   pauseText: { ...TYPE.bodyStrong },
+-  finish: { minHeight: CONTROL.buttonHeight, flex: 1.22, borderRadius: RADIUS.button, borderCurve: 'continuous', borderWidth: 1.5, paddingHorizontal: SPACE.sm, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
++  finish: { minHeight: CONTROL.buttonHeight, flex: 1.22, borderRadius: RADIUS.button, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.sm, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+   holdFill: { position: 'absolute', left: 0, top: 0, bottom: 0, overflow: 'hidden' },
+-  holdScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.52)' },
++  holdScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.38)' },
+   finishContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xs },
+-  finishText: { color: '#fff', ...TYPE.bodyStrong },
++  finishText: { ...TYPE.bodyStrong },
+   unavailable: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SPACE.lg, paddingBottom: 64 },
+   unavailableIcon: { width: 52, height: 52, borderRadius: RADIUS.button, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', marginBottom: SPACE.md },
+   unavailableTitle: { ...TYPE.modalTitle, textAlign: 'center' },
+diff --git a/artifacts/chain/app/pause-gate-demo.tsx b/artifacts/chain/app/pause-gate-demo.tsx
+index 94b306c..6b61246 100644
+--- a/artifacts/chain/app/pause-gate-demo.tsx
++++ b/artifacts/chain/app/pause-gate-demo.tsx
+@@ -35,9 +35,9 @@ import { playFeedback } from "@/lib/feedback";
+ const PAUSE_DURATION_MS = 8_000;
+ const BREATH_PHASE_MS = 4_000;
+ const PAUSE_SECONDS = PAUSE_DURATION_MS / 1_000;
+-const FINISH_EXIT_DELAY_MS = 320;
+-const ORB_MIN_SCALE = 1;
+-const ORB_MAX_SCALE = 1.08;
++const CONTINUE_EXIT_DELAY_MS = 320;
++const ORB_MIN_SCALE = 0.94;
++const ORB_MAX_SCALE = 1.04;
+ const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+ 
+ type BreathPhase = "in" | "out" | "complete";
+@@ -90,7 +90,7 @@ export default function PauseGateDemoScreen() {
+   const phaseRef = useRef<BreathPhase>("in");
+   const readyRef = useRef(false);
+   const isExitingRef = useRef(false);
+-  const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+   const [countdown, setCountdown] = useState(PAUSE_SECONDS);
+   const [phase, setPhase] = useState<BreathPhase>("in");
+   const [ready, setReady] = useState(false);
+@@ -106,12 +106,23 @@ export default function PauseGateDemoScreen() {
+     transform: [{ scale: orbScale.value }],
+   }));
+ 
++  const haloAnimatedStyle = useAnimatedStyle(() => {
++    const breathProgress = Math.max(
++      0,
++      Math.min(
++        1,
++        (orbScale.value - ORB_MIN_SCALE) / (ORB_MAX_SCALE - ORB_MIN_SCALE),
++      ),
++    );
++    return { opacity: 0.48 + breathProgress * 0.34 };
++  });
++
+   const pauseFillStyle = useAnimatedStyle(() => ({
+     width: (String(pauseFill.value * 100) + "%") as `${number}%`,
+   }));
+ 
+   // Status is always derived from one absolute deadline. Resuming the app
+-  // cannot extend the preview pause or restart the breath.
++  // cannot extend the pause or restart the breath.
+   useEffect(() => {
+     let statusTimer: ReturnType<typeof setTimeout> | undefined;
+     let mounted = true;
+@@ -138,7 +149,7 @@ export default function PauseGateDemoScreen() {
+ 
+       cancelAnimation(orbScale);
+       if (reduceMotion || remainingMs === 0) {
+-        orbScale.value = ORB_MIN_SCALE;
++        orbScale.value = 1;
+       } else if (elapsedMs < BREATH_PHASE_MS) {
+         const inhaleProgress = elapsedMs / BREATH_PHASE_MS;
+         orbScale.value =
+@@ -188,7 +199,7 @@ export default function PauseGateDemoScreen() {
+       if (remainingMs === 0) {
+         cancelAnimation(orbScale);
+         cancelAnimation(pauseFill);
+-        orbScale.value = ORB_MIN_SCALE;
++        orbScale.value = 1;
+         pauseFill.value = 1;
+         if (!readyRef.current) {
+           readyRef.current = true;
+@@ -250,7 +261,7 @@ export default function PauseGateDemoScreen() {
+ 
+   useEffect(
+     () => () => {
+-      if (finishTimerRef.current) clearTimeout(finishTimerRef.current);
++      if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+     },
+     [],
+   );
+@@ -268,10 +279,10 @@ export default function PauseGateDemoScreen() {
+     exitToGate();
+   }
+ 
+-  function handleFinish() {
++  function handleContinue() {
+     if (!readyRef.current || !beginExit()) return;
+     playFeedback("light");
+-    finishTimerRef.current = setTimeout(exitToGate, FINISH_EXIT_DELAY_MS);
++    exitTimerRef.current = setTimeout(exitToGate, CONTINUE_EXIT_DELAY_MS);
+   }
+ 
+   const phaseLabel =
+@@ -298,22 +309,15 @@ export default function PauseGateDemoScreen() {
+       >
+         <View style={styles.frame}>
+           <View style={styles.topBar}>
+-            <View style={styles.titleBlock}>
+-              <Text
+-                accessibilityRole="header"
+-                style={[styles.eyebrow, { color: colors.primary }]}
+-              >
+-                GATE PREVIEW
+-              </Text>
+-              <Text
+-                style={[styles.screenTitle, { color: colors.foreground }]}
+-              >
+-                Make space for a choice
+-              </Text>
+-            </View>
++            <Text
++              accessibilityRole="header"
++              style={[styles.screenTitle, { color: colors.foreground }]}
++            >
++              Take one breath.
++            </Text>
+             <Pressable
+               accessibilityRole="button"
+-              accessibilityLabel="Close Gate preview"
++              accessibilityLabel="Close Gate"
+               accessibilityState={{ busy: isExiting }}
+               hitSlop={8}
+               onPress={handleReturn}
+@@ -336,7 +340,12 @@ export default function PauseGateDemoScreen() {
+             </Pressable>
+           </View>
+ 
+-          <View style={styles.previewContext}>
++          <View
++            style={[
++              styles.pauseContext,
++              { backgroundColor: colors.card, borderColor: colors.border },
++            ]}
++          >
+             <View style={styles.appRow}>
+               <View
+                 accessibilityElementsHidden
+@@ -358,6 +367,7 @@ export default function PauseGateDemoScreen() {
+                   PAUSE BEFORE
+                 </Text>
+                 <Text
++                  numberOfLines={1}
+                   style={[styles.appName, { color: colors.foreground }]}
+                 >
+                   {appName}
+@@ -384,6 +394,7 @@ export default function PauseGateDemoScreen() {
+                 color={colors.primary}
+               />
+               <Text
++                numberOfLines={1}
+                 style={[styles.chainChipText, { color: colors.primary }]}
+               >
+                 {"CHAIN · " + chainName}
+@@ -391,132 +402,126 @@ export default function PauseGateDemoScreen() {
+             </View>
+           </View>
+ 
+-          <View style={styles.orbSlot}>
++          <View
++            accessible
++            accessibilityLabel={
++              ready
++                ? "Pause complete"
++                : phaseLabel + ", " + countdown + " seconds"
++            }
++            style={styles.orbSlot}
++          >
+             <Animated.View
++              pointerEvents="none"
+               style={[
+-                styles.orb,
+-                {
+-                  backgroundColor: colors.primary,
+-                  borderColor: colors.primary + "CC",
+-                  shadowColor: colors.primary,
+-                },
++                styles.breathField,
+                 orbAnimatedStyle,
+               ]}
+             >
+-              {ready ? (
+-                <View style={styles.orbComplete}>
+-                  <Ionicons
+-                    accessibilityElementsHidden
+-                    importantForAccessibility="no"
+-                    name="checkmark"
+-                    size={42}
+-                    color={colors.primaryForeground}
+-                  />
+-                  <Text
+-                    adjustsFontSizeToFit
+-                    minimumFontScale={0.6}
+-                    numberOfLines={2}
+-                    style={[
+-                      styles.orbPhase,
+-                      { color: colors.primaryForeground },
+-                    ]}
+-                  >
+-                    Pause complete
+-                  </Text>
+-                </View>
+-              ) : (
+-                <>
+-                  <Text
+-                    adjustsFontSizeToFit
+-                    minimumFontScale={0.6}
+-                    numberOfLines={2}
+-                    style={[
+-                      styles.orbPhase,
+-                      { color: colors.primaryForeground },
+-                    ]}
+-                  >
+-                    {phaseLabel}
+-                  </Text>
+-                  <View
+-                    accessibilityElementsHidden
+-                    importantForAccessibility="no-hide-descendants"
+-                    style={styles.countdownRow}
+-                  >
++              <Animated.View
++                style={[
++                  styles.haloOuter,
++                  {
++                    backgroundColor: colors.primary + "08",
++                    borderColor: colors.primary + "42",
++                  },
++                  haloAnimatedStyle,
++                ]}
++              />
++              <View
++                style={[
++                  styles.haloMiddle,
++                  {
++                    backgroundColor: colors.primary + "0C",
++                    borderColor: colors.primary + "34",
++                  },
++                ]}
++              />
++              <View
++                style={[
++                  styles.haloInner,
++                  {
++                    backgroundColor: colors.primary + "10",
++                    borderColor: colors.primary + "2E",
++                  },
++                ]}
++              />
++              <View
++                style={[
++                  styles.breathCore,
++                  {
++                    backgroundColor: colors.card,
++                    borderColor: colors.primary + "52",
++                  },
++                ]}
++              >
++                {ready ? (
++                  <View style={styles.orbComplete}>
++                    <Ionicons
++                      accessibilityElementsHidden
++                      importantForAccessibility="no"
++                      name="checkmark"
++                      size={34}
++                      color={colors.primary}
++                    />
+                     <Text
++                      adjustsFontSizeToFit
++                      minimumFontScale={0.6}
++                      numberOfLines={1}
+                       style={[
+-                        styles.countdownNumber,
+-                        { color: colors.primaryForeground },
++                        styles.orbPhase,
++                        { color: colors.foreground },
+                       ]}
+                     >
+-                      {countdown}
++                      Choose
+                     </Text>
++                  </View>
++                ) : (
++                  <>
+                     <Text
+-                      style={[
+-                        styles.countdownUnit,
+-                        { color: colors.primaryForeground },
+-                      ]}
++                      adjustsFontSizeToFit
++                      minimumFontScale={0.7}
++                      numberOfLines={1}
++                      style={[styles.orbPhase, { color: colors.foreground }]}
+                     >
+-                      sec
++                      {phaseLabel}
+                     </Text>
+-                  </View>
+-                </>
+-              )}
++                    <View style={styles.countdownRow}>
++                      <Text
++                        style={[
++                          styles.countdownNumber,
++                          { color: colors.foreground },
++                        ]}
++                      >
++                        {countdown}
++                      </Text>
++                      <Text
++                        style={[
++                          styles.countdownUnit,
++                          { color: colors.mutedForeground },
++                        ]}
++                      >
++                        sec
++                      </Text>
++                    </View>
++                  </>
++                )}
++              </View>
+             </Animated.View>
+           </View>
+ 
+           <View style={styles.prompt}>
+-            <Text
+-              style={[styles.promptTitle, { color: colors.foreground }]}
+-            >
+-              One breath. Then choose.
+-            </Text>
+             <Text
+               style={[styles.promptBody, { color: colors.mutedForeground }]}
+             >
+-              Notice the impulse without judgment. Returning to Gate is
+-              available at any time.
++              Notice the impulse. You can still choose what matters.
+             </Text>
+           </View>
+ 
+-          <View
+-            style={[
+-              styles.previewNote,
+-              { backgroundColor: colors.card, borderColor: colors.border },
+-            ]}
+-          >
+-            <View
+-              accessibilityElementsHidden
+-              importantForAccessibility="no-hide-descendants"
+-              style={[
+-                styles.noteIcon,
+-                { backgroundColor: colors.primary + "18" },
+-              ]}
+-            >
+-              <Ionicons
+-                name="information-outline"
+-                size={17}
+-                color={colors.primary}
+-              />
+-            </View>
+-            <View style={styles.noteCopy}>
+-              <Text
+-                style={[styles.noteTitle, { color: colors.foreground }]}
+-              >
+-                Visual preview only
+-              </Text>
+-              <Text
+-                style={[styles.noteBody, { color: colors.mutedForeground }]}
+-              >
+-                Chain does not open, block, or monitor {appName}. Apple app
+-                controls are not connected in this build.
+-              </Text>
+-            </View>
+-          </View>
+-
+           <View style={styles.actions}>
+             <Pressable
+               accessibilityRole="button"
+-              accessibilityLabel="Return to Gate"
++              accessibilityLabel="Go back"
+               accessibilityHint="Available throughout the pause"
+               accessibilityState={{ busy: isExiting }}
+               onPress={handleReturn}
+@@ -542,7 +547,7 @@ export default function PauseGateDemoScreen() {
+                   { color: colors.primaryForeground },
+                 ]}
+               >
+-                Return to Gate
++                Go back
+               </Text>
+             </Pressable>
+ 
+@@ -550,8 +555,8 @@ export default function PauseGateDemoScreen() {
+               accessibilityRole="button"
+               accessibilityLabel={
+                 ready
+-                  ? "Finish preview"
+-                  : "Finish preview, available after the pause"
++                  ? "Continue"
++                  : "Continue, available after the pause"
+               }
+               accessibilityHint={
+                 ready
+@@ -563,7 +568,7 @@ export default function PauseGateDemoScreen() {
+                 busy: isExiting,
+               }}
+               disabled={!ready || isExiting}
+-              onPress={handleFinish}
++              onPress={handleContinue}
+               style={({ pressed }) => [
+                 styles.secondaryButton,
+                 {
+@@ -588,19 +593,13 @@ export default function PauseGateDemoScreen() {
+                 ]}
+               >
+                 {isExiting
+-                  ? "Finishing preview…"
++                  ? "Continuing…"
+                   : ready
+-                    ? "Finish preview"
+-                    : "Finish preview · " + countdown + "s"}
++                    ? "Continue"
++                    : "Continue · " + countdown + "s"}
+               </Text>
+             </Pressable>
+           </View>
+-
+-          <Text
+-            style={[styles.footer, { color: colors.mutedForeground }]}
+-          >
+-            PAUSE GATE · APP CONTROLS NOT CONNECTED
+-          </Text>
+         </View>
+       </ScrollView>
+     </AmbientScreen>
+@@ -623,24 +622,18 @@ const styles = StyleSheet.create({
+     width: "100%",
+     maxWidth: 520,
+     flexGrow: 1,
+-    gap: SPACE.lg,
++    gap: SPACE.md,
+   },
+   topBar: {
+     width: "100%",
+     flexDirection: "row",
+-    alignItems: "flex-start",
++    alignItems: "center",
+     justifyContent: "space-between",
+     gap: SPACE.md,
+   },
+-  titleBlock: {
+-    flex: 1,
+-    gap: SPACE.xxs,
+-  },
+-  eyebrow: {
+-    ...TYPE.eyebrow,
+-  },
+   screenTitle: {
+     ...TYPE.modalTitle,
++    flex: 1,
+   },
+   closeButton: {
+     width: CONTROL.minimumTarget,
+@@ -651,20 +644,28 @@ const styles = StyleSheet.create({
+     justifyContent: "center",
+     flexShrink: 0,
+   },
+-  previewContext: {
++  pauseContext: {
++    width: "100%",
++    minHeight: 76,
++    flexDirection: "row",
++    flexWrap: "wrap",
+     alignItems: "center",
++    justifyContent: "space-between",
+     gap: SPACE.sm,
++    padding: SPACE.sm,
++    borderRadius: RADIUS.card,
++    borderWidth: StyleSheet.hairlineWidth,
+   },
+   appRow: {
++    flex: 1,
++    minWidth: 174,
+     flexDirection: "row",
+     alignItems: "center",
+-    justifyContent: "center",
+     gap: SPACE.sm,
+-    maxWidth: "100%",
+   },
+   appIcon: {
+-    width: 52,
+-    height: 52,
++    width: 48,
++    height: 48,
+     borderRadius: RADIUS.control,
+     borderWidth: StyleSheet.hairlineWidth,
+     alignItems: "center",
+@@ -672,6 +673,7 @@ const styles = StyleSheet.create({
+     flexShrink: 0,
+   },
+   appCopy: {
++    flex: 1,
+     flexShrink: 1,
+     gap: SPACE.hairline,
+   },
+@@ -684,7 +686,7 @@ const styles = StyleSheet.create({
+     ...TYPE.sectionTitle,
+   },
+   chainChip: {
+-    maxWidth: "100%",
++    maxWidth: 190,
+     minHeight: 28,
+     flexDirection: "row",
+     alignItems: "center",
+@@ -703,23 +705,46 @@ const styles = StyleSheet.create({
+     textAlign: "center",
+   },
+   orbSlot: {
+-    height: 198,
++    height: 236,
+     alignItems: "center",
+     justifyContent: "center",
+     flexShrink: 0,
+   },
+-  orb: {
+-    width: 180,
+-    height: 180,
+-    borderRadius: 90,
++  breathField: {
++    width: 218,
++    height: 218,
++    alignItems: "center",
++    justifyContent: "center",
++  },
++  haloOuter: {
++    position: "absolute",
++    width: 214,
++    height: 214,
++    borderRadius: 107,
+     borderWidth: 1,
++  },
++  haloMiddle: {
++    position: "absolute",
++    width: 170,
++    height: 170,
++    borderRadius: 85,
++    borderWidth: StyleSheet.hairlineWidth,
++  },
++  haloInner: {
++    position: "absolute",
++    width: 134,
++    height: 134,
++    borderRadius: 67,
++    borderWidth: StyleSheet.hairlineWidth,
++  },
++  breathCore: {
++    width: 112,
++    height: 112,
++    borderRadius: 56,
++    borderWidth: StyleSheet.hairlineWidth,
+     alignItems: "center",
+     justifyContent: "center",
+-    gap: SPACE.xs,
+-    shadowOffset: { width: 0, height: 10 },
+-    shadowOpacity: 0.25,
+-    shadowRadius: 28,
+-    elevation: 8,
++    gap: SPACE.xxs,
+   },
+   orbComplete: {
+     alignItems: "center",
+@@ -727,7 +752,7 @@ const styles = StyleSheet.create({
+     gap: SPACE.xxs,
+   },
+   orbPhase: {
+-    ...TYPE.sectionTitle,
++    ...TYPE.bodyStrong,
+     textAlign: "center",
+   },
+   countdownRow: {
+@@ -736,8 +761,8 @@ const styles = StyleSheet.create({
+     gap: SPACE.xxs,
+   },
+   countdownNumber: {
+-    fontSize: 34,
+-    lineHeight: 39,
++    fontSize: 30,
++    lineHeight: 34,
+     fontFamily: "Inter_700Bold",
+     letterSpacing: -0.8,
+   },
+@@ -747,47 +772,16 @@ const styles = StyleSheet.create({
+   },
+   prompt: {
+     alignItems: "center",
+-    gap: SPACE.xs,
+-  },
+-  promptTitle: {
+-    ...TYPE.modalTitle,
+-    textAlign: "center",
+   },
+   promptBody: {
+     ...TYPE.body,
+     maxWidth: 390,
+     textAlign: "center",
+   },
+-  previewNote: {
+-    width: "100%",
+-    flexDirection: "row",
+-    alignItems: "flex-start",
+-    gap: SPACE.sm,
+-    borderRadius: RADIUS.card,
+-    borderWidth: StyleSheet.hairlineWidth,
+-    padding: SPACE.md,
+-  },
+-  noteIcon: {
+-    width: 30,
+-    height: 30,
+-    borderRadius: RADIUS.capsule,
+-    alignItems: "center",
+-    justifyContent: "center",
+-    flexShrink: 0,
+-  },
+-  noteCopy: {
+-    flex: 1,
+-    gap: SPACE.xxs,
+-  },
+-  noteTitle: {
+-    ...TYPE.bodyStrong,
+-  },
+-  noteBody: {
+-    ...TYPE.caption,
+-  },
+   actions: {
+     width: "100%",
+     gap: SPACE.sm,
++    marginTop: "auto",
+   },
+   primaryButton: {
+     width: "100%",
+@@ -826,10 +820,4 @@ const styles = StyleSheet.create({
+     ...TYPE.bodyStrong,
+     textAlign: "center",
+   },
+-  footer: {
+-    ...TYPE.eyebrow,
+-    alignSelf: "center",
+-    textAlign: "center",
+-    opacity: 0.72,
+-  },
+ });

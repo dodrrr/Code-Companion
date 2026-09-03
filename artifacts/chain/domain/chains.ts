@@ -12,6 +12,8 @@ export interface Chain {
   frozenDates: string[];
   freezeCredits: number;
   freezeRecoveryProgress: number;
+  /** Dates already evaluated for recovery, so a day can never earn progress twice. */
+  freezeRecoveryCountedDates?: string[];
   freezeSystemVersion: number;
   restDays: number[];
   cadence: 'daily' | 'weekly';
@@ -44,7 +46,18 @@ export function getLocalDateFromString(value: string): Date {
 }
 
 export function isDateKey(value: unknown): value is string {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1];
 }
 
 function uniqueDateKeys(values: unknown): string[] {
@@ -89,7 +102,10 @@ export function getWeeklyProgress(chain: Chain, referenceDate = getTodayStr()): 
 export function normalizeChain(value: unknown): Chain | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Partial<Chain>;
-  if (!raw.id || !raw.name || !raw.color || !isDateKey(raw.createdAt)) return null;
+  const id = typeof raw.id === 'string' ? raw.id.trim() : '';
+  const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+  const color = typeof raw.color === 'string' ? raw.color.trim() : '';
+  if (!id || !name || !color || !isDateKey(raw.createdAt)) return null;
 
   const completedDates = uniqueDateKeys(raw.completedDates);
   const minimumDates = uniqueDateKeys(raw.minimumDates).filter((date) => !completedDates.includes(date));
@@ -106,11 +122,14 @@ export function normalizeChain(value: unknown): Chain | null {
     (storedFreezeCredits === null || (storedFreezeCredits === 1 && frozenDates.length === 0))
       ? MAX_FREEZE_CREDITS
       : storedFreezeCredits ?? MAX_FREEZE_CREDITS;
+  const freezeRecoveryCountedDates = Array.from(
+    new Set([...uniqueDateKeys(raw.freezeRecoveryCountedDates), ...completedDates]),
+  );
 
   return {
-    id: raw.id,
-    name: raw.name.trim(),
-    color: raw.color,
+    id,
+    name,
+    color,
     createdAt: raw.createdAt,
     completedDates,
     minimumDates,
@@ -124,6 +143,7 @@ export function normalizeChain(value: unknown): Chain | null {
       typeof raw.freezeRecoveryProgress === 'number' && Number.isInteger(raw.freezeRecoveryProgress)
         ? Math.max(0, Math.min(COMPLETIONS_PER_FREEZE - 1, raw.freezeRecoveryProgress))
         : 0,
+    ...(freezeRecoveryCountedDates.length > 0 ? { freezeRecoveryCountedDates } : {}),
     freezeSystemVersion: 2,
     restDays: normalizeRestDays(raw.restDays),
     cadence: raw.cadence === 'weekly' ? 'weekly' : 'daily',
@@ -146,7 +166,8 @@ export function decodeChains(value: unknown): Chain[] | null {
       ? (value as { chains: unknown[] }).chains
       : null;
   if (source === null) return null;
-  return source.map(normalizeChain).filter((chain): chain is Chain => chain !== null);
+  const normalized = source.map(normalizeChain).filter((chain): chain is Chain => chain !== null);
+  return source.length > 0 && normalized.length === 0 ? null : normalized;
 }
 
 export function parseChains(raw: string | null): Chain[] {
@@ -222,11 +243,17 @@ export function applyDayStatus(
   const completionTimes = { ...chain.completionTimes };
   let freezeCredits = chain.freezeCredits;
   let freezeRecoveryProgress = chain.freezeRecoveryProgress;
+  const freezeRecoveryCountedDates = new Set([
+    ...(chain.freezeRecoveryCountedDates ?? []),
+    ...chain.completedDates,
+  ].filter(isDateKey));
 
   if (status === 'done') {
     completedDates.push(date);
     completionTimes[date] = completedAt;
-    if (!wasDone && freezeCredits < MAX_FREEZE_CREDITS) {
+    const isFirstCountedCompletion = !freezeRecoveryCountedDates.has(date);
+    freezeRecoveryCountedDates.add(date);
+    if (!wasDone && isFirstCountedCompletion && freezeCredits < MAX_FREEZE_CREDITS) {
       freezeRecoveryProgress += 1;
       if (freezeRecoveryProgress >= COMPLETIONS_PER_FREEZE) {
         freezeCredits += 1;
@@ -262,6 +289,7 @@ export function applyDayStatus(
       completionTimes,
       freezeCredits,
       freezeRecoveryProgress,
+      freezeRecoveryCountedDates: Array.from(freezeRecoveryCountedDates),
     },
   };
 }

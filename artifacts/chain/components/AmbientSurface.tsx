@@ -2,27 +2,35 @@ import React from 'react';
 import { Platform, StyleSheet, View, ViewProps } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect';
-
-type AmbientTone = 'today' | 'gate' | 'plan' | 'focus' | 'neutral';
-
-const tones: Record<AmbientTone, string> = {
-  today: '#FF6B35',
-  gate: '#FF6B35',
-  plan: '#FF6B35',
-  focus: '#FF6B35',
-  neutral: '#FF6B35',
-};
-
-const companionTones: Record<AmbientTone, [string, string]> = {
-  today: ['#B76A48', '#343037'],
-  gate: ['#B76A48', '#343037'],
-  plan: ['#B76A48', '#343037'],
-  focus: ['#B76A48', '#343037'],
-  neutral: ['#B76A48', '#343037'],
-};
+import {
+  AMBIENT_ACCENTS,
+  AMBIENT_COMPANIONS,
+  AmbientTone,
+} from '@/constants/sectionTheme';
 
 function alpha(hex: string, value: string) {
   return /^#[0-9a-fA-F]{6}$/.test(hex) ? `${hex}${value}` : hex;
+}
+
+function mixHex(base: string, tint: string, amount: number) {
+  const parse = (value: string) => {
+    const match = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(value);
+    return match ? match.slice(1).map((channel) => Number.parseInt(channel, 16)) : null;
+  };
+  const baseChannels = parse(base);
+  const tintChannels = parse(tint);
+  if (!baseChannels || !tintChannels) return base;
+  const channel = (index: number) => Math.round(baseChannels[index] + (tintChannels[index] - baseChannels[index]) * amount)
+    .toString(16)
+    .padStart(2, '0');
+  return `#${channel(0)}${channel(1)}${channel(2)}`;
+}
+
+function rgba(hex: string, opacity: number) {
+  const match = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(hex);
+  if (!match) return hex;
+  const [red, green, blue] = match.slice(1).map((channel) => Number.parseInt(channel, 16));
+  return `rgba(${red},${green},${blue},${opacity})`;
 }
 
 /**
@@ -30,13 +38,13 @@ function alpha(hex: string, value: string) {
  * content: it adds atmosphere without turning the app into a neon dashboard.
  */
 export function AmbientScreen({ tone = 'neutral', color: colorOverride, children, style, ...props }: ViewProps & { tone?: AmbientTone; color?: string }) {
-  const color = colorOverride ?? tones[tone];
-  const [secondary, tertiary] = companionTones[tone];
+  const color = colorOverride ?? AMBIENT_ACCENTS[tone];
+  const [secondary] = AMBIENT_COMPANIONS[tone];
   return (
     <View {...props} style={[styles.screen, style]}>
       <LinearGradient
         pointerEvents="none"
-        colors={['#050609', '#090A0F', '#050609']}
+        colors={['#050609', '#08090D', '#040405']}
         locations={[0, 0.48, 1]}
         style={StyleSheet.absoluteFill}
       />
@@ -49,15 +57,6 @@ export function AmbientScreen({ tone = 'neutral', color: colorOverride, children
           style={StyleSheet.absoluteFill}
         />
       </View>
-      <View pointerEvents="none" style={[styles.wash, styles.middleWash]}>
-        <LinearGradient
-          colors={[alpha(tertiary, '00'), alpha(tertiary, '12'), alpha(secondary, '08'), alpha(tertiary, '00')]}
-          locations={[0, 0.38, 0.7, 1]}
-          start={{ x: 0, y: 0.6 }}
-          end={{ x: 1, y: 0.25 }}
-          style={StyleSheet.absoluteFill}
-        />
-      </View>
       <View pointerEvents="none" style={[styles.wash, styles.bottomWash]}>
         <LinearGradient
           colors={[alpha(secondary, '00'), alpha(secondary, '0E'), alpha(color, '07'), alpha(secondary, '00')]}
@@ -65,27 +64,49 @@ export function AmbientScreen({ tone = 'neutral', color: colorOverride, children
           style={StyleSheet.absoluteFill}
         />
       </View>
-      <LinearGradient
-        pointerEvents="none"
-        colors={['rgba(4,4,5,0.30)', 'rgba(6,6,7,0.68)', 'rgba(4,4,5,0.84)']}
-        locations={[0, 0.54, 1]}
-        style={StyleSheet.absoluteFill}
-      />
       {children}
     </View>
   );
 }
 
 /** A restrained glass surface for high-level cards, sheets and section groups. */
-export function GlassSurface({ children, style, accentColor, elevated = false, ...props }: ViewProps & { intensity?: number; accentColor?: string; elevated?: boolean }) {
+export function GlassSurface({
+  children,
+  style,
+  accentColor,
+  elevated = false,
+  intensity,
+  ...props
+}: ViewProps & {
+  /** @deprecated Kept for call-site compatibility. This material intentionally adds no extra blur. */
+  intensity?: number;
+  accentColor?: string;
+  elevated?: boolean;
+}) {
+  // Do not forward the legacy blur control to the native View.
+  void intensity;
   const useNativeGlass = elevated && Platform.OS === 'ios' && isGlassEffectAPIAvailable();
+  const baseColor = elevated ? '#17171A' : '#121214';
+  const materialColor = accentColor ? mixHex(baseColor, accentColor, 0.045) : baseColor;
+  const fallbackColor = rgba(materialColor, elevated ? 0.9 : 0.94);
   return (
-    <View {...props} style={[styles.glass, elevated && styles.glassElevated, style]}>
+    <View
+      {...props}
+      style={[
+        styles.glass,
+        !useNativeGlass && { backgroundColor: fallbackColor },
+        style,
+      ]}
+    >
       {useNativeGlass ? (
-        <GlassView pointerEvents="none" glassEffectStyle="regular" colorScheme="dark" tintColor="#11141B" style={StyleSheet.absoluteFill} />
+        <GlassView
+          pointerEvents="none"
+          glassEffectStyle="regular"
+          colorScheme="dark"
+          tintColor={materialColor}
+          style={StyleSheet.absoluteFill}
+        />
       ) : null}
-      <View pointerEvents="none" style={styles.glassSheen} />
-      {accentColor ? <View pointerEvents="none" style={[styles.accentVeil, { backgroundColor: alpha(accentColor, '05') }]} /> : null}
       {children}
     </View>
   );
@@ -95,26 +116,11 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#050506', overflow: 'hidden' },
   wash: { position: 'absolute', overflow: 'hidden', borderRadius: 9999 },
   topWash: { width: 900, height: 650, top: -465, right: -500, transform: [{ rotate: '-10deg' }], opacity: 0.46 },
-  middleWash: { width: 820, height: 520, top: 340, left: -610, transform: [{ rotate: '19deg' }], opacity: 0.22 },
   bottomWash: { width: 920, height: 560, bottom: -450, right: -610, transform: [{ rotate: '-16deg' }], opacity: 0.24 },
   glass: {
     overflow: 'hidden',
-    backgroundColor: 'rgba(18,18,20,0.92)',
+    borderCurve: 'continuous',
     borderColor: 'rgba(255,255,255,0.075)',
     borderWidth: StyleSheet.hairlineWidth,
   },
-  glassElevated: {
-    backgroundColor: 'rgba(20,20,22,0.78)',
-    shadowColor: '#000',
-    shadowOpacity: 0.16,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
-  },
-  glassSheen: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.018)',
-    borderTopColor: 'rgba(255,255,255,0.035)',
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  accentVeil: { ...StyleSheet.absoluteFillObject },
 });

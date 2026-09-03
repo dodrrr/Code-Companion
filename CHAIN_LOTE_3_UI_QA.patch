@@ -1,0 +1,2999 @@
+diff --git a/artifacts/chain/app/(tabs)/plan.tsx b/artifacts/chain/app/(tabs)/plan.tsx
+index 3fa16b4..86edf9b 100644
+--- a/artifacts/chain/app/(tabs)/plan.tsx
++++ b/artifacts/chain/app/(tabs)/plan.tsx
+@@ -27,10 +27,11 @@ import { Chain, getTodayStr, isRestDay, useChains } from '@/context/ChainsContex
+ import { PlanItem, usePlan } from '@/context/PlanContext';
+ import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+ import { cancelPlanReminder, getPlanNotificationPermission, requestPlanNotificationPermission, scheduleMorningBriefing, schedulePlanReminder } from '@/lib/planNotifications';
+-import { GateWindow, getGateWindows } from '@/lib/gateWindows';
++import { GateWindow, gateWindowDescriptor, gateWindowDisplayName, getGateWindowsSnapshot } from '@/lib/gateWindows';
+ import { reportDiagnostic } from '@/lib/diagnostics';
+ import { CONTROL, MOTION, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { playFeedback } from '@/lib/feedback';
++import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
+ 
+ const QUICK_TIMES = ['7 AM', '9 AM', '12 PM', '3 PM', '6 PM', '8 PM'];
+ const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
+@@ -40,6 +41,17 @@ const DURATION_OPTIONS = [30, 60, 90, 120, 180, 240];
+ const UNLINKED_TASK_COLOR = '#8FA2B3';
+ const TASK_ACCENTS = ['#8FA2B3', ...EXTRA_CHAIN_COLORS];
+ const MORNING_BRIEFING_KEY = '@chain_morning_briefing';
++const WEEKDAY_OPTIONS = [
++  { label: 'M', value: 1, accessibilityLabel: 'Monday' },
++  { label: 'T', value: 2, accessibilityLabel: 'Tuesday' },
++  { label: 'W', value: 3, accessibilityLabel: 'Wednesday' },
++  { label: 'T', value: 4, accessibilityLabel: 'Thursday' },
++  { label: 'F', value: 5, accessibilityLabel: 'Friday' },
++  { label: 'S', value: 6, accessibilityLabel: 'Saturday' },
++  { label: 'S', value: 0, accessibilityLabel: 'Sunday' },
++] as const;
++
++type GateWindowsLoadState = 'loading' | 'ready' | 'failed';
+ 
+ function getPlanLabel(dateKey: string): string {
+   const [year, month, day] = dateKey.split('-').map(Number);
+@@ -58,6 +70,11 @@ function formatDurationLabel(minutes: number) {
+   return hours ? `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ''}` : `${minutes}m`;
+ }
+ 
++function formatBriefingTime(hour: number | null) {
++  if (hour === null) return 'Off';
++  return `${hour % 12 || 12}:00 ${hour >= 12 ? 'PM' : 'AM'}`;
++}
++
+ export default function PlanScreen() {
+   const colors = useColors();
+   const insets = useSafeAreaInsets();
+@@ -69,10 +86,10 @@ export default function PlanScreen() {
+   const [selectedChainId, setSelectedChainId] = useState<string | undefined>();
+   const [selectedTaskColor, setSelectedTaskColor] = useState<string | undefined>();
+   const [selectedReminder, setSelectedReminder] = useState<number | undefined>();
+-  const [showReminderOptions, setShowReminderOptions] = useState(false);
+   const [selectedRepeatDays, setSelectedRepeatDays] = useState<number[]>([]);
+   const [selectedDuration, setSelectedDuration] = useState<number | undefined>();
+   const [gateWindows, setGateWindows] = useState<GateWindow[]>([]);
++  const [gateWindowsLoadState, setGateWindowsLoadState] = useState<GateWindowsLoadState>('loading');
+   const [selectedGateWindowId, setSelectedGateWindowId] = useState<string | undefined>();
+   const [isPriority, setIsPriority] = useState(false);
+   const [showInput, setShowInput] = useState(false);
+@@ -81,6 +98,7 @@ export default function PlanScreen() {
+   const [briefingHour, setBriefingHour] = useState<number | null>(null);
+   const [briefingNotificationId, setBriefingNotificationId] = useState<string | undefined>();
+   const [briefingBusy, setBriefingBusy] = useState(false);
++  const [showBriefingPicker, setShowBriefingPicker] = useState(false);
+   const [editingItem, setEditingItem] = useState<PlanItem | null>(null);
+   const [showCompletion, setShowCompletion] = useState(false);
+   const [showReminderPermission, setShowReminderPermission] = useState(false);
+@@ -109,7 +127,7 @@ export default function PlanScreen() {
+   const orderedItems = [...items].sort((a, b) => timeSortValue(a.timeSlot) - timeSortValue(b.timeSlot));
+   const hasPendingItems = items.some((item) => !item.completed);
+   const plannedFocusMinutes = items.reduce((total, item) => total + (item.durationMinutes || 0), 0);
+-  const reminderCount = items.filter((item) => item.reminderMinutes !== undefined).length;
++  const reminderCount = items.filter((item) => Boolean(item.timeSlot) && item.reminderMinutes !== undefined).length;
+   const canEditActivePlan = !isToday || !isActiveDayClosed;
+ 
+   useEffect(() => {
+@@ -128,14 +146,22 @@ export default function PlanScreen() {
+ 
+   useFocusEffect(useCallback(() => {
+     let cancelled = false;
+-    void getGateWindows()
+-      .then((windows) => { if (!cancelled) setGateWindows(windows); })
+-      .catch((error) => reportDiagnostic({ area: 'storage', operation: 'plan.gateWindows.read', severity: 'warning', error }));
++    setGateWindowsLoadState('loading');
++    void getGateWindowsSnapshot()
++      .then((result) => {
++        if (cancelled) return;
++        setGateWindows(result.windows);
++        setGateWindowsLoadState(result.status);
++      })
++      .catch((error) => {
++        if (!cancelled) setGateWindowsLoadState('failed');
++        reportDiagnostic({ area: 'storage', operation: 'plan.gateWindows.read', severity: 'warning', error });
++      });
+     return () => { cancelled = true; };
+   }, []));
+ 
+-  async function setMorningBriefing(hour: number) {
+-    if (briefingBusyRef.current) return;
++  async function setMorningBriefing(hour: number): Promise<boolean> {
++    if (briefingBusyRef.current) return false;
+     briefingBusyRef.current = true;
+     setBriefingBusy(true);
+     try {
+@@ -148,12 +174,12 @@ export default function PlanScreen() {
+             ? 'Morning briefings are unavailable on this device.'
+             : 'Notifications are off. You can enable them in iPhone Settings.',
+         );
+-        return;
++        return false;
+       }
+       const result = await scheduleMorningBriefing(hour);
+       if (result.status !== 'scheduled') {
+         Alert.alert('Briefing not added', result.status === 'unavailable' ? 'Morning briefings are unavailable here.' : 'Notifications are off.');
+-        return;
++        return false;
+       }
+       try {
+         await AsyncStorage.setItem(MORNING_BRIEFING_KEY, JSON.stringify({ hour, notificationId: result.notificationId }));
+@@ -174,25 +200,27 @@ export default function PlanScreen() {
+             ? 'Chain couldn’t keep this setting, so the new briefing was turned off. Try again.'
+             : 'Chain couldn’t save or cancel this briefing. Check Chain notifications in iPhone Settings.',
+         );
+-        return;
++        return false;
+       }
+       setBriefingHour(hour);
+       setBriefingNotificationId(result.notificationId);
+       playFeedback('success');
++      return true;
+     } catch (error) {
+       reportDiagnostic({ area: 'notifications', operation: 'morningBriefing.schedule', severity: 'error', error });
+       Alert.alert('Briefing not added', 'Chain couldn’t schedule it. Try again.');
++      return false;
+     } finally {
+       briefingBusyRef.current = false;
+       setBriefingBusy(false);
+     }
+   }
+ 
+-  async function disableMorningBriefing() {
+-    if (briefingBusyRef.current || briefingHour === null) return;
++  async function disableMorningBriefing(): Promise<boolean> {
++    if (briefingBusyRef.current || briefingHour === null) return false;
+     if (!briefingNotificationId) {
+       Alert.alert('Open iPhone Settings', 'Chain can’t identify this older briefing safely. Turn off Chain notifications in iPhone Settings, then set it again here if you want.');
+-      return;
++      return false;
+     }
+     briefingBusyRef.current = true;
+     setBriefingBusy(true);
+@@ -207,9 +235,11 @@ export default function PlanScreen() {
+         Alert.alert('Briefing turned off', 'The notification was cancelled, but Chain couldn’t save the setting locally.');
+       }
+       playFeedback('selection');
++      return true;
+     } catch (error) {
+       reportDiagnostic({ area: 'notifications', operation: 'morningBriefing.disable', severity: 'error', error });
+       Alert.alert('Briefing still on', 'Chain couldn’t turn it off. Nothing was changed; try again.');
++      return false;
+     } finally {
+       briefingBusyRef.current = false;
+       setBriefingBusy(false);
+@@ -233,7 +263,6 @@ export default function PlanScreen() {
+     setSelectedChainId(undefined);
+     setSelectedTaskColor(undefined);
+     setSelectedReminder(undefined);
+-    setShowReminderOptions(false);
+     setSelectedRepeatDays([]);
+     setSelectedDuration(undefined);
+     setSelectedGateWindowId(undefined);
+@@ -424,13 +453,12 @@ export default function PlanScreen() {
+     setSelectedChainId(item.chainId);
+     setSelectedTaskColor(item.chainId ? undefined : item.color);
+     setSelectedReminder(item.reminderMinutes);
+-    setShowReminderOptions(item.reminderMinutes !== undefined);
+     setIsPriority(item.isPriority === true);
+     setSelectedRepeatDays(item.repeatDays || []);
+     setSelectedDuration(item.durationMinutes);
+     setSelectedGateWindowId(item.gateWindowId);
+     setShowInput(true);
+-    setShowAdvancedOptions(Boolean(item.repeatDays?.length || item.durationMinutes || item.reminderMinutes !== undefined || (!item.chainId && item.color)));
++    setShowAdvancedOptions(Boolean(item.repeatDays?.length || item.durationMinutes || item.reminderMinutes !== undefined || item.gateWindowId || (!item.chainId && item.color)));
+   }
+ 
+   async function handleToggle(item: PlanItem) {
+@@ -669,34 +697,6 @@ export default function PlanScreen() {
+           </View>
+         )}
+ 
+-        {isToday && <View style={[styles.briefingCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+-          <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
+-          <View style={[styles.briefingIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sunny-outline" size={18} color={colors.primary} /></View>
+-          <View style={styles.briefingCopy}>
+-            <Text style={[styles.briefingTitle, { color: colors.foreground }]}>Morning briefing</Text>
+-            <Text style={[styles.briefingBody, { color: colors.mutedForeground }]}>{briefingHour === null ? 'A gentle nudge to open your day.' : `Daily at ${briefingHour % 12 || 12} ${briefingHour >= 12 ? 'PM' : 'AM'}`}</Text>
+-          </View>
+-          <View style={styles.briefingChoices}>
+-            {[7, 8, 9].map((hour) => <Pressable
+-              key={hour}
+-              accessibilityRole="radio"
+-              accessibilityLabel={`Morning briefing at ${hour} AM`}
+-              accessibilityState={{ selected: briefingHour === hour, disabled: briefingBusy }}
+-              disabled={briefingBusy}
+-              onPress={() => { void setMorningBriefing(hour); }}
+-              style={[styles.briefingHour, { backgroundColor: briefingHour === hour ? colors.primary : colors.background, borderColor: briefingHour === hour ? colors.primary : colors.border, opacity: briefingBusy ? OPACITY.disabled : 1 }]}
+-            ><Text style={[styles.briefingHourText, { color: briefingHour === hour ? colors.primaryForeground : colors.mutedForeground }]}>{hour}</Text></Pressable>)}
+-            <Pressable
+-              accessibilityRole="radio"
+-              accessibilityLabel="Turn off morning briefing"
+-              accessibilityState={{ selected: briefingHour === null, disabled: briefingBusy || briefingHour === null }}
+-              disabled={briefingBusy || briefingHour === null}
+-              onPress={() => { void disableMorningBriefing(); }}
+-              style={[styles.briefingOff, { backgroundColor: briefingHour === null ? colors.muted : colors.background, borderColor: colors.border, opacity: briefingBusy ? OPACITY.disabled : 1 }]}
+-            ><Ionicons name="notifications-off-outline" size={15} color={colors.mutedForeground} /><Text style={[styles.briefingHourText, { color: colors.mutedForeground }]}>Off</Text></Pressable>
+-          </View>
+-        </View>}
+-
+         <View style={styles.focusHeading}>
+           <View style={styles.focusHeadingCopy}>
+             <Text style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 3 }]}>{isToday ? "TODAY'S AGENDA" : "TOMORROW'S FOCUS"}</Text>
+@@ -722,6 +722,9 @@ export default function PlanScreen() {
+             item={item}
+             chainName={chains.find((chain) => chain.id === item.chainId)?.name}
+             gateWindow={gateWindows.find((window) => window.id === item.gateWindowId)}
++            gateWindowId={item.gateWindowId}
++            gateWindows={gateWindows}
++            gateWindowsLoadState={gateWindowsLoadState}
+             highlighted={item.id === highlightedItemId}
+             newlyAdded={item.id === newlyAddedItemId}
+             reminderSyncing={reminderSyncingItemIds.has(item.id)}
+@@ -743,6 +746,25 @@ export default function PlanScreen() {
+           </View>
+         )}
+ 
++        {isToday && <Pressable
++          accessibilityRole="button"
++          accessibilityLabel={`Morning briefing, ${formatBriefingTime(briefingHour)}`}
++          accessibilityHint="Opens briefing time options"
++          accessibilityState={{ busy: briefingBusy }}
++          disabled={briefingBusy}
++          onPress={() => setShowBriefingPicker(true)}
++          style={({ pressed }) => [styles.briefingRow, { backgroundColor: colors.card, borderColor: colors.border, opacity: briefingBusy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
++        >
++          <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
++          <View style={[styles.briefingIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sunny-outline" size={18} color={colors.primary} /></View>
++          <View style={styles.briefingCopy}>
++            <Text style={[styles.briefingTitle, { color: colors.foreground }]}>Morning briefing</Text>
++            <Text style={[styles.briefingBody, { color: colors.mutedForeground }]}>A quiet prompt to open your plan.</Text>
++          </View>
++          <Text style={[styles.briefingValue, { color: briefingHour === null ? colors.mutedForeground : colors.primary }]}>{formatBriefingTime(briefingHour)}</Text>
++          <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
++        </Pressable>}
++
+         {(!isToday || isActiveDayClosed || !hasPendingItems) && <Pressable
+           accessibilityRole="button"
+           accessibilityLabel={isToday ? 'Prepare tomorrow' : 'Back to today'}
+@@ -785,12 +807,10 @@ export default function PlanScreen() {
+                   selectedTaskColor={selectedTaskColor}
+                   setSelectedTaskColor={(color: string | undefined) => { setSelectedTaskColor(color); Keyboard.dismiss(); }}
+                   selectedTime={selectedTime}
+-                  setSelectedTime={(time: string) => { setSelectedTime(time); Keyboard.dismiss(); }}
++                  setSelectedTime={(time: string) => { setSelectedTime(time); if (!time) setSelectedReminder(undefined); Keyboard.dismiss(); }}
+                   openTimePicker={() => { Keyboard.dismiss(); setShowTimePicker(true); }}
+                   selectedReminder={selectedReminder}
+                   setSelectedReminder={(minutes: number | undefined) => { setSelectedReminder(minutes); Keyboard.dismiss(); }}
+-                  showReminderOptions={showReminderOptions}
+-                  setShowReminderOptions={setShowReminderOptions}
+                   allowPriority
+                   priorityForToday={isToday}
+                   isPriority={isPriority}
+@@ -800,6 +820,7 @@ export default function PlanScreen() {
+                   selectedDuration={selectedDuration}
+                   setSelectedDuration={setSelectedDuration}
+                   gateWindows={gateWindows}
++                  gateWindowsLoadState={gateWindowsLoadState}
+                   selectedGateWindowId={selectedGateWindowId}
+                   setSelectedGateWindowId={setSelectedGateWindowId}
+                   showAdvancedOptions={showAdvancedOptions}
+@@ -835,6 +856,18 @@ export default function PlanScreen() {
+         onClose={() => setShowTimePicker(false)}
+         onConfirm={chooseCustomTime}
+       />
++      <MorningBriefingSheet
++        visible={showBriefingPicker}
++        hour={briefingHour}
++        busy={briefingBusy}
++        onClose={() => setShowBriefingPicker(false)}
++        onSelect={async (hour) => {
++          if (await setMorningBriefing(hour)) setShowBriefingPicker(false);
++        }}
++        onDisable={async () => {
++          if (briefingHour === null || await disableMorningBriefing()) setShowBriefingPicker(false);
++        }}
++      />
+       <CompletionMoment visible={showCompletion} onClose={() => setShowCompletion(false)} onPrepareTomorrow={prepareTomorrowWithClosure} />
+       <ReminderPermissionMoment visible={showReminderPermission} minutes={selectedReminder} onSkip={() => { setShowReminderPermission(false); void savePlanItem(false); }} onAllow={() => { void enableRemindersAndSave(); }} />
+       <DayReviewMoment visible={showDayReview} completedCount={completedCount} totalCount={items.length} protectedChains={protectedChains} chainCount={chains.length} pendingItems={items.filter((item) => !item.completed)} onMove={(item) => { void moveToTomorrow(item); }} onLetGo={(item) => { void letGo(item); }} onClose={() => setShowDayReview(false)} onPrepareTomorrow={finishDayAndPrepareTomorrow} />
+@@ -866,67 +899,210 @@ function ChainReflection({ chain, done, minimum, frozen, resting, isLast }: { ch
+   </View>;
+ }
+ 
+-function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, selectedTaskColor, setSelectedTaskColor, selectedTime, setSelectedTime, openTimePicker, selectedReminder, setSelectedReminder, showReminderOptions, setShowReminderOptions, allowPriority, priorityForToday, isPriority, setIsPriority, repeatDays, setRepeatDays, selectedDuration, setSelectedDuration, gateWindows, selectedGateWindowId, setSelectedGateWindowId, showAdvancedOptions, setShowAdvancedOptions }: any) {
+-  const [showAccentOptions, setShowAccentOptions] = useState(Boolean(selectedTaskColor));
+-  const [showRepeatOptions, setShowRepeatOptions] = useState(Boolean(repeatDays.length));
+-  const [showFocusOptions, setShowFocusOptions] = useState(Boolean(selectedDuration));
+-  const [showGateOptions, setShowGateOptions] = useState(Boolean(selectedGateWindowId));
+-  const accentSummary = selectedTaskColor ? 'Custom task color' : 'Keep this task neutral.';
+-  const repeatSummary = repeatDays.length ? `${repeatDays.length} day${repeatDays.length === 1 ? '' : 's'} selected` : 'Add it automatically when you plan tomorrow.';
+-  const focusSummary = selectedDuration ? `${formatDurationLabel(selectedDuration)} reserved for this task.` : 'Set aside intentional time for it.';
++function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, selectedTaskColor, setSelectedTaskColor, selectedTime, setSelectedTime, openTimePicker, selectedReminder, setSelectedReminder, allowPriority, priorityForToday, isPriority, setIsPriority, repeatDays, setRepeatDays, selectedDuration, setSelectedDuration, gateWindows, gateWindowsLoadState, selectedGateWindowId, setSelectedGateWindowId, showAdvancedOptions, setShowAdvancedOptions }: any) {
++  const timeScrollRef = useRef<ScrollView>(null);
++  const detailsCount = Number(Boolean(selectedTaskColor && !selectedChainId))
++    + Number(repeatDays.length > 0)
++    + Number(Boolean(selectedDuration))
++    + Number(Boolean(selectedGateWindowId))
++    + Number(Boolean(selectedTime) && selectedReminder !== undefined);
++
++  useEffect(() => {
++    const selectedIndex = QUICK_TIMES.indexOf(selectedTime);
++    if (selectedIndex < 0) return;
++    const frame = requestAnimationFrame(() => {
++      timeScrollRef.current?.scrollTo({ x: Math.max(0, (selectedIndex + 1) * 72 - SPACE.md), animated: false });
++    });
++    return () => cancelAnimationFrame(frame);
++  }, [selectedTime]);
++
+   return <View style={styles.composerMeta}>
+     <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>TIME</Text>
+-    <FlatList data={QUICK_TIMES} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(time) => time} contentContainerStyle={styles.timeSlots} ListHeaderComponent={<Pressable accessibilityRole="button" accessibilityLabel={selectedTime && !QUICK_TIMES.includes(selectedTime) ? `Custom time ${selectedTime}` : 'Choose a custom time'} accessibilityState={{ selected: Boolean(selectedTime && !QUICK_TIMES.includes(selectedTime)) }} onPress={openTimePicker} style={[styles.timeChip, { backgroundColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.background, borderColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.border }]}><Ionicons name="time-outline" size={14} color={selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primaryForeground : colors.mutedForeground} /><Text style={[styles.timeChipText, { color: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primaryForeground : colors.mutedForeground }]}>{selectedTime && !QUICK_TIMES.includes(selectedTime) ? selectedTime : 'Custom'}</Text></Pressable>} renderItem={({ item: time }) => <Pressable accessibilityRole="radio" accessibilityLabel={`Task time ${time}`} accessibilityState={{ selected: time === selectedTime }} onPress={() => setSelectedTime(time === selectedTime ? '' : time)} style={[styles.timeChip, { backgroundColor: time === selectedTime ? colors.primary : colors.background, borderColor: time === selectedTime ? colors.primary : colors.border }]}><Text style={[styles.timeChipText, { color: time === selectedTime ? colors.primaryForeground : colors.mutedForeground }]}>{time}</Text></Pressable>} />
++    <ScrollView ref={timeScrollRef} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeSlots}>
++      <Pressable accessibilityRole="button" accessibilityLabel={selectedTime && !QUICK_TIMES.includes(selectedTime) ? `Custom time ${selectedTime}` : 'Choose a custom time'} accessibilityState={{ selected: Boolean(selectedTime && !QUICK_TIMES.includes(selectedTime)) }} onPress={openTimePicker} style={[styles.timeChip, { backgroundColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.background, borderColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.border }]}><Ionicons name="time-outline" size={14} color={selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primaryForeground : colors.mutedForeground} /><Text style={[styles.timeChipText, { color: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primaryForeground : colors.mutedForeground }]}>{selectedTime && !QUICK_TIMES.includes(selectedTime) ? selectedTime : 'Custom'}</Text></Pressable>
++      {QUICK_TIMES.map((time) => <Pressable key={time} accessibilityRole="radio" accessibilityLabel={`Task time ${time}`} accessibilityState={{ selected: time === selectedTime }} onPress={() => setSelectedTime(time === selectedTime ? '' : time)} style={[styles.timeChip, { backgroundColor: time === selectedTime ? colors.primary : colors.background, borderColor: time === selectedTime ? colors.primary : colors.border }]}><Text style={[styles.timeChipText, { color: time === selectedTime ? colors.primaryForeground : colors.mutedForeground }]}>{time}</Text></Pressable>)}
++    </ScrollView>
+     <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>ADD TO A CHAIN · OPTIONAL</Text>
+     <Text style={[styles.chainHelper, { color: colors.mutedForeground }]}>Only link tasks that move that chain forward. Unlinked tasks stay neutral.</Text>
+     <FlatList data={[{ id: '', name: 'No chain', color: colors.mutedForeground }, ...chains]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(chain) => chain.id} contentContainerStyle={styles.chainChoices} renderItem={({ item: chain }) => { const selected = (chain.id || undefined) === selectedChainId; return <Pressable accessibilityRole="radio" accessibilityLabel={chain.id ? `Link to ${chain.name}` : 'Do not link a chain'} accessibilityState={{ selected }} onPress={() => setSelectedChainId(chain.id || undefined)} style={[styles.chainChip, { borderColor: selected ? chain.color : colors.border, backgroundColor: selected ? chain.color + '1F' : colors.background }]}><View style={[styles.chainChipDot, { backgroundColor: chain.color }]} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{chain.name}</Text></Pressable>; }} />
+     {allowPriority && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>{priorityForToday ? 'TODAY\'S ONE THING · OPTIONAL' : 'TOMORROW\'S ONE THING · OPTIONAL'}</Text><Pressable accessibilityRole="switch" accessibilityLabel="Make this your one thing" accessibilityState={{ checked: isPriority }} onPress={() => setIsPriority(!isPriority)} style={[styles.priorityPick, { borderColor: isPriority ? colors.primary : colors.border, backgroundColor: isPriority ? colors.primary + '1A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sparkles-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Make this your one thing</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>The task that matters most {priorityForToday ? 'today' : 'tomorrow'}.</Text></View>{isPriority && <Ionicons name="checkmark-circle" size={19} color={colors.primary} />}</Pressable></>}
+-    <Pressable accessibilityRole="button" accessibilityLabel="Task details" accessibilityState={{ expanded: showAdvancedOptions }} onPress={() => setShowAdvancedOptions(!showAdvancedOptions)} style={[styles.detailsToggle, { borderColor: showAdvancedOptions ? colors.primary + '70' : colors.border, backgroundColor: showAdvancedOptions ? colors.primary + '0A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="options-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Task details</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{showAdvancedOptions ? 'Fine-tune this task.' : 'Color, repeat, focus and reminders.'}</Text></View><Ionicons name={showAdvancedOptions ? 'chevron-up' : 'chevron-down'} size={18} color={showAdvancedOptions ? colors.primary : colors.mutedForeground} /></Pressable>
+-    {showAdvancedOptions && <View style={styles.detailsStack}>
+-      {!selectedChainId && <>
+-        <Pressable accessibilityRole="button" accessibilityLabel="Task accent" accessibilityState={{ expanded: showAccentOptions }} onPress={() => setShowAccentOptions(!showAccentOptions)} style={[styles.priorityPick, { borderColor: selectedTaskColor || colors.border, backgroundColor: selectedTaskColor ? selectedTaskColor + '18' : colors.background }]}>
+-          <View style={[styles.priorityIcon, { backgroundColor: (selectedTaskColor || colors.primary) + '18' }]}><Ionicons name="color-palette-outline" size={15} color={selectedTaskColor || colors.primary} /></View>
+-          <View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Task accent</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{accentSummary}</Text></View>
+-          <Ionicons name={showAccentOptions ? 'chevron-up' : 'chevron-down'} size={18} color={selectedTaskColor || colors.mutedForeground} />
+-        </Pressable>
+-        {showAccentOptions && <FlatList data={[undefined, ...TASK_ACCENTS]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(color, index) => color ?? `neutral-${index}`} contentContainerStyle={styles.chainChoices} renderItem={({ item: color, index }) => { const selected = color === selectedTaskColor; return <Pressable accessibilityRole="radio" accessibilityLabel={color ? `Task accent option ${index}` : 'Neutral task accent'} accessibilityState={{ selected }} onPress={() => setSelectedTaskColor(selected ? undefined : color)} style={[styles.chainChip, { borderColor: selected ? (color || colors.mutedForeground) : colors.border, backgroundColor: selected ? (color || colors.mutedForeground) + '1C' : colors.background }]}>{color ? <View style={[styles.chainChipDot, { backgroundColor: color }]} /> : <><Ionicons name="remove-outline" size={14} color={colors.mutedForeground} /><Text style={[styles.chainChipText, { color: colors.mutedForeground }]}>Neutral</Text></>}</Pressable>; }} />}
+-      </>}
+-      <Pressable accessibilityRole="button" accessibilityLabel="Repeat this task" accessibilityState={{ expanded: showRepeatOptions }} onPress={() => setShowRepeatOptions(!showRepeatOptions)} style={[styles.priorityPick, { borderColor: repeatDays.length ? colors.primary : colors.border, backgroundColor: repeatDays.length ? colors.primary + '1A' : colors.background }]}>
+-        <View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="repeat-outline" size={15} color={colors.primary} /></View>
+-        <View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Repeat this task</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{repeatSummary}</Text></View>
+-        <Ionicons name={showRepeatOptions ? 'chevron-up' : 'chevron-down'} size={18} color={repeatDays.length ? colors.primary : colors.mutedForeground} />
+-      </Pressable>
+-      {showRepeatOptions && <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6, paddingHorizontal: 16, paddingBottom: 8 }}>{[{ label: 'M', value: 1, name: 'Monday' }, { label: 'T', value: 2, name: 'Tuesday' }, { label: 'W', value: 3, name: 'Wednesday' }, { label: 'T', value: 4, name: 'Thursday' }, { label: 'F', value: 5, name: 'Friday' }, { label: 'S', value: 6, name: 'Saturday' }, { label: 'S', value: 0, name: 'Sunday' }].map(({ label, value, name }) => { const selected = repeatDays.includes(value); return <Pressable key={value} accessibilityRole="button" accessibilityLabel={`Repeat on ${name}`} accessibilityState={{ selected }} onPress={() => setRepeatDays(selected ? repeatDays.filter((day: number) => day !== value) : [...repeatDays, value])} style={{ width: 44, height: 44, borderRadius: 22, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: selected ? colors.primary : colors.background, borderColor: selected ? colors.primary : colors.border }}><Text style={{ fontSize: 12, fontFamily: 'Inter_700Bold', color: selected ? colors.primaryForeground : colors.mutedForeground }}>{label}</Text></Pressable>; })}</View>}
+-      {!!selectedTime && <>
+-        <Pressable accessibilityRole="button" accessibilityLabel="Focus block" accessibilityState={{ expanded: showFocusOptions }} onPress={() => setShowFocusOptions(!showFocusOptions)} style={[styles.priorityPick, { borderColor: selectedDuration ? colors.primary : colors.border, backgroundColor: selectedDuration ? colors.primary + '1A' : colors.background }]}>
+-          <View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="hourglass-outline" size={15} color={colors.primary} /></View>
+-          <View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Focus block</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{focusSummary}</Text></View>
+-          <Ionicons name={showFocusOptions ? 'chevron-up' : 'chevron-down'} size={18} color={selectedDuration ? colors.primary : colors.mutedForeground} />
+-        </Pressable>
+-        {showFocusOptions && <FlatList data={DURATION_OPTIONS} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(minutes) => String(minutes)} contentContainerStyle={styles.chainChoices} renderItem={({ item: minutes }) => { const selected = selectedDuration === minutes; return <Pressable accessibilityRole="radio" accessibilityLabel={`Focus for ${formatDurationLabel(minutes)}`} accessibilityState={{ selected }} onPress={() => setSelectedDuration(selected ? undefined : minutes)} style={[styles.chainChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Ionicons name="hourglass-outline" size={13} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{formatDurationLabel(minutes)}</Text></Pressable>; }} />}
+-        {gateWindows.length > 0 && <>
+-          <Pressable accessibilityRole="button" accessibilityLabel="Link Gate preview" accessibilityState={{ expanded: showGateOptions }} onPress={() => setShowGateOptions(!showGateOptions)} style={[styles.priorityPick, { borderColor: selectedGateWindowId ? colors.primary : colors.border, backgroundColor: selectedGateWindowId ? colors.primary + '1A' : colors.background }]}>
+-            <View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="shield-checkmark-outline" size={15} color={colors.primary} /></View>
+-            <View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Link Gate preview</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{selectedGateWindowId ? `${gateWindows.find((window: GateWindow) => window.id === selectedGateWindowId)?.name || 'Protection window'} linked · native app protection is not connected yet.` : 'Link a Window for context. This preview does not block apps yet.'}</Text></View>
+-            <Ionicons name={showGateOptions ? 'chevron-up' : 'chevron-down'} size={18} color={selectedGateWindowId ? colors.primary : colors.mutedForeground} />
+-          </Pressable>
+-          {showGateOptions && <FlatList data={[{ id: '', name: 'No window' }, ...gateWindows]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(window) => window.id || 'none'} contentContainerStyle={styles.chainChoices} renderItem={({ item: window }) => { const selected = window.id === selectedGateWindowId; return <Pressable accessibilityRole="radio" accessibilityLabel={window.id ? `Link ${window.name}` : 'Do not link a Gate Window'} accessibilityState={{ selected }} onPress={() => setSelectedGateWindowId(selected ? undefined : (window.id || undefined))} style={[styles.chainChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Ionicons name={window.id ? 'shield-checkmark-outline' : 'remove-outline'} size={13} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{window.name}</Text></Pressable>; }} />}
+-        </>}
+-        <Pressable accessibilityRole="button" accessibilityLabel="Task reminder" accessibilityState={{ expanded: showReminderOptions }} onPress={() => setShowReminderOptions(!showReminderOptions)} style={[styles.priorityPick, { borderColor: selectedReminder !== undefined ? colors.primary : colors.border, backgroundColor: selectedReminder !== undefined ? colors.primary + '1A' : colors.background }]}>
+-          <View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="notifications-outline" size={15} color={colors.primary} /></View>
+-          <View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>{selectedReminder !== undefined ? `Reminder · ${selectedReminder === 0 ? 'at start' : `${selectedReminder} min before`}` : 'Add a reminder'}</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{selectedReminder !== undefined ? 'Tap to change or remove it.' : 'A gentle nudge before this task starts.'}</Text></View>
+-          <Ionicons name={showReminderOptions ? 'chevron-up' : 'chevron-down'} size={18} color={selectedReminder !== undefined ? colors.primary : colors.mutedForeground} />
+-        </Pressable>
+-        {showReminderOptions && <>
+-          <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>REMIND ME</Text>
+-          <FlatList data={REMINDER_OPTIONS} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(minutes) => String(minutes)} contentContainerStyle={styles.chainChoices} renderItem={({ item: minutes }) => { const selected = selectedReminder === minutes; return <Pressable accessibilityRole="radio" accessibilityLabel={minutes === 0 ? 'Remind at start' : `Remind ${minutes} minutes before`} accessibilityState={{ selected }} onPress={() => setSelectedReminder(selected ? undefined : minutes)} style={[styles.chainChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Ionicons name="notifications-outline" size={13} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{minutes === 0 ? 'At start' : `${minutes} min before`}</Text></Pressable>; }} />
+-        </>}
+-      </>}
+-    </View>}
++    <Pressable accessibilityRole="button" accessibilityLabel="Task details" accessibilityHint="Opens color, repeat, focus, Gate and reminder options" accessibilityState={{ expanded: showAdvancedOptions }} onPress={() => { Keyboard.dismiss(); setShowAdvancedOptions(true); }} style={[styles.detailsToggle, { borderColor: detailsCount ? colors.primary + '70' : colors.border, backgroundColor: detailsCount ? colors.primary + '0A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="options-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Task details</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{detailsCount ? `${detailsCount} ${detailsCount === 1 ? 'detail' : 'details'} set` : 'Color, repeat, focus, Gate and reminders.'}</Text></View><Ionicons name="chevron-forward" size={18} color={detailsCount ? colors.primary : colors.mutedForeground} /></Pressable>
++    <TaskDetailsSheet
++      visible={showAdvancedOptions}
++      onClose={() => setShowAdvancedOptions(false)}
++      colors={colors}
++      selectedChainId={selectedChainId}
++      selectedChainName={chains.find((chain: Chain) => chain.id === selectedChainId)?.name}
++      selectedTaskColor={selectedTaskColor}
++      setSelectedTaskColor={setSelectedTaskColor}
++      selectedTime={selectedTime}
++      selectedReminder={selectedReminder}
++      setSelectedReminder={setSelectedReminder}
++      repeatDays={repeatDays}
++      setRepeatDays={setRepeatDays}
++      selectedDuration={selectedDuration}
++      setSelectedDuration={setSelectedDuration}
++      gateWindows={gateWindows}
++      gateWindowsLoadState={gateWindowsLoadState}
++      selectedGateWindowId={selectedGateWindowId}
++      setSelectedGateWindowId={setSelectedGateWindowId}
++    />
+   </View>;
+ }
+ 
+-function PlanItemRow({ item, chainName, gateWindow, highlighted, newlyAdded, reminderSyncing, isLast, locked, completionLocked, onToggle, onEdit, onMore }: { item: PlanItem; chainName?: string; gateWindow?: GateWindow; highlighted: boolean; newlyAdded: boolean; reminderSyncing: boolean; isLast: boolean; locked: boolean; completionLocked: boolean; onToggle: () => void; onEdit: () => void; onMore: () => void }) {
++type TaskDetailSection = 'accent' | 'repeat' | 'focus' | 'gate' | 'reminder' | null;
++
++function TaskDetailSectionRow({ icon, title, summary, active, configured, disabled, onPress, colors }: any) {
++  return <Pressable
++    accessibilityRole="button"
++    accessibilityLabel={title}
++    accessibilityHint={summary}
++    accessibilityState={{ expanded: active, disabled }}
++    disabled={disabled}
++    onPress={onPress}
++    style={({ pressed }) => [styles.taskDetailRow, { borderColor: colors.border, opacity: disabled ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
++  >
++    <View style={[styles.taskDetailIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name={icon} size={17} color={colors.primary} /></View>
++    <View style={styles.taskDetailCopy}><Text style={[styles.taskDetailTitle, { color: colors.foreground }]}>{title}</Text><Text style={[styles.taskDetailSummary, { color: colors.mutedForeground }]} numberOfLines={2}>{summary}</Text></View>
++    {configured && !active && <View style={[styles.taskDetailSetDot, { backgroundColor: colors.primary }]} />}
++    <Ionicons name={active ? 'chevron-up' : 'chevron-down'} size={18} color={configured || active ? colors.primary : colors.mutedForeground} />
++  </Pressable>;
++}
++
++function TaskDetailsSheet({ visible, onClose, colors, selectedChainId, selectedChainName, selectedTaskColor, setSelectedTaskColor, selectedTime, selectedReminder, setSelectedReminder, repeatDays, setRepeatDays, selectedDuration, setSelectedDuration, gateWindows, gateWindowsLoadState, selectedGateWindowId, setSelectedGateWindowId }: any) {
++  const insets = useSafeAreaInsets();
++  const reduceMotion = useReducedMotion();
++  const { height } = useWindowDimensions();
++  const [openSection, setOpenSection] = useState<TaskDetailSection>(null);
++  const selectedWindow = gateWindows.find((window: GateWindow) => window.id === selectedGateWindowId);
++  const accentLocked = Boolean(selectedChainId);
++  const gateUnavailable = gateWindowsLoadState === 'ready' && gateWindows.length === 0 && !selectedGateWindowId;
++  const missingWindowConfirmed = Boolean(selectedGateWindowId && !selectedWindow && gateWindowsLoadState === 'ready');
++  const gateSummary = selectedWindow
++    ? gateWindowsLoadState === 'ready'
++      ? `${gateWindowDisplayName(selectedWindow, gateWindows)} · ${gateWindowDescriptor(selectedWindow)}`
++      : gateWindowsLoadState === 'failed'
++        ? `Last saved: ${gateWindowDisplayName(selectedWindow, gateWindows)} · ${gateWindowDescriptor(selectedWindow)}`
++        : `Checking ${gateWindowDisplayName(selectedWindow, gateWindows)}…`
++    : selectedGateWindowId
++      ? gateWindowsLoadState === 'loading'
++        ? 'Checking the linked Window…'
++        : gateWindowsLoadState === 'failed'
++          ? 'The linked Window could not be checked.'
++          : 'The linked Window no longer exists.'
++      : gateWindowsLoadState === 'loading'
++        ? 'Loading saved Windows…'
++        : gateWindowsLoadState === 'failed'
++          ? 'Windows are unavailable right now.'
++          : gateUnavailable
++            ? 'Create a Window in Gate first.'
++            : 'Link protection context to this task.';
++  const gateStatusNotice = gateWindowsLoadState === 'failed'
++    ? { title: 'Windows unavailable right now', body: selectedGateWindowId ? 'Showing last-saved details. You can remove this link, but choose another Window after Chain confirms your saved data.' : 'Showing last-saved details. Choose a Window after Chain confirms your saved data.', destructive: false }
++    : gateWindowsLoadState === 'loading'
++      ? { title: 'Loading saved Windows', body: 'Chain is checking this task’s protection context.', destructive: false }
++      : missingWindowConfirmed
++        ? { title: 'Window unavailable', body: 'Choose another Window or remove this link.', destructive: true }
++        : null;
++
++  useEffect(() => {
++    if (!visible) setOpenSection(null);
++  }, [visible]);
++
++  const toggleSection = (section: Exclude<TaskDetailSection, null>) => {
++    setOpenSection((current) => current === section ? null : section);
++  };
++
++  return <Modal transparent visible={visible} animationType={reduceMotion ? 'none' : 'slide'} onRequestClose={onClose}>
++    <View style={styles.modalShade}>
++      <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={onClose} />
++      <View accessibilityViewIsModal style={[styles.taskDetailsSheet, { backgroundColor: colors.card, borderColor: colors.border, maxHeight: height - Math.max(insets.top, SPACE.sm), paddingBottom: Math.max(insets.bottom, SPACE.md) }]}>
++        <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
++        <View style={styles.taskDetailsHeader}>
++          <View style={styles.taskDetailsHeaderCopy}><Text style={[styles.modalTitle, { color: colors.foreground }]}>Task details</Text><Text style={[styles.taskDetailsIntro, { color: colors.mutedForeground }]}>Add only what helps this task happen.</Text></View>
++          <Pressable accessibilityRole="button" accessibilityLabel="Close task details" onPress={onClose} style={styles.modalClose}><Ionicons name="close" size={22} color={colors.mutedForeground} /></Pressable>
++        </View>
++        <ScrollView style={styles.taskDetailsScroll} contentContainerStyle={styles.taskDetailsContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
++          <TaskDetailSectionRow
++            icon="color-palette-outline"
++            title="Accent"
++            summary={accentLocked ? `Uses ${selectedChainName || 'the linked chain'}’s color.` : selectedTaskColor ? 'Custom color selected.' : 'Neutral task color.'}
++            active={openSection === 'accent'}
++            configured={Boolean(selectedTaskColor && !accentLocked)}
++            disabled={accentLocked}
++            onPress={() => toggleSection('accent')}
++            colors={colors}
++          />
++          {openSection === 'accent' && !accentLocked && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.taskDetailChips}>
++            {[undefined, ...TASK_ACCENTS].map((color, index) => {
++              const selected = color === selectedTaskColor;
++              return <Pressable key={color ?? 'neutral'} accessibilityRole="radio" accessibilityLabel={color ? `Accent color ${index}` : 'Neutral accent'} accessibilityState={{ selected }} onPress={() => setSelectedTaskColor(color)} style={[styles.colorChoice, { borderColor: selected ? (color || colors.primary) : colors.border, backgroundColor: selected ? (color || colors.mutedForeground) + '20' : colors.background }]}>{color ? <View style={[styles.colorChoiceDot, { backgroundColor: color }]} /> : <Ionicons name="remove-outline" size={17} color={colors.mutedForeground} />}{!color && <Text style={[styles.colorChoiceText, { color: colors.mutedForeground }]}>Neutral</Text>}</Pressable>;
++            })}
++          </ScrollView>}
++
++          <TaskDetailSectionRow
++            icon="repeat-outline"
++            title="Repeat"
++            summary={repeatDays.length ? `${repeatDays.length} day${repeatDays.length === 1 ? '' : 's'} selected.` : 'Choose the days this task returns.'}
++            active={openSection === 'repeat'}
++            configured={repeatDays.length > 0}
++            onPress={() => toggleSection('repeat')}
++            colors={colors}
++          />
++          {openSection === 'repeat' && <View style={styles.sevenChoiceWrap}><SevenChoiceSelector options={WEEKDAY_OPTIONS} selectionMode="multiple" selectedValues={repeatDays} onSelectionChange={setRepeatDays} accentColor={colors.primary} selectedTextColor={colors.primaryForeground} textColor={colors.mutedForeground} borderColor={colors.border} backgroundColor={colors.background} accessibilityLabel="Repeat days" /></View>}
++
++          <TaskDetailSectionRow
++            icon="hourglass-outline"
++            title="Focus"
++            summary={selectedDuration ? `${formatDurationLabel(selectedDuration)} reserved.` : 'Reserve intentional time for this task.'}
++            active={openSection === 'focus'}
++            configured={Boolean(selectedDuration)}
++            onPress={() => toggleSection('focus')}
++            colors={colors}
++          />
++          {openSection === 'focus' && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.taskDetailChips}>
++            <Pressable accessibilityRole="radio" accessibilityLabel="No focus duration" accessibilityState={{ selected: selectedDuration === undefined }} onPress={() => setSelectedDuration(undefined)} style={[styles.detailChip, { borderColor: selectedDuration === undefined ? colors.primary : colors.border, backgroundColor: selectedDuration === undefined ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selectedDuration === undefined ? colors.primary : colors.mutedForeground }]}>None</Text></Pressable>
++            {DURATION_OPTIONS.map((minutes) => { const selected = selectedDuration === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={`Focus for ${formatDurationLabel(minutes)}`} accessibilityState={{ selected }} onPress={() => setSelectedDuration(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{formatDurationLabel(minutes)}</Text></Pressable>; })}
++          </ScrollView>}
++
++          <TaskDetailSectionRow
++            icon="shield-checkmark-outline"
++            title="Gate Window"
++            summary={gateSummary}
++            active={openSection === 'gate'}
++            configured={Boolean(selectedGateWindowId)}
++            disabled={gateUnavailable}
++            onPress={() => toggleSection('gate')}
++            colors={colors}
++          />
++          {openSection === 'gate' && <View style={styles.windowChoices}>
++            {gateStatusNotice && <View accessibilityRole={gateStatusNotice.destructive ? 'alert' : undefined} style={[styles.unavailableWindow, { backgroundColor: (gateStatusNotice.destructive ? colors.destructive : colors.primary) + '12', borderColor: (gateStatusNotice.destructive ? colors.destructive : colors.primary) + '45' }]}><Ionicons name={gateStatusNotice.destructive ? 'alert-circle-outline' : gateWindowsLoadState === 'loading' ? 'hourglass-outline' : 'information-circle-outline'} size={17} color={gateStatusNotice.destructive ? colors.destructive : colors.primary} /><View style={styles.windowChoiceCopy}><Text style={[styles.windowChoiceTitle, { color: gateStatusNotice.destructive ? colors.destructive : colors.foreground }]}>{gateStatusNotice.title}</Text><Text style={[styles.windowChoiceSummary, { color: colors.mutedForeground }]}>{gateStatusNotice.body}</Text></View></View>}
++            <Pressable accessibilityRole="radio" accessibilityLabel="No Gate Window" accessibilityState={{ selected: !selectedGateWindowId }} onPress={() => setSelectedGateWindowId(undefined)} style={[styles.windowChoice, { borderColor: !selectedGateWindowId ? colors.primary : colors.border, backgroundColor: !selectedGateWindowId ? colors.primary + '12' : colors.background }]}><View style={[styles.windowChoiceIcon, { backgroundColor: colors.mutedForeground + '16' }]}><Ionicons name="remove-outline" size={16} color={colors.mutedForeground} /></View><View style={styles.windowChoiceCopy}><Text style={[styles.windowChoiceTitle, { color: colors.foreground }]}>No Window</Text><Text style={[styles.windowChoiceSummary, { color: colors.mutedForeground }]}>Keep this task independent from Gate.</Text></View>{!selectedGateWindowId && <Ionicons name="checkmark-circle" size={19} color={colors.primary} />}</Pressable>
++            {gateWindows.map((window: GateWindow) => { const selected = window.id === selectedGateWindowId; const displayName = gateWindowDisplayName(window, gateWindows); const selectionDisabled = gateWindowsLoadState !== 'ready'; return <Pressable key={window.id} accessibilityRole="radio" accessibilityLabel={`${displayName}, ${gateWindowDescriptor(window)}`} accessibilityState={{ selected, disabled: selectionDisabled }} disabled={selectionDisabled} onPress={() => setSelectedGateWindowId(window.id)} style={[styles.windowChoice, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '12' : colors.background, opacity: selectionDisabled ? OPACITY.disabled : 1 }]}><View style={[styles.windowChoiceIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="shield-checkmark-outline" size={16} color={colors.primary} /></View><View style={styles.windowChoiceCopy}><Text style={[styles.windowChoiceTitle, { color: colors.foreground }]} numberOfLines={1}>{displayName}</Text><Text style={[styles.windowChoiceSummary, { color: colors.mutedForeground }]} numberOfLines={2}>{gateWindowDescriptor(window)}</Text></View>{selected && <Ionicons name="checkmark-circle" size={19} color={colors.primary} />}</Pressable>; })}
++          </View>}
++
++          <TaskDetailSectionRow
++            icon="notifications-outline"
++            title="Reminder"
++            summary={!selectedTime ? 'Choose a task time first.' : selectedReminder !== undefined ? selectedReminder === 0 ? 'At start.' : `${selectedReminder} min before.` : 'Add a gentle nudge.'}
++            active={openSection === 'reminder'}
++            configured={selectedReminder !== undefined && Boolean(selectedTime)}
++            disabled={!selectedTime}
++            onPress={() => toggleSection('reminder')}
++            colors={colors}
++          />
++          {openSection === 'reminder' && selectedTime && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.taskDetailChips}>
++            <Pressable accessibilityRole="radio" accessibilityLabel="No reminder" accessibilityState={{ selected: selectedReminder === undefined }} onPress={() => setSelectedReminder(undefined)} style={[styles.detailChip, { borderColor: selectedReminder === undefined ? colors.primary : colors.border, backgroundColor: selectedReminder === undefined ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selectedReminder === undefined ? colors.primary : colors.mutedForeground }]}>None</Text></Pressable>
++            {REMINDER_OPTIONS.map((minutes) => { const selected = selectedReminder === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={minutes === 0 ? 'Remind at start' : `Remind ${minutes} minutes before`} accessibilityState={{ selected }} onPress={() => setSelectedReminder(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{minutes === 0 ? 'At start' : `${minutes} min`}</Text></Pressable>; })}
++          </ScrollView>}
++        </ScrollView>
++        <Pressable accessibilityRole="button" accessibilityLabel="Done editing task details" onPress={onClose} style={[styles.taskDetailsDone, { backgroundColor: colors.primary }]}><Text style={[styles.taskDetailsDoneText, { color: colors.primaryForeground }]}>Done</Text></Pressable>
++      </View>
++    </View>
++  </Modal>;
++}
++
++function PlanItemRow({ item, chainName, gateWindow, gateWindowId, gateWindows, gateWindowsLoadState, highlighted, newlyAdded, reminderSyncing, isLast, locked, completionLocked, onToggle, onEdit, onMore }: { item: PlanItem; chainName?: string; gateWindow?: GateWindow; gateWindowId?: string; gateWindows: GateWindow[]; gateWindowsLoadState: GateWindowsLoadState; highlighted: boolean; newlyAdded: boolean; reminderSyncing: boolean; isLast: boolean; locked: boolean; completionLocked: boolean; onToggle: () => void; onEdit: () => void; onMore: () => void }) {
+   const colors = useColors();
+   const reduceMotion = useReducedMotion();
+   const accentColor = item.color || UNLINKED_TASK_COLOR;
+@@ -935,6 +1111,22 @@ function PlanItemRow({ item, chainName, gateWindow, highlighted, newlyAdded, rem
+   const chainTextAccent = readableAccentColor(accentColor, colors.cardSolid);
+   const borderColor = highlighted ? displayAccent : item.isPriority ? colors.primary : item.completed ? displayAccent + '48' : colors.border;
+   const backgroundColor = highlighted ? accentColor + '14' : item.isPriority ? colors.primary + '0D' : item.completed ? accentColor + '12' : colors.card;
++  const gateWindowLabel = gateWindow
++    ? gateWindowsLoadState === 'ready'
++      ? `${gateWindowDisplayName(gateWindow, gateWindows)} · ${gateWindowDescriptor(gateWindow)}`
++      : gateWindowsLoadState === 'failed'
++        ? `${gateWindowDisplayName(gateWindow, gateWindows)} · Last saved Window`
++        : `Checking ${gateWindowDisplayName(gateWindow, gateWindows)}…`
++    : gateWindowId
++      ? gateWindowsLoadState === 'loading'
++        ? 'Loading linked Window…'
++        : gateWindowsLoadState === 'failed'
++          ? 'Linked Window unavailable right now'
++          : 'Linked Window no longer exists'
++      : undefined;
++  const missingWindowConfirmed = Boolean(gateWindowId && !gateWindow && gateWindowsLoadState === 'ready');
++  const gateWindowConfirmed = Boolean(gateWindow && gateWindowsLoadState === 'ready');
++  const gateBadgeColor = gateWindowConfirmed ? colors.primary : missingWindowConfirmed ? colors.destructive : colors.mutedForeground;
+   const arrival = useRef(new Animated.Value(1)).current;
+   useEffect(() => {
+     if (!newlyAdded || reduceMotion) {
+@@ -950,11 +1142,11 @@ function PlanItemRow({ item, chainName, gateWindow, highlighted, newlyAdded, rem
+     <GlassSurface pointerEvents="none" accentColor={displayAccent} style={StyleSheet.absoluteFill} />
+     <View style={[styles.planBar, { backgroundColor: item.completed ? displayAccent + 'A8' : displayAccent }]} />
+     <Pressable accessibilityRole="checkbox" accessibilityLabel={reminderSyncing ? `Saving reminder for ${item.text}` : item.completed ? `Mark ${item.text} incomplete` : `Complete ${item.text}`} accessibilityState={{ checked: item.completed, disabled: completionLocked, busy: reminderSyncing }} hitSlop={8} disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? displayAccent : completionLocked ? 'transparent' : displayAccent + '14', borderColor: item.completed ? displayAccent : completionLocked ? colors.mutedForeground : displayAccent, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <Ionicons name="checkmark" size={13} color={readableTextColor(displayAccent)} /> : reminderSyncing ? <Ionicons name="hourglass-outline" size={12} color={colors.mutedForeground} /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
+-    <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${item.text}`} accessibilityState={{ disabled: locked }} disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
++    <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${item.text}${gateWindowLabel ? `. Gate Window: ${gateWindowLabel}` : ''}`} accessibilityState={{ disabled: locked }} disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
+       <View style={styles.planMeta}>{item.isPriority && <View style={[styles.priorityBadge, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="sparkles" size={10} color={colors.primary} /><Text style={[styles.priorityBadgeText, { color: colors.primary }]}>ONE THING</Text></View>}{completionLocked && !locked && <View style={[styles.tomorrowBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /><Text style={[styles.tomorrowBadgeText, { color: colors.mutedForeground }]}>TOMORROW</Text></View>}{item.timeSlot ? <Text style={[styles.planTime, { color: textAccent }]}>{item.timeSlot}{item.durationMinutes ? `  ·  ${formatDurationLabel(item.durationMinutes)}` : ''}{item.reminderMinutes !== undefined ? `  ·  ${item.reminderMinutes === 0 ? 'AT START' : `${item.reminderMinutes} MIN REMINDER`}` : ''}</Text> : <Text style={[styles.planTime, { color: item.isPriority ? colors.primary : colors.mutedForeground }]}>{item.durationMinutes ? `${formatDurationLabel(item.durationMinutes)} BLOCK` : 'ANYTIME'}</Text>}{chainName && <View style={[styles.linkBadge, { backgroundColor: accentColor + '1A' }]}><Ionicons name="link-outline" size={10} color={chainTextAccent} /><Text style={[styles.linkBadgeText, { color: chainTextAccent }]}>{chainName}</Text></View>}</View>
+       <Text style={[styles.planText, { color: item.completed ? colors.foreground + 'A6' : colors.foreground, textDecorationLine: item.completed ? 'line-through' : 'none', textDecorationColor: item.completed ? colors.primary : undefined, textDecorationStyle: 'solid' }]} numberOfLines={2}>{item.text}</Text>
++      {gateWindowId && gateWindowLabel && <View style={[styles.gateWindowBadge, { backgroundColor: gateBadgeColor + '12', borderColor: gateBadgeColor + '40' }]}><Ionicons name={gateWindowConfirmed ? 'shield-checkmark-outline' : gateWindowsLoadState === 'loading' ? 'hourglass-outline' : missingWindowConfirmed ? 'alert-circle-outline' : 'information-circle-outline'} size={13} color={gateBadgeColor} /><Text style={[styles.gateWindowBadgeText, { color: missingWindowConfirmed ? colors.destructive : colors.foreground }]} numberOfLines={1}>{gateWindowLabel}</Text></View>}
+     </Pressable>
+-    {gateWindow && <View style={{ width: 28, height: 28, borderRadius: 10, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginLeft: -5, backgroundColor: colors.primary + '18', borderColor: colors.primary + '48' }}><Ionicons name="shield-checkmark" size={14} color={colors.primary} /></View>}
+     {locked ? <Ionicons name={reminderSyncing ? 'hourglass-outline' : 'lock-closed-outline'} size={16} color={colors.mutedForeground} /> : <Pressable accessibilityRole="button" accessibilityLabel={`More actions for ${item.text}`} onPress={onMore} style={styles.moreButton}><Ionicons name="ellipsis-horizontal" size={20} color={colors.mutedForeground} /></Pressable>}
+   </Animated.View>;
+ }
+@@ -1044,6 +1236,32 @@ function timeSortValue(timeSlot: string) {
+   return hour * 60 + Number(match[2] || 0);
+ }
+ 
++function MorningBriefingSheet({ visible, hour, busy, onClose, onSelect, onDisable }: { visible: boolean; hour: number | null; busy: boolean; onClose: () => void; onSelect: (hour: number) => Promise<void>; onDisable: () => Promise<void> }) {
++  const colors = useColors();
++  const insets = useSafeAreaInsets();
++  const reduceMotion = useReducedMotion();
++  const { height } = useWindowDimensions();
++  const dismiss = () => { if (!busy) onClose(); };
++  return <Modal transparent visible={visible} animationType={reduceMotion ? 'none' : 'slide'} onRequestClose={dismiss}>
++    <View style={styles.modalShade}>
++      <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={dismiss} />
++      <View accessibilityViewIsModal style={[styles.briefingSheet, { backgroundColor: colors.card, borderColor: colors.border, maxHeight: height - Math.max(insets.top, SPACE.sm), paddingBottom: Math.max(insets.bottom, SPACE.md) }]}>
++        <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
++        <View style={styles.taskDetailsHeader}>
++          <View style={styles.taskDetailsHeaderCopy}><Text style={[styles.modalTitle, { color: colors.foreground }]}>Morning briefing</Text><Text style={[styles.taskDetailsIntro, { color: colors.mutedForeground }]}>A single quiet prompt to open your plan.</Text></View>
++          <Pressable accessibilityRole="button" accessibilityLabel="Close briefing options" accessibilityState={{ disabled: busy }} disabled={busy} onPress={dismiss} style={styles.modalClose}><Ionicons name="close" size={22} color={colors.mutedForeground} /></Pressable>
++        </View>
++        <ScrollView style={styles.briefingOptionsScroll} contentContainerStyle={styles.briefingOptionsContent} showsVerticalScrollIndicator={false}>
++          <View accessibilityRole="radiogroup" accessibilityLabel="Morning briefing time" style={styles.briefingOptionList}>
++            {[7, 8, 9].map((optionHour) => { const selected = hour === optionHour; return <Pressable key={optionHour} accessibilityRole="radio" accessibilityLabel={`${optionHour}:00 AM`} accessibilityState={{ selected, disabled: busy }} disabled={busy} onPress={() => { void onSelect(optionHour); }} style={({ pressed }) => [styles.briefingOption, { backgroundColor: selected ? colors.primary + '16' : colors.background, borderColor: selected ? colors.primary : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}><View style={[styles.briefingOptionIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sunny-outline" size={17} color={colors.primary} /></View><Text style={[styles.briefingOptionText, { color: colors.foreground }]}>{optionHour}:00 AM</Text>{selected && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}</Pressable>; })}
++            <Pressable accessibilityRole="radio" accessibilityLabel="Turn morning briefing off" accessibilityState={{ selected: hour === null, disabled: busy }} disabled={busy} onPress={() => { void onDisable(); }} style={({ pressed }) => [styles.briefingOption, { backgroundColor: hour === null ? colors.muted : colors.background, borderColor: hour === null ? colors.mutedForeground + '55' : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}><View style={[styles.briefingOptionIcon, { backgroundColor: colors.mutedForeground + '16' }]}><Ionicons name="notifications-off-outline" size={17} color={colors.mutedForeground} /></View><Text style={[styles.briefingOptionText, { color: colors.foreground }]}>Off</Text>{hour === null && <Ionicons name="checkmark-circle" size={20} color={colors.mutedForeground} />}</Pressable>
++          </View>
++        </ScrollView>
++      </View>
++    </View>
++  </Modal>;
++}
++
+ function TimePickerModal({ visible, hour, minute, setHour, setMinute, onClose, onConfirm }: any) {
+   const colors = useColors();
+   const insets = useSafeAreaInsets();
+@@ -1069,18 +1287,22 @@ const styles = StyleSheet.create({
+   headerSub: { ...TYPE.body, marginTop: SPACE.xxs },
+   scroll: { paddingHorizontal: CONTROL.screenHorizontal },
+   sectionLabel: { ...TYPE.eyebrow, fontSize: 11, lineHeight: 15, marginBottom: SPACE.xs },
+-  briefingCard: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.card, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: SPACE.md, marginTop: SPACE.md, overflow: 'hidden' },
++  briefingRow: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.card, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.md, paddingVertical: SPACE.sm, marginTop: SPACE.xxs, marginBottom: SPACE.xs, overflow: 'hidden' },
+   briefingIcon: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.control, alignItems: 'center', justifyContent: 'center' },
+-  briefingCopy: { flex: 1, minWidth: 150 },
++  briefingCopy: { flex: 1, minWidth: 0 },
+   briefingTitle: { ...TYPE.bodyStrong },
+   briefingBody: { ...TYPE.caption, marginTop: SPACE.hairline },
+-  briefingChoices: { width: '100%', flexDirection: 'row', justifyContent: 'flex-end', gap: SPACE.xs },
+-  briefingHour: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+-  briefingOff: { width: 60, height: CONTROL.minimumTarget, flexDirection: 'row', gap: SPACE.xxs, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+-  briefingHourText: { ...TYPE.metadata },
++  briefingValue: { ...TYPE.metadata, flexShrink: 0 },
++  briefingSheet: { maxHeight: '86%', borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.lg, paddingTop: SPACE.xs },
++  briefingOptionsScroll: { flexShrink: 1, minHeight: 0 },
++  briefingOptionsContent: { paddingBottom: SPACE.xs },
++  briefingOptionList: { gap: SPACE.xs, marginTop: SPACE.md, paddingBottom: SPACE.xs },
++  briefingOption: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.sm },
++  briefingOptionIcon: { width: 34, height: 34, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
++  briefingOptionText: { ...TYPE.bodyStrong, flex: 1 },
+   advancedToggle: { alignSelf: 'center', minHeight: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', gap: SPACE.xxs, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, borderCurve: 'continuous', paddingHorizontal: SPACE.sm, marginVertical: SPACE.hairline },
+   advancedToggleText: { ...TYPE.metadata },
+-  detailsToggle: { minHeight: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, borderCurve: 'continuous', paddingHorizontal: SPACE.sm, marginHorizontal: SPACE.md, marginTop: SPACE.xs },
++  detailsToggle: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, borderCurve: 'continuous', paddingHorizontal: SPACE.sm, paddingVertical: SPACE.sm, marginHorizontal: SPACE.md, marginTop: SPACE.xs },
+   detailsStack: { gap: SPACE.xs, paddingTop: SPACE.xxs },
+   emptySection: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, padding: SPACE.md, borderRadius: RADIUS.card, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+   emptyText: { ...TYPE.body, flex: 1 },
+@@ -1119,6 +1341,8 @@ const styles = StyleSheet.create({
+   tomorrowBadge: { flexDirection: 'row', alignItems: 'center', gap: SPACE.xxs, paddingHorizontal: SPACE.xs, paddingVertical: SPACE.xxs, borderRadius: RADIUS.compact },
+   tomorrowBadgeText: { ...TYPE.metadata, letterSpacing: 0.6 },
+   planText: { fontSize: 15, lineHeight: 21, fontFamily: 'Inter_500Medium' },
++  gateWindowBadge: { alignSelf: 'flex-start', maxWidth: '100%', minHeight: 26, flexDirection: 'row', alignItems: 'center', gap: SPACE.xxs, borderRadius: RADIUS.compact, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.xs, paddingVertical: SPACE.xxs },
++  gateWindowBadgeText: { ...TYPE.metadata, flexShrink: 1 },
+   moreButton: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, alignItems: 'center', justifyContent: 'center' },
+   addCard: { borderRadius: RADIUS.card, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, marginTop: SPACE.xxs, overflow: 'hidden' },
+   addTrigger: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, padding: SPACE.md },
+@@ -1130,7 +1354,7 @@ const styles = StyleSheet.create({
+   composerMeta: { gap: SPACE.xs, paddingBottom: SPACE.xxs },
+   metaLabel: { ...TYPE.eyebrow, fontSize: 11, lineHeight: 15, paddingHorizontal: SPACE.md, marginTop: SPACE.hairline },
+   chainHelper: { ...TYPE.metadata, fontFamily: 'Inter_400Regular', paddingHorizontal: SPACE.md, marginTop: -SPACE.hairline },
+-  timeSlots: { paddingHorizontal: SPACE.md, gap: SPACE.xs, paddingBottom: SPACE.xs },
++  timeSlots: { paddingLeft: SPACE.md, paddingRight: SPACE.xl, paddingTop: SPACE.xxs, gap: SPACE.xs, paddingBottom: SPACE.xs },
+   timeChip: { minHeight: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', gap: SPACE.xs, paddingHorizontal: SPACE.sm, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth },
+   timeChipText: { ...TYPE.caption, fontFamily: 'Inter_500Medium' },
+   chainChoices: { paddingHorizontal: SPACE.md, gap: SPACE.xs, paddingBottom: SPACE.xs },
+@@ -1161,6 +1385,35 @@ const styles = StyleSheet.create({
+   pickerValueText: { ...TYPE.bodyStrong },
+   modalConfirm: { minHeight: CONTROL.buttonHeight, borderRadius: RADIUS.button, borderCurve: 'continuous', alignItems: 'center', justifyContent: 'center', marginTop: SPACE.md },
+   modalConfirmText: { ...TYPE.bodyStrong },
++  sheetHandle: { width: 36, height: 5, borderRadius: RADIUS.capsule, alignSelf: 'center', marginBottom: SPACE.xs },
++  taskDetailsSheet: { maxHeight: '86%', borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.lg, paddingTop: SPACE.xs },
++  taskDetailsHeader: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm },
++  taskDetailsHeaderCopy: { flex: 1, minWidth: 0 },
++  taskDetailsIntro: { ...TYPE.caption, marginTop: SPACE.xxs },
++  taskDetailsScroll: { flexShrink: 1, minHeight: 0 },
++  taskDetailsContent: { paddingTop: SPACE.xs, paddingBottom: SPACE.md },
++  taskDetailRow: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderBottomWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.xxs, paddingVertical: SPACE.sm },
++  taskDetailIcon: { width: 36, height: 36, borderRadius: RADIUS.control, alignItems: 'center', justifyContent: 'center' },
++  taskDetailCopy: { flex: 1, minWidth: 0 },
++  taskDetailTitle: { ...TYPE.bodyStrong },
++  taskDetailSummary: { ...TYPE.caption, marginTop: SPACE.xxs },
++  taskDetailSetDot: { width: 6, height: 6, borderRadius: RADIUS.capsule },
++  taskDetailChips: { gap: SPACE.xs, paddingHorizontal: SPACE.xxs, paddingVertical: SPACE.sm },
++  sevenChoiceWrap: { paddingVertical: SPACE.sm },
++  detailChip: { minHeight: CONTROL.minimumTarget, justifyContent: 'center', borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.sm },
++  detailChipText: { ...TYPE.caption, fontFamily: 'Inter_600SemiBold' },
++  colorChoice: { minWidth: CONTROL.minimumTarget, height: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xs, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.sm },
++  colorChoiceDot: { width: 20, height: 20, borderRadius: RADIUS.capsule },
++  colorChoiceText: { ...TYPE.caption, fontFamily: 'Inter_600SemiBold' },
++  windowChoices: { gap: SPACE.xs, paddingVertical: SPACE.sm },
++  windowChoice: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm },
++  unavailableWindow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm },
++  windowChoiceIcon: { width: 34, height: 34, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
++  windowChoiceCopy: { flex: 1, minWidth: 0 },
++  windowChoiceTitle: { ...TYPE.bodyStrong },
++  windowChoiceSummary: { ...TYPE.caption, marginTop: SPACE.xxs },
++  taskDetailsDone: { minHeight: CONTROL.buttonHeight, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.button, borderCurve: 'continuous', marginTop: SPACE.xs },
++  taskDetailsDoneText: { ...TYPE.bodyStrong },
+   reminderNotice: { ...TYPE.metadata, fontFamily: 'Inter_400Regular', paddingHorizontal: SPACE.md, paddingBottom: SPACE.xxs },
+   reviewTrigger: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.card, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: SPACE.md, marginTop: SPACE.xxs, marginBottom: SPACE.xs },
+   reviewIcon: { width: 36, height: 36, borderRadius: RADIUS.control, alignItems: 'center', justifyContent: 'center' },
+diff --git a/artifacts/chain/app/_layout.tsx b/artifacts/chain/app/_layout.tsx
+index bfa1038..e58c80f 100644
+--- a/artifacts/chain/app/_layout.tsx
++++ b/artifacts/chain/app/_layout.tsx
+@@ -45,7 +45,15 @@ function RootLayoutNav() {
+           gestureDirection: 'vertical',
+         }}
+       />
+-      <Stack.Screen name="chain/[id]" options={{ headerShown: false }} />
++      <Stack.Screen
++        name="chain/[id]"
++        options={{
++          headerShown: false,
++          gestureEnabled: true,
++          gestureDirection: 'horizontal',
++          fullScreenGestureEnabled: false,
++        }}
++      />
+       <Stack.Screen name="pause-gate-demo" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade' }} />
+       <Stack.Screen name="gate-windows" options={{ headerShown: false, animation: 'slide_from_right' }} />
+       <Stack.Screen name="focus/[id]" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade' }} />
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index 8d3baac..717616f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -2,14 +2,18 @@ import React, { useEffect, useRef, useState } from 'react';
+ import AsyncStorage from '@react-native-async-storage/async-storage';
+ import {
+   Alert,
++  KeyboardAvoidingView,
++  Modal,
+   Platform,
+   Pressable,
+   ScrollView,
+   StyleSheet,
+   Text,
++  TextInput,
+   View,
+ } from 'react-native';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { useReducedMotion } from 'react-native-reanimated';
+ import { Ionicons } from '@expo/vector-icons';
+ import { router, useLocalSearchParams } from 'expo-router';
+ import { useColors } from '@/hooks/useColors';
+@@ -32,8 +36,9 @@ import { FOCUS_LOG_KEY, type FocusLogEntry } from '@/context/PlanContext';
+ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+-import { Surface, SectionLabel } from '@/components/ui/AppUI';
+-import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
++import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
++import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { playFeedback } from '@/lib/feedback';
+ import { normalizeFocusLog } from '@/domain/plan';
+@@ -56,7 +61,16 @@ const SCHEDULE_DAYS = [
+   { value: 0, label: weekdayLabel(0, 'short'), narrowLabel: weekdayLabel(0, 'narrow') },
+ ];
+ 
+-const MINIMUM_PRESETS = ['5 min', 'One page', 'One set'] as const;
++const WEEKLY_TARGET_OPTIONS: readonly SevenChoiceOption[] = [1, 2, 3, 4, 5, 6, 7].map((value) => ({
++  value,
++  label: String(value),
++  accessibilityLabel: `${value} ${value === 1 ? 'day' : 'days'} each week`,
++}));
++const REST_DAY_OPTIONS: readonly SevenChoiceOption[] = SCHEDULE_DAYS.map(({ label, narrowLabel, value }) => ({
++  value,
++  label: narrowLabel,
++  accessibilityLabel: `${label} rest day`,
++}));
+ const COLOR_NAMES: Record<string, string> = {
+   '#FF6B35': 'Orange', '#00C896': 'Emerald', '#A855F7': 'Violet', '#F43F5E': 'Rose',
+   '#F59E0B': 'Amber', '#3B82F6': 'Blue', '#FBBF24': 'Gold', '#84CC16': 'Lime',
+@@ -219,6 +233,7 @@ function CalendarGrid({
+ export default function ChainDetailScreen() {
+   const colors = useColors();
+   const insets = useSafeAreaInsets();
++  const reducedMotion = useReducedMotion();
+   const { id } = useLocalSearchParams<{ id: string }>();
+   const {
+     chains,
+@@ -238,6 +253,9 @@ export default function ChainDetailScreen() {
+   const [month, setMonth] = useState(() => startOfMonth(new Date()));
+   const [scheduleOpen, setScheduleOpen] = useState(false);
+   const [showMoreColors, setShowMoreColors] = useState(false);
++  const [minimumEditorOpen, setMinimumEditorOpen] = useState(false);
++  const [minimumDraft, setMinimumDraft] = useState('');
++  const [minimumSaving, setMinimumSaving] = useState(false);
+   const mutationBusyRef = useRef(false);
+   const [focusLog, setFocusLog] = useState<FocusLogEntry[]>([]);
+   const touchStartX = useRef<number | null>(null);
+@@ -247,6 +265,11 @@ export default function ChainDetailScreen() {
+   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
+ 
++  function handleBack() {
++    if (router.canGoBack()) router.back();
++    else router.replace('/(tabs)');
++  }
++
+   useEffect(() => {
+     let cancelled = false;
+     if (!chain) {
+@@ -266,7 +289,7 @@ export default function ChainDetailScreen() {
+     return (
+       <AmbientScreen tone="today" style={styles.root}>
+         <AnimatedPressable
+-          onPress={() => router.back()}
++          onPress={handleBack}
+           accessibilityRole="button"
+           accessibilityLabel="Go back"
+           containerStyle={[styles.backBtn, { top: topPad + SPACE.xs, left: SPACE.md }]}
+@@ -378,19 +401,35 @@ export default function ChainDetailScreen() {
+ 
+   function editMinimum() {
+     if (!chain) return;
+-    if (Platform.OS === 'ios') {
+-      Alert.prompt('Your minimum version', 'What still counts on a difficult day?', [{ text: 'Cancel', style: 'cancel' }, { text: 'Save', onPress: (value?: string) => { void (async () => {
+-        const updated = await commitChainChange(() => updateChainMinimumLabel(chain.id, value || ''));
+-        if (updated) playFeedback('selection');
+-      })(); } }], 'plain-text', chain.minimumLabel);
+-      return;
+-    }
+-    Alert.alert('Your minimum version', `Currently: ${chain.minimumLabel}`);
++    setMinimumDraft(chain.minimumLabel);
++    setMinimumEditorOpen(true);
++  }
++
++  function closeMinimumEditor() {
++    if (minimumSaving) return;
++    setMinimumEditorOpen(false);
++  }
++
++  async function saveMinimum() {
++    if (!chain || minimumSaving || !minimumDraft.trim()) return;
++    setMinimumSaving(true);
++    const updated = await commitChainChange(() => updateChainMinimumLabel(chain.id, minimumDraft));
++    setMinimumSaving(false);
++    if (!updated) return;
++    setMinimumEditorOpen(false);
++    playFeedback('selection');
++  }
++
++  async function changeWeeklyTarget(target: number) {
++    if (!chain) return;
++    const updated = await commitChainChange(() => updateChainCadence(chain.id, 'weekly', target));
++    if (!updated) return;
++    playFeedback('selection');
+   }
+ 
+-  async function toggleRestDay(day: number) {
++  async function changeRestDays(restDays: number[]) {
+     if (!chain) return;
+-    const updated = await commitChainChange(() => updateChainRestDays(chain.id, chain.restDays.includes(day) ? chain.restDays.filter((item) => item !== day) : [...chain.restDays, day]));
++    const updated = await commitChainChange(() => updateChainRestDays(chain.id, restDays));
+     if (!updated) return;
+     playFeedback('selection');
+   }
+@@ -436,7 +475,7 @@ export default function ChainDetailScreen() {
+       {/* Nav bar */}
+       <View style={[styles.navBar, { paddingTop: topPad + 4 }]}>
+         <AnimatedPressable
+-          onPress={() => router.back()}
++          onPress={handleBack}
+           accessibilityRole="button"
+           accessibilityLabel="Go back"
+           style={styles.backBtn2}
+@@ -541,55 +580,26 @@ export default function ChainDetailScreen() {
+                   ? 'Reach your target in a week to extend your week streak.'
+                   : 'Choose rest days. They never break your streak.'}
+               </Text>
+-              <View style={styles.weekDays} accessibilityRole={chain.cadence === 'weekly' ? 'radiogroup' : undefined}>
+-                {chain.cadence === 'weekly'
+-                  ? [1, 2, 3, 4, 5, 6, 7].map((target) => {
+-                    const selected = target === chain.weeklyTarget;
+-                    return (
+-                      <AnimatedPressable
+-                        key={target}
+-                        onPress={() => { void (async () => {
+-                          const updated = await commitChainChange(() => updateChainCadence(chain.id, 'weekly', target));
+-                          if (updated) playFeedback('selection');
+-                        })(); }}
+-                        accessibilityRole="radio"
+-                        accessibilityLabel={`${target} ${target === 1 ? 'day' : 'days'} each week`}
+-                        accessibilityState={{ checked: selected }}
+-                        style={[
+-                          styles.weekDay,
+-                          {
+-                            backgroundColor: selected ? chain.color : colors.background,
+-                            borderColor: selected ? chain.color : colors.border,
+-                          },
+-                        ]}
+-                        scaleTo={0.92}
+-                      >
+-                        <Text style={[styles.weekDayText, { color: selected ? solidAccentText : colors.mutedForeground }]}>{target}</Text>
+-                      </AnimatedPressable>
+-                    );
+-                  })
+-                  : SCHEDULE_DAYS.map(({ label, narrowLabel, value }) => {
+-                    const isRest = chain.restDays.includes(value);
+-                    return (
+-                      <AnimatedPressable
+-                        key={value}
+-                        onPress={() => toggleRestDay(value)}
+-                        accessibilityRole="checkbox"
+-                        accessibilityLabel={`${label} rest day`}
+-                        accessibilityState={{ checked: isRest }}
+-                        style={[
+-                          styles.weekDay,
+-                          {
+-                            backgroundColor: isRest ? chain.color : colors.background,
+-                            borderColor: isRest ? chain.color : colors.border,
+-                          },
+-                        ]}
+-                        scaleTo={0.92}
+-                      >
+-                        <Text style={[styles.weekDayText, { color: isRest ? solidAccentText : colors.mutedForeground }]}>{narrowLabel}</Text>
+-                      </AnimatedPressable>
+-                    );
+-                  })}
++              <View style={styles.scheduleSelector}>
++                <SevenChoiceSelector
++                  options={chain.cadence === 'weekly' ? WEEKLY_TARGET_OPTIONS : REST_DAY_OPTIONS}
++                  selectionMode={chain.cadence === 'weekly' ? 'single' : 'multiple'}
++                  selectedValues={chain.cadence === 'weekly' ? [chain.weeklyTarget] : chain.restDays}
++                  onSelectionChange={(selectedValues) => {
++                    if (chain.cadence === 'weekly') {
++                      const target = selectedValues[0];
++                      if (target !== undefined) void changeWeeklyTarget(target);
++                    } else {
++                      void changeRestDays(selectedValues);
++                    }
++                  }}
++                  accentColor={chain.color}
++                  selectedTextColor={solidAccentText}
++                  textColor={colors.mutedForeground}
++                  borderColor={colors.border}
++                  backgroundColor={colors.background}
++                  accessibilityLabel={chain.cadence === 'weekly' ? 'Weekly target' : 'Rest days'}
++                />
+               </View>
+             </View>
+           )}
+@@ -599,53 +609,18 @@ export default function ChainDetailScreen() {
+           <AnimatedPressable
+             onPress={editMinimum}
+             accessibilityRole="button"
+-            accessibilityLabel={`Edit minimum version, currently ${chain.minimumLabel}`}
++            accessibilityLabel="Edit minimum version"
++            accessibilityValue={{ text: chain.minimumLabel }}
++            accessibilityHint="Opens the minimum version editor."
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+               <Ionicons name="leaf-outline" size={18} color={accentText} />
+             </View>
+-            <View style={styles.scheduleCopy}>
+-              <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Minimum version</Text>
+-              <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{chain.minimumLabel} · tap to edit</Text>
+-            </View>
++            <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
++            <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+             <Ionicons name="chevron-forward" size={17} color={accentText} />
+           </AnimatedPressable>
+-          <View style={styles.minimumPresetRow}>
+-            {MINIMUM_PRESETS.map((preset) => {
+-              const selected = chain.minimumLabel === preset;
+-              return (
+-                <AnimatedPressable
+-                  key={preset}
+-                  onPress={() => { void (async () => {
+-                    const updated = await commitChainChange(() => updateChainMinimumLabel(chain.id, preset));
+-                    if (updated) playFeedback('selection');
+-                  })(); }}
+-                  accessibilityRole="radio"
+-                  accessibilityLabel={`${preset} minimum version`}
+-                  accessibilityState={{ checked: selected }}
+-                  style={[
+-                    styles.minimumPreset,
+-                    {
+-                      backgroundColor: selected ? chain.color + '28' : colors.card,
+-                      borderColor: selected ? chain.color : colors.border,
+-                    },
+-                  ]}
+-                >
+-                  <Text style={[styles.minimumPresetText, { color: selected ? accentText : colors.mutedForeground }]}>{preset}</Text>
+-                </AnimatedPressable>
+-              );
+-            })}
+-            <AnimatedPressable
+-              onPress={editMinimum}
+-              accessibilityRole="button"
+-              accessibilityLabel="Set a custom minimum version"
+-              style={[styles.minimumPreset, { backgroundColor: colors.card, borderColor: colors.border }]}
+-            >
+-              <Ionicons name="create-outline" size={14} color={colors.mutedForeground} />
+-              <Text style={[styles.minimumPresetText, { color: colors.mutedForeground }]}>Custom</Text>
+-            </AnimatedPressable>
+-          </View>
+         </View>
+ 
+         {/* Streak hero */}
+@@ -847,6 +822,119 @@ export default function ChainDetailScreen() {
+           })}
+         </Text>
+       </ScrollView>
++
++      {minimumEditorOpen ? (
++        <Modal
++          visible
++          transparent
++          statusBarTranslucent
++          animationType={reducedMotion ? 'none' : 'slide'}
++          onRequestClose={closeMinimumEditor}
++        >
++          <KeyboardAvoidingView
++            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
++            style={styles.minimumModal}
++          >
++            <Pressable
++              accessible={false}
++              accessibilityElementsHidden
++              importantForAccessibility="no-hide-descendants"
++              disabled={minimumSaving}
++              onPress={closeMinimumEditor}
++              style={StyleSheet.absoluteFill}
++            />
++            <View
++              accessibilityViewIsModal
++              importantForAccessibility="yes"
++              onAccessibilityEscape={closeMinimumEditor}
++              style={[
++                styles.minimumSheet,
++                {
++                  backgroundColor: colors.card,
++                  borderColor: colors.border,
++                },
++              ]}
++            >
++              <SheetHandle />
++              <ScrollView
++                bounces={false}
++                keyboardShouldPersistTaps="handled"
++                showsVerticalScrollIndicator={false}
++                contentContainerStyle={[
++                  styles.minimumSheetContent,
++                  { paddingBottom: Math.max(insets.bottom, SPACE.md) },
++                ]}
++              >
++                <View style={styles.minimumSheetHeader}>
++                  <View style={styles.minimumSheetHeading}>
++                    <Text style={[styles.minimumSheetEyebrow, { color: accentText }]}>MINIMUM VERSION</Text>
++                    <Text accessibilityRole="header" style={[styles.minimumSheetTitle, { color: colors.foreground }]}>What still counts on a difficult day?</Text>
++                  </View>
++                  <AnimatedPressable
++                    accessibilityRole="button"
++                    accessibilityLabel="Close minimum version editor"
++                    accessibilityState={{ disabled: minimumSaving }}
++                    disabled={minimumSaving}
++                    onPress={closeMinimumEditor}
++                    scaleTo={0.94}
++                    style={[styles.minimumSheetClose, { opacity: minimumSaving ? OPACITY.disabled : 1 }]}
++                  >
++                    <Ionicons name="close" size={22} color={colors.mutedForeground} />
++                  </AnimatedPressable>
++                </View>
++
++                <TextInput
++                  accessibilityLabel="Minimum version"
++                  autoCapitalize="sentences"
++                  autoCorrect
++                  autoFocus
++                  editable={!minimumSaving}
++                  maxLength={48}
++                  onChangeText={setMinimumDraft}
++                  onSubmitEditing={() => { void saveMinimum(); }}
++                  returnKeyType="done"
++                  selectTextOnFocus
++                  value={minimumDraft}
++                  style={[
++                    styles.minimumInput,
++                    {
++                      backgroundColor: colors.background,
++                      borderColor: colors.border,
++                      color: colors.foreground,
++                    },
++                  ]}
++                />
++                <Text
++                  accessibilityLabel={`${minimumDraft.length} of 48 characters`}
++                  style={[styles.minimumCounter, { color: colors.mutedForeground }]}
++                >
++                  {minimumDraft.length}/48
++                </Text>
++
++                <AnimatedPressable
++                  accessibilityRole="button"
++                  accessibilityLabel="Save minimum version"
++                  accessibilityState={{ busy: minimumSaving, disabled: minimumSaving || !minimumDraft.trim() }}
++                  disabled={minimumSaving || !minimumDraft.trim()}
++                  onPress={() => { void saveMinimum(); }}
++                  style={[
++                    styles.minimumSave,
++                    {
++                      backgroundColor: chain.color,
++                      borderColor: chain.color,
++                      opacity: minimumSaving || !minimumDraft.trim() ? OPACITY.disabled : 1,
++                    },
++                  ]}
++                >
++                  <Text style={[styles.minimumSaveText, { color: solidAccentText }]}>
++                    {minimumSaving ? 'Saving…' : 'Save minimum'}
++                  </Text>
++                </AnimatedPressable>
++              </ScrollView>
++            </View>
++          </KeyboardAvoidingView>
++        </Modal>
++      ) : null}
+     </AmbientScreen>
+   );
+ }
+@@ -932,11 +1020,22 @@ const styles = StyleSheet.create({
+     borderRadius: RADIUS.card,
+     overflow: 'hidden',
+   },
+-  minimumPanel: { borderRadius: RADIUS.card, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden', marginTop: SPACE.xs },
+-  minimumCard: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, paddingHorizontal: SPACE.md, paddingVertical: SPACE.sm },
+-  minimumPresetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.xs, paddingHorizontal: SPACE.md, paddingBottom: SPACE.md },
+-  minimumPreset: { minHeight: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xxs, borderRadius: RADIUS.compact, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.sm, paddingVertical: SPACE.xs },
+-  minimumPresetText: { ...TYPE.metadata },
++  minimumPanel: {
++    borderRadius: RADIUS.card,
++    borderCurve: 'continuous',
++    borderWidth: StyleSheet.hairlineWidth,
++    overflow: 'hidden',
++  },
++  minimumCard: {
++    minHeight: 60,
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: SPACE.sm,
++    paddingHorizontal: SPACE.md,
++    paddingVertical: SPACE.xs,
++  },
++  minimumTitle: { ...TYPE.bodyStrong, flexShrink: 0 },
++  minimumValue: { ...TYPE.caption, flex: 1, minWidth: 0, textAlign: 'right' },
+   scheduleHeader: {
+     minHeight: 64,
+     flexDirection: 'row',
+@@ -957,9 +1056,62 @@ const styles = StyleSheet.create({
+   scheduleBody: { ...TYPE.caption, marginTop: SPACE.hairline },
+   scheduleExpanded: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#ffffff12', padding: SPACE.md, paddingTop: SPACE.sm },
+   scheduleHint: { ...TYPE.caption, marginBottom: SPACE.sm },
+-  weekDays: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.xs },
+-  weekDay: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.capsule, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+-  weekDayText: { ...TYPE.bodyStrong },
++  scheduleSelector: { marginHorizontal: -SPACE.md },
++  minimumModal: {
++    flex: 1,
++    justifyContent: 'flex-end',
++    backgroundColor: SCRIM,
++  },
++  minimumSheet: {
++    width: '100%',
++    maxHeight: '88%',
++    borderTopLeftRadius: RADIUS.sheet,
++    borderTopRightRadius: RADIUS.sheet,
++    borderCurve: 'continuous',
++    borderWidth: StyleSheet.hairlineWidth,
++    overflow: 'hidden',
++    paddingTop: SPACE.sm,
++  },
++  minimumSheetContent: { paddingHorizontal: CONTROL.screenHorizontal },
++  minimumSheetHeader: {
++    flexDirection: 'row',
++    alignItems: 'flex-start',
++    gap: SPACE.md,
++  },
++  minimumSheetHeading: { flex: 1, minWidth: 0, gap: SPACE.xxs },
++  minimumSheetEyebrow: { ...TYPE.eyebrow },
++  minimumSheetTitle: { ...TYPE.sectionTitle },
++  minimumSheetClose: {
++    width: CONTROL.minimumTarget,
++    height: CONTROL.minimumTarget,
++    borderRadius: RADIUS.capsule,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  minimumInput: {
++    minHeight: CONTROL.buttonHeight,
++    borderRadius: RADIUS.control,
++    borderCurve: 'continuous',
++    borderWidth: StyleSheet.hairlineWidth,
++    fontSize: 16,
++    lineHeight: 22,
++    fontFamily: 'Inter_500Medium',
++    paddingHorizontal: SPACE.sm,
++    paddingVertical: SPACE.sm,
++    marginTop: SPACE.md,
++  },
++  minimumCounter: { ...TYPE.caption, alignSelf: 'flex-end', marginTop: SPACE.xxs },
++  minimumSave: {
++    minHeight: CONTROL.buttonHeight,
++    borderRadius: RADIUS.button,
++    borderCurve: 'continuous',
++    borderWidth: StyleSheet.hairlineWidth,
++    alignItems: 'center',
++    justifyContent: 'center',
++    paddingHorizontal: SPACE.md,
++    marginTop: SPACE.md,
++  },
++  minimumSaveText: { ...TYPE.bodyStrong, textAlign: 'center' },
+   streakHero: {
+     alignItems: 'center',
+     borderRadius: RADIUS.hero,
+diff --git a/artifacts/chain/app/gate-windows.tsx b/artifacts/chain/app/gate-windows.tsx
+index e015514..c2c4c42 100644
+--- a/artifacts/chain/app/gate-windows.tsx
++++ b/artifacts/chain/app/gate-windows.tsx
+@@ -5,24 +5,33 @@ import { useReducedMotion } from 'react-native-reanimated';
+ import { Ionicons as IconSource } from '@expo/vector-icons';
+ import { router } from 'expo-router';
+ import { useColors } from '@/hooks/useColors';
+-import { canToggleGateWindowSkip, endGateWindowOnDemand, formatGateHour, formatGateWindowMinutes, GateWindow, gateDateKey, gateWindowSchedule, getGateWindowStatus, getGateWindowsSnapshot, removeGateWindow, saveGateWindows, startGateWindowOnDemand, syncGateWindowProgress, toggleGateWindowSkipToday } from '@/lib/gateWindows';
++import { canToggleGateWindowSkip, endGateWindowOnDemand, formatGateHour, formatGateWindowMinutes, GateWindow, gateDateKey, gateWindowDescriptor, gateWindowDisplayName, gateWindowNameKey, getGateWindowStatus, getGateWindowsSnapshot, isGateWindowNameTaken, nextAvailableGateWindowName, normalizeGateWindowName, removeGateWindow, saveGateWindows, startGateWindowOnDemand, syncGateWindowProgress, toggleGateWindowSkipToday } from '@/lib/gateWindows';
+ import { getProtectedAppsWeeklyUsage, isNativeScreenTimeAvailable, pickProtectedApps, ProtectedAppUsage } from '@/lib/screenTimeBridge';
+ import { AmbientScreen, GlassSurface } from '@/components/AmbientSurface';
+ import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+ import { CONTROL, MOTION, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor } from '@/constants/sectionTheme';
+ import { playFeedback } from '@/lib/feedback';
++import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
+ 
+ const Ionicons = IconSource as React.ComponentType<any>;
+ 
+-const DAY_OPTIONS = [{ label: 'M', name: 'Monday', id: 1 }, { label: 'T', name: 'Tuesday', id: 2 }, { label: 'W', name: 'Wednesday', id: 3 }, { label: 'T', name: 'Thursday', id: 4 }, { label: 'F', name: 'Friday', id: 5 }, { label: 'S', name: 'Saturday', id: 6 }, { label: 'S', name: 'Sunday', id: 0 }];
++const DAY_OPTIONS = [
++  { label: 'M', value: 1, accessibilityLabel: 'Monday' },
++  { label: 'T', value: 2, accessibilityLabel: 'Tuesday' },
++  { label: 'W', value: 3, accessibilityLabel: 'Wednesday' },
++  { label: 'T', value: 4, accessibilityLabel: 'Thursday' },
++  { label: 'F', value: 5, accessibilityLabel: 'Friday' },
++  { label: 'S', value: 6, accessibilityLabel: 'Saturday' },
++  { label: 'S', value: 0, accessibilityLabel: 'Sunday' },
++] as const;
+ const HOURS = Array.from({ length: 24 }, (_, index) => index);
+ const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
+ const PRESETS = [{ name: 'Deep work', startHour: 9, endHour: 11, icon: 'laptop-outline' as const }, { name: 'Morning reset', startHour: 7, endHour: 9, icon: 'sunny-outline' as const }, { name: 'Wind down', startHour: 22, endHour: 0, icon: 'moon-outline' as const }];
+ const ICON_TARGET = { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' } as const;
+ const MIN_TARGET = { minHeight: 44, justifyContent: 'center' } as const;
+ 
+-function freshWindow(): GateWindow { return { id: '', name: 'Deep work', startHour: 9, startMinute: 0, endHour: 11, endMinute: 0, days: [1, 2, 3, 4, 5], appIds: [], mode: 'scheduled', onDemandDurationMinutes: 60 }; }
++function freshWindow(windows: readonly GateWindow[]): GateWindow { return { id: '', name: nextAvailableGateWindowName('Deep work', windows), startHour: 9, startMinute: 0, endHour: 11, endMinute: 0, days: [1, 2, 3, 4, 5], appIds: [], mode: 'scheduled', onDemandDurationMinutes: 60 }; }
+ const totalMinutes = (hour: number, minute: number) => hour * 60 + minute;
+ 
+ function GateSwitcher({ active }: { active: 'pause' | 'windows' }) {
+@@ -59,18 +68,22 @@ function TimePicker({ visible, hour, minute, onConfirm, onClose }: { visible: bo
+   </Modal>;
+ }
+ 
+-function WindowEditor({ initial, onSave, onDelete, onClose }: { initial?: GateWindow; onSave: (window: GateWindow) => Promise<boolean>; onDelete?: () => void; onClose: () => void }) {
++function WindowEditor({ initial, existingWindows, onSave, onDelete, onClose }: { initial?: GateWindow; existingWindows: readonly GateWindow[]; onSave: (window: GateWindow) => Promise<boolean>; onDelete?: () => void; onClose: () => void }) {
+   const colors = useColors();
+   const insets = useSafeAreaInsets();
+   const reducedMotion = useReducedMotion();
+   const accentText = readableAccentColor(colors.primary, colors.cardSolid);
+-  const [window, setWindow] = useState<GateWindow>(initial || freshWindow());
++  const [window, setWindow] = useState<GateWindow>(() => initial || freshWindow(existingWindows));
+   const [picker, setPicker] = useState<'start' | 'end' | null>(null);
+   const [saving, setSaving] = useState(false);
+   const create = !initial;
+   const scheduled = window.mode !== 'onDemand';
+-  const canSave = window.name.trim().length > 0 && (!scheduled || (window.days.length > 0 && totalMinutes(window.endHour, window.endMinute) !== totalMinutes(window.startHour, window.startMinute)));
+-  const toggleDay = (day: number) => setWindow((value) => ({ ...value, days: value.days.includes(day) ? value.days.filter((item) => item !== day) : [...value.days, day] }));
++  const normalizedName = normalizeGateWindowName(window.name);
++  const nameForSave = initial && window.name === initial.name ? initial.name : normalizedName;
++  const canonicalNameChanged = !initial || gateWindowNameKey(window.name) !== gateWindowNameKey(initial.name);
++  const duplicateName = Boolean(normalizedName) && canonicalNameChanged
++    && isGateWindowNameTaken(window.name, existingWindows, initial?.id);
++  const canSave = normalizedName.length > 0 && !duplicateName && (!scheduled || (window.days.length > 0 && totalMinutes(window.endHour, window.endMinute) !== totalMinutes(window.startHour, window.startMinute)));
+   const changeMode = (mode: 'scheduled' | 'onDemand') => setWindow((value) => {
+     const clean = {
+       ...value,
+@@ -91,7 +104,7 @@ function WindowEditor({ initial, onSave, onDelete, onClose }: { initial?: GateWi
+     if (!canSave || saving) return;
+     setSaving(true);
+     try {
+-      await onSave({ ...window, id: window.id || `${Date.now()}${Math.random().toString(36).slice(2, 7)}` });
++      await onSave({ ...window, name: nameForSave, id: window.id || `${Date.now()}${Math.random().toString(36).slice(2, 7)}` });
+     } catch {
+       // The parent presents calm persistence feedback and keeps the editor open.
+     } finally {
+@@ -107,8 +120,9 @@ function WindowEditor({ initial, onSave, onDelete, onClose }: { initial?: GateWi
+     setWindow((value) => ({ ...value, appIds: selected.map((app) => app.id) }));
+   };
+   return <Modal transparent animationType={reducedMotion ? 'none' : 'slide'} statusBarTranslucent onRequestClose={onClose}><View style={styles.shade} accessibilityViewIsModal><View style={[styles.editor, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: Math.max(16, insets.bottom + 8) }]}><KeyboardAwareScrollViewCompat contentContainerStyle={styles.editorScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} bottomOffset={insets.bottom + 20}><View style={styles.editorHeader}><View style={{ flex: 1, minWidth: 0, paddingRight: 10 }}><Text style={[styles.editorEyebrow, { color: accentText }]}>{create ? 'NEW WINDOW' : 'EDIT WINDOW'}</Text><Text numberOfLines={2} style={[styles.editorTitle, { color: colors.foreground }]}>{create ? 'Plan a focused part of your day' : 'Tune this window'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Close window editor" onPress={onClose} style={ICON_TARGET}><Ionicons name="close" size={24} color={colors.mutedForeground} /></Pressable></View>
+-    {create && <View style={styles.presets}>{PRESETS.map((preset) => { const selected = window.name === preset.name; return <Pressable key={preset.name} accessibilityRole="button" accessibilityLabel={`Use ${preset.name} preset`} accessibilityState={{ selected }} onPress={() => setWindow((value) => ({ ...value, name: preset.name, startHour: preset.startHour, startMinute: 0, endHour: preset.endHour, endMinute: 0 }))} style={[styles.preset, MIN_TARGET, { backgroundColor: selected ? colors.primary + '1A' : colors.background, borderColor: selected ? colors.primary : colors.border }]}><Ionicons name={preset.icon} size={14} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.presetText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{preset.name}</Text></Pressable>; })}</View>}
+-    <TextInput accessibilityLabel="Window name" value={window.name} onChangeText={(name) => setWindow((value) => ({ ...value, name }))} placeholder="Name this window" placeholderTextColor={colors.mutedForeground} style={[styles.nameInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]} />
++    {create && <View style={styles.presets}>{PRESETS.map((preset) => { const availableName = nextAvailableGateWindowName(preset.name, existingWindows); const selected = gateWindowNameKey(window.name) === gateWindowNameKey(availableName); return <Pressable key={preset.name} accessibilityRole="button" accessibilityLabel={`Use ${preset.name} preset`} accessibilityState={{ selected }} onPress={() => setWindow((value) => ({ ...value, name: availableName, startHour: preset.startHour, startMinute: 0, endHour: preset.endHour, endMinute: 0 }))} style={[styles.preset, MIN_TARGET, { backgroundColor: selected ? colors.primary + '1A' : colors.background, borderColor: selected ? colors.primary : colors.border }]}><Ionicons name={preset.icon} size={14} color={selected ? colors.primary : colors.mutedForeground} /><Text style={[styles.presetText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{preset.name}</Text></Pressable>; })}</View>}
++    <TextInput accessibilityLabel="Window name" value={window.name} onChangeText={(name) => setWindow((value) => ({ ...value, name }))} placeholder="Name this window" placeholderTextColor={colors.mutedForeground} style={[styles.nameInput, { color: colors.foreground, borderColor: duplicateName ? colors.destructive : colors.border, backgroundColor: colors.background }]} />
++    {duplicateName && <Text accessibilityRole="alert" accessibilityLiveRegion="polite" style={[styles.validationText, { color: colors.destructive }]}>Another Window already uses this name. Choose a unique name.</Text>}
+     <Text style={[styles.label, { color: colors.mutedForeground }]}>WINDOW TYPE</Text><View style={styles.modeRow}><Pressable accessibilityRole="button" accessibilityState={{ selected: scheduled }} accessibilityLabel="Scheduled window" onPress={() => changeMode('scheduled')} style={[styles.modeChoice, MIN_TARGET, { backgroundColor: scheduled ? colors.primary + '18' : colors.background, borderColor: scheduled ? colors.primary : colors.border }]}><Ionicons name="calendar-outline" size={17} color={scheduled ? colors.primary : colors.mutedForeground} /><View style={{ flex: 1 }}><Text style={[styles.modeTitle, { color: colors.foreground }]}>Scheduled</Text><Text style={[styles.modeBody, { color: colors.mutedForeground }]}>Follows your routine.</Text></View></Pressable><Pressable accessibilityRole="button" accessibilityState={{ selected: !scheduled }} accessibilityLabel="On-demand window" onPress={() => changeMode('onDemand')} style={[styles.modeChoice, MIN_TARGET, { backgroundColor: !scheduled ? colors.primary + '18' : colors.background, borderColor: !scheduled ? colors.primary : colors.border }]}><Ionicons name="play-outline" size={17} color={!scheduled ? colors.primary : colors.mutedForeground} /><View style={{ flex: 1 }}><Text style={[styles.modeTitle, { color: colors.foreground }]}>On demand</Text><Text style={[styles.modeBody, { color: colors.mutedForeground }]}>Start it when ready.</Text></View></Pressable></View>
+     {scheduled ? <>
+       <Text style={[styles.label, { color: colors.mutedForeground }]}>WHEN</Text>
+@@ -117,7 +131,7 @@ function WindowEditor({ initial, onSave, onDelete, onClose }: { initial?: GateWi
+         <Pressable accessibilityRole="button" accessibilityLabel={`End time, ${formatGateHour(window.endHour, window.endMinute)}`} onPress={() => setPicker('end')} style={[styles.timeChoice, { backgroundColor: colors.background, borderColor: colors.border }]}><Text style={[styles.timeLabel, { color: colors.mutedForeground }]}>END</Text><Text style={[styles.timeChoiceText, { color: colors.foreground }]}>{formatGateHour(window.endHour, window.endMinute)}</Text><Ionicons name="chevron-down" size={14} color={colors.primary} /></Pressable>
+       </View>
+       <Text style={[styles.label, { color: colors.mutedForeground }]}>REPEAT</Text>
+-      <View style={[styles.days, { flexWrap: 'wrap', justifyContent: 'flex-start' }]}>{DAY_OPTIONS.map(({ label, name, id }) => { const selected = window.days.includes(id); return <View key={id} style={{ width: '25%', alignItems: 'center', marginBottom: 8 }}><Pressable accessibilityRole="checkbox" accessibilityLabel={name} accessibilityState={{ checked: selected }} onPress={() => toggleDay(id)} style={[styles.day, { width: 44, height: 44, borderRadius: 22, backgroundColor: selected ? colors.primary : colors.background, borderColor: selected ? colors.primary : colors.border }]}><Text style={[styles.dayText, { color: selected ? colors.primaryForeground : colors.mutedForeground }]}>{label}</Text></Pressable></View>; })}</View>
++      <SevenChoiceSelector options={DAY_OPTIONS} selectionMode="multiple" selectedValues={window.days} onSelectionChange={(days) => setWindow((value) => ({ ...value, days }))} accentColor={colors.primary} selectedTextColor={colors.primaryForeground} textColor={colors.mutedForeground} borderColor={colors.border} backgroundColor={colors.background} accessibilityLabel="Repeat days" />
+       {!window.days.length && <Text accessibilityRole="alert" style={[styles.validationText, { color: colors.destructive }]}>Choose at least one day.</Text>}
+     </> : <>
+       <Text style={[styles.label, { color: colors.mutedForeground }]}>SESSION LENGTH</Text>
+@@ -281,6 +295,13 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
+     }
+   };
+   const save = async (window: GateWindow) => {
++    const currentWindow = windowsRef.current.find((item) => item.id === window.id);
++    const isNewOrRenamed = !currentWindow
++      || gateWindowNameKey(currentWindow.name) !== gateWindowNameKey(window.name);
++    if (isNewOrRenamed && isGateWindowNameTaken(window.name, windowsRef.current, window.id)) {
++      presentNotice('Another Window already uses this name. Choose a unique name.');
++      return false;
++    }
+     const saved = await commitWindows((current) => {
+       const next = current.some((item) => item.id === window.id)
+         ? current.map((item) => item.id === window.id ? window : item)
+@@ -348,7 +369,7 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
+   const selectedAppSignature = Array.from(new Set(windows.flatMap((window) => window.appIds))).sort().join('\u001f');
+   const selectedAppIds = useMemo(() => selectedAppSignature ? selectedAppSignature.split('\u001f') : [], [selectedAppSignature]);
+   const mutationsBlocked = saving || loadState !== 'ready';
+-  return <View style={[styles.root, { backgroundColor: 'transparent', paddingTop: topPad }]}>{(creating || editing) && <WindowEditor initial={editing} onSave={save} onDelete={editing ? () => remove(editing) : undefined} onClose={() => { setCreating(false); setEditing(undefined); }} />}{showUsage && <ProtectedUsageSheet appIds={selectedAppIds} onClose={() => setShowUsage(false)} />}
++  return <View style={[styles.root, { backgroundColor: 'transparent', paddingTop: topPad }]}>{(creating || editing) && <WindowEditor initial={editing} existingWindows={windows} onSave={save} onDelete={editing ? () => remove(editing) : undefined} onClose={() => { setCreating(false); setEditing(undefined); }} />}{showUsage && <ProtectedUsageSheet appIds={selectedAppIds} onClose={() => setShowUsage(false)} />}
+     {!embedded && <View style={styles.header}><View style={{ flex: 1 }}><GateSwitcher active="windows" /><Text style={[styles.headerSub, { color: colors.mutedForeground }]}>{loadState === 'failed' ? 'Editing is paused to protect your saved configuration.' : windows.length ? `${windows.length} window${windows.length === 1 ? '' : 's'} saved` : 'Plan focused time before native protection is connected.'}</Text></View><Pressable accessibilityRole="button" accessibilityLabel="Create a window" accessibilityState={{ disabled: mutationsBlocked, busy: saving }} disabled={mutationsBlocked} onPress={() => setCreating(true)} style={[styles.add, { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.capsule, backgroundColor: colors.primary, opacity: mutationsBlocked ? OPACITY.disabled : 1 }]}><Ionicons name="add" size={22} color={colors.primaryForeground} /></Pressable></View>}
+     <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + (embedded ? CONTROL.tabContentInset : SPACE.xxl) }]} showsVerticalScrollIndicator={false}><View style={[styles.hero, { backgroundColor: statusCard.color + '13', borderColor: statusCard.color + '66' }]}><View style={[styles.heroIcon, { backgroundColor: statusCard.color + '1D' }]}><Ionicons name={statusCard.icon} size={24} color={accentText} /></View><View style={{ flex: 1 }}><Text style={[styles.heroEyebrow, { color: accentText }]}>{statusCard.eyebrow}</Text><Text style={[styles.heroTitle, { color: colors.foreground }]}>{statusCard.title}</Text><Text style={[styles.heroBody, { color: colors.mutedForeground }]}>{statusCard.body}</Text></View></View>
+       {notice && <View accessibilityRole="alert" accessibilityLiveRegion="polite" style={[styles.inlineNotice, { backgroundColor: (notice.tone === 'error' ? colors.destructive : colors.primary) + '12', borderColor: (notice.tone === 'error' ? colors.destructive : colors.primary) + '66' }]}><Ionicons name={notice.tone === 'error' ? 'alert-circle-outline' : 'information-circle-outline'} size={19} color={notice.tone === 'error' ? colors.destructive : accentText} /><Text style={[styles.inlineNoticeText, { color: colors.foreground }]}>{notice.message}</Text><Pressable accessibilityRole="button" accessibilityLabel="Dismiss message" onPress={clearNotice} style={ICON_TARGET}><Ionicons name="close" size={17} color={colors.mutedForeground} /></Pressable></View>}
+@@ -359,13 +380,14 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
+         <Text style={[styles.section, { color: colors.mutedForeground }]}>YOUR WINDOWS</Text>
+         {statuses.map(({ window, status }) => {
+           const onDemand = window.mode === 'onDemand';
++          const displayName = gateWindowDisplayName(window, windows);
+           const skipAvailable = canToggleGateWindowSkip(window, now);
+           const appCount = `${window.appIds.length || 'No'} app${window.appIds.length === 1 ? '' : 's'} selected`;
+           const description = status.active
+             ? status.unbounded ? `On demand · ${formatMinutes(Math.floor(status.elapsedSeconds / 60))} elapsed` : `${status.manual ? 'On-demand session' : 'Schedule active'} · ${formatCountdown(status.remainingSeconds)} left`
+             : status.completedToday && onDemand ? `Finished today · ${formatMinutes(window.protectedMinutesByDate?.[gateDateKey(now)] ?? 0)} recorded`
+-            : status.skippedToday ? 'Skipped today'
+-            : gateWindowSchedule(window);
++            : status.skippedToday ? `Skipped today · ${gateWindowDescriptor(window)}`
++            : gateWindowDescriptor(window);
+           const helper = onDemand
+             ? status.active ? `${appCount} · ${status.unbounded ? 'end it when you are finished' : 'countdown is live'}` : `${appCount} · ${status.completedToday ? 'ready when you need it again' : 'start when you choose'}`
+             : status.skippedToday ? skipAvailable ? 'This occurrence is skipped · use Restore when needed' : 'Skipped occurrence finished · schedule unchanged'
+@@ -374,15 +396,15 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
+             : `${appCount} · no remaining occurrence today`;
+           return <Animated.View key={window.id} style={toggledWindowId === window.id ? { transform: [{ scale: toggleScale }] } : undefined}>
+             <View style={[styles.window, { backgroundColor: status.active ? colors.primary + '12' : colors.card, borderColor: status.active ? colors.primary : colors.border }]}>
+-              <Pressable accessibilityRole="button" accessibilityLabel={`${window.name}. ${description}. ${helper}`} accessibilityHint="Opens the window editor" accessibilityState={{ disabled: mutationsBlocked, busy: saving }} disabled={mutationsBlocked} onPress={() => setEditing(window)} style={({ pressed }) => [styles.windowSummary, { opacity: mutationsBlocked ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}>
++              <Pressable accessibilityRole="button" accessibilityLabel={`${displayName}. ${description}. ${helper}`} accessibilityHint="Opens the window editor" accessibilityState={{ disabled: mutationsBlocked, busy: saving }} disabled={mutationsBlocked} onPress={() => setEditing(window)} style={({ pressed }) => [styles.windowSummary, { opacity: mutationsBlocked ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}>
+                 <View style={[styles.windowIcon, { backgroundColor: status.active ? colors.primary + '29' : colors.primary + '18' }]}><Ionicons name={status.active ? 'timer' : onDemand ? 'play-outline' : status.skippedToday ? 'pause-outline' : 'calendar-outline'} size={19} color={colors.primary} /></View>
+-                <View style={{ flex: 1, minWidth: 0 }}><Text style={[styles.windowName, { color: colors.foreground }]}>{window.name}</Text><Text style={[styles.windowSchedule, { color: status.skippedToday ? colors.mutedForeground : accentText }]}>{description}</Text></View>
++                <View style={{ flex: 1, minWidth: 0 }}><Text style={[styles.windowName, { color: colors.foreground }]}>{displayName}</Text><Text style={[styles.windowSchedule, { color: status.skippedToday ? colors.mutedForeground : accentText }]}>{description}</Text></View>
+                 <Ionicons name="chevron-forward" size={17} color={colors.mutedForeground} />
+               </Pressable>
+               <View style={[styles.windowFooter, { borderTopColor: colors.border }]}>
+                 <Text style={[styles.windowApps, { color: colors.mutedForeground }]}>{helper}</Text>
+-                {onDemand && <Pressable accessibilityRole="button" accessibilityLabel={status.active ? `End ${window.name}` : `Start ${window.name}`} accessibilityState={{ disabled: mutationsBlocked, busy: saving }} disabled={mutationsBlocked} onPress={() => { void (status.active ? endOnDemand(window) : startOnDemand(window)); }} style={[styles.startOnDemand, MIN_TARGET, { borderColor: colors.primary, backgroundColor: colors.primary + '14', opacity: mutationsBlocked ? OPACITY.disabled : 1 }]}><Ionicons name={status.active ? 'stop' : 'play'} size={13} color={accentText} /><Text style={[styles.startOnDemandText, { color: accentText }]}>{status.active ? 'End' : 'Start'}</Text></Pressable>}
+-                {!onDemand && skipAvailable && <Pressable accessibilityRole="button" accessibilityLabel={status.skippedToday ? `Restore ${window.name}` : `Skip ${window.name} for this occurrence`} accessibilityState={{ disabled: mutationsBlocked, selected: status.skippedToday, busy: saving }} disabled={mutationsBlocked} onPress={() => { void toggleSkipToday(window); }} style={[styles.startOnDemand, MIN_TARGET, { borderColor: colors.primary, backgroundColor: colors.primary + '14', opacity: mutationsBlocked ? OPACITY.disabled : 1 }]}><Ionicons name={status.skippedToday ? 'play' : 'pause'} size={13} color={accentText} /><Text style={[styles.startOnDemandText, { color: accentText }]}>{status.skippedToday ? 'Restore' : 'Skip'}</Text></Pressable>}
++                {onDemand && <Pressable accessibilityRole="button" accessibilityLabel={status.active ? `End ${displayName}` : `Start ${displayName}`} accessibilityState={{ disabled: mutationsBlocked, busy: saving }} disabled={mutationsBlocked} onPress={() => { void (status.active ? endOnDemand(window) : startOnDemand(window)); }} style={[styles.startOnDemand, MIN_TARGET, { borderColor: colors.primary, backgroundColor: colors.primary + '14', opacity: mutationsBlocked ? OPACITY.disabled : 1 }]}><Ionicons name={status.active ? 'stop' : 'play'} size={13} color={accentText} /><Text style={[styles.startOnDemandText, { color: accentText }]}>{status.active ? 'End' : 'Start'}</Text></Pressable>}
++                {!onDemand && skipAvailable && <Pressable accessibilityRole="button" accessibilityLabel={status.skippedToday ? `Restore ${displayName}` : `Skip ${displayName} for this occurrence`} accessibilityState={{ disabled: mutationsBlocked, selected: status.skippedToday, busy: saving }} disabled={mutationsBlocked} onPress={() => { void toggleSkipToday(window); }} style={[styles.startOnDemand, MIN_TARGET, { borderColor: colors.primary, backgroundColor: colors.primary + '14', opacity: mutationsBlocked ? OPACITY.disabled : 1 }]}><Ionicons name={status.skippedToday ? 'play' : 'pause'} size={13} color={accentText} /><Text style={[styles.startOnDemandText, { color: accentText }]}>{status.skippedToday ? 'Restore' : 'Skip'}</Text></Pressable>}
+               </View>
+             </View>
+           </Animated.View>;
+@@ -461,9 +483,6 @@ const styles = StyleSheet.create({
+   timeChoice: { minHeight: 72, flexGrow: 1, flexBasis: 130, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, padding: SPACE.sm },
+   timeLabel: { ...TYPE.eyebrow, marginBottom: SPACE.xxs },
+   timeChoiceText: { ...TYPE.bodyStrong, marginBottom: SPACE.xxs },
+-  days: { flexDirection: 'row', flexWrap: 'wrap' },
+-  day: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.capsule, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+-  dayText: TYPE.bodyStrong,
+   durationRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.xs },
+   durationChoice: { minHeight: CONTROL.minimumTarget, flexGrow: 1, flexBasis: 70, alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.compact, paddingHorizontal: SPACE.xs },
+   durationText: TYPE.bodyStrong,
+diff --git a/artifacts/chain/app/pause-gate-demo.tsx b/artifacts/chain/app/pause-gate-demo.tsx
+index ce5da0c..94b306c 100644
+--- a/artifacts/chain/app/pause-gate-demo.tsx
++++ b/artifacts/chain/app/pause-gate-demo.tsx
+@@ -1,42 +1,58 @@
+-import React, { useEffect, useRef, useState } from 'react';
++import React, { useEffect, useRef, useState } from "react";
+ import {
++  AccessibilityInfo,
++  AppState,
+   Platform,
+   Pressable,
+   ScrollView,
+   StyleSheet,
+   Text,
+   View,
+-} from 'react-native';
+-import { useSafeAreaInsets } from 'react-native-safe-area-context';
++} from "react-native";
++import { useSafeAreaInsets } from "react-native-safe-area-context";
+ import Animated, {
++  cancelAnimation,
++  Easing,
+   useAnimatedStyle,
+-  useSharedValue,
+   useReducedMotion,
+-  withRepeat,
++  useSharedValue,
+   withSequence,
+   withTiming,
+-  cancelAnimation,
+-  Easing,
+-} from 'react-native-reanimated';
+-import { Ionicons } from '@expo/vector-icons';
+-import { router, useLocalSearchParams } from 'expo-router';
+-import { useColors } from '@/hooks/useColors';
+-import { AmbientScreen } from '@/components/AmbientSurface';
+-import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+-import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+-import { playFeedback } from '@/lib/feedback';
+-
+-const COUNTDOWN_SECONDS = 12;
++} from "react-native-reanimated";
++import { Ionicons } from "@expo/vector-icons";
++import { router, useLocalSearchParams } from "expo-router";
++import { AmbientScreen } from "@/components/AmbientSurface";
++import {
++  CONTROL,
++  OPACITY,
++  RADIUS,
++  SPACE,
++  TYPE,
++} from "@/constants/designSystem";
++import { useColors } from "@/hooks/useColors";
++import { playFeedback } from "@/lib/feedback";
++
++const PAUSE_DURATION_MS = 8_000;
++const BREATH_PHASE_MS = 4_000;
++const PAUSE_SECONDS = PAUSE_DURATION_MS / 1_000;
++const FINISH_EXIT_DELAY_MS = 320;
++const ORB_MIN_SCALE = 1;
++const ORB_MAX_SCALE = 1.08;
+ const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+ 
++type BreathPhase = "in" | "out" | "complete";
+ type RouteParam = string | string[] | undefined;
+ 
+ function firstRouteValue(value: RouteParam): string | undefined {
+   return Array.isArray(value) ? value[0] : value;
+ }
+ 
+-function safeRouteText(value: RouteParam, fallback: string, maxLength: number): string {
+-  const normalized = firstRouteValue(value)?.trim().replace(/\s+/g, ' ');
++function safeRouteText(
++  value: RouteParam,
++  fallback: string,
++  maxLength: number,
++): string {
++  const normalized = firstRouteValue(value)?.trim().replace(/\s+/g, " ");
+   return normalized ? normalized.slice(0, maxLength) : fallback;
+ }
+ 
+@@ -45,274 +61,548 @@ function safeRouteColor(value: RouteParam, fallback: string): string {
+   return candidate && HEX_COLOR_PATTERN.test(candidate) ? candidate : fallback;
+ }
+ 
+-function safePositiveInteger(value: RouteParam, maximum: number): number | null {
+-  const candidate = firstRouteValue(value)?.trim();
+-  if (!candidate || !/^\d{1,5}$/.test(candidate)) return null;
+-  const parsed = Number(candidate);
+-  return Number.isSafeInteger(parsed) && parsed >= 0 ? Math.min(parsed, maximum) : null;
++function exitToGate() {
++  router.canGoBack() ? router.back() : router.replace("/(tabs)/gate");
+ }
+ 
+ export default function PauseGateDemoScreen() {
+-  const colors = useColors();
++  const colors = useColors("gate");
+   const insets = useSafeAreaInsets();
++  const reduceMotion = useReducedMotion();
+   const params = useLocalSearchParams<{
+     appName?: string | string[];
+     appIcon?: string | string[];
+     appColor?: string | string[];
+     chainName?: string | string[];
+-    streak?: string | string[];
+-    chainColor?: string | string[];
+-    cadence?: string | string[];
+-    weeklyTarget?: string | string[];
+   }>();
+-  const reduceMotion = useReducedMotion();
+-  const appName = safeRouteText(params.appName, 'Selected app', 48);
++
++  const appName = safeRouteText(params.appName, "Selected app", 48);
+   const iconCandidate = firstRouteValue(params.appIcon)?.trim();
+-  const appIcon = iconCandidate && Object.prototype.hasOwnProperty.call(Ionicons.glyphMap, iconCandidate)
+-    ? iconCandidate as keyof typeof Ionicons.glyphMap
+-    : 'apps-outline';
++  const appIcon =
++    iconCandidate &&
++    Object.prototype.hasOwnProperty.call(Ionicons.glyphMap, iconCandidate)
++      ? (iconCandidate as keyof typeof Ionicons.glyphMap)
++      : "apps-outline";
+   const appColor = safeRouteColor(params.appColor, colors.primary);
+-  const chainName = safeRouteText(params.chainName, 'what matters', 64);
+-  const chainColor = safeRouteColor(params.chainColor, colors.primary);
+-  const cadence = firstRouteValue(params.cadence) === 'weekly' ? 'weekly' : 'daily';
+-  const streak = safePositiveInteger(params.streak, cadence === 'weekly' ? 520 : 3650);
+-  const parsedWeeklyTarget = safePositiveInteger(params.weeklyTarget, 7);
+-  const weeklyTarget = cadence === 'weekly' && parsedWeeklyTarget !== null && parsedWeeklyTarget >= 1
+-    ? parsedWeeklyTarget
+-    : null;
+-  const returnTextColor = readableTextColor(chainColor);
+-  const chainTextColor = readableAccentColor(chainColor, colors.background, 5);
+-
+-  const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
+-  const [ready, setReady] = useState(false);
+-  const [confirmingContinue, setConfirmingContinue] = useState(false);
+-  const deadlineRef = useRef(Date.now() + COUNTDOWN_SECONDS * 1000);
+-  const readyRef = useRef(false);
+-  const continueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++  const chainName = safeRouteText(params.chainName, "what matters", 64);
+ 
+-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+-  const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
++  const deadlineRef = useRef(Date.now() + PAUSE_DURATION_MS);
++  const phaseRef = useRef<BreathPhase>("in");
++  const readyRef = useRef(false);
++  const isExitingRef = useRef(false);
++  const finishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++  const [countdown, setCountdown] = useState(PAUSE_SECONDS);
++  const [phase, setPhase] = useState<BreathPhase>("in");
++  const [ready, setReady] = useState(false);
++  const [isExiting, setIsExiting] = useState(false);
+ 
+-  // One full breath: 4s in, 2s hold, 6s out. The pause lasts exactly one cycle.
+-  const breathScale = useSharedValue(1);
+-  const breathOpacity = useSharedValue(0.5);
++  const orbScale = useSharedValue(ORB_MIN_SCALE);
+   const pauseFill = useSharedValue(0);
+ 
+-  const breathStyle = useAnimatedStyle(() => ({
+-    transform: [{ scale: breathScale.value }],
+-    opacity: breathOpacity.value,
++  const topPad = Platform.OS === "web" ? 67 : insets.top;
++  const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
++
++  const orbAnimatedStyle = useAnimatedStyle(() => ({
++    transform: [{ scale: orbScale.value }],
+   }));
+ 
+   const pauseFillStyle = useAnimatedStyle(() => ({
+-    width: `${pauseFill.value * 100}%`,
++    width: (String(pauseFill.value * 100) + "%") as `${number}%`,
+   }));
+ 
++  // Status is always derived from one absolute deadline. Resuming the app
++  // cannot extend the preview pause or restart the breath.
+   useEffect(() => {
+-    if (reduceMotion || ready) {
+-      cancelAnimation(breathScale);
+-      cancelAnimation(breathOpacity);
+-      breathScale.value = 1;
+-      breathOpacity.value = 0.62;
+-      return;
+-    }
+-    breathScale.value = withRepeat(
+-      withSequence(
+-        withTiming(1.22, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
+-        withTiming(1.22, { duration: 2000, easing: Easing.linear }),
+-        withTiming(0.92, { duration: 6000, easing: Easing.inOut(Easing.ease) }),
+-      ),
+-      -1,
+-    );
+-    breathOpacity.value = withRepeat(
+-      withSequence(
+-        withTiming(0.92, { duration: 4000, easing: Easing.inOut(Easing.ease) }),
+-        withTiming(0.92, { duration: 2000, easing: Easing.linear }),
+-        withTiming(0.34, { duration: 6000, easing: Easing.inOut(Easing.ease) }),
+-      ),
+-      -1,
+-    );
+-    return () => {
+-      cancelAnimation(breathScale);
+-      cancelAnimation(breathOpacity);
++    let statusTimer: ReturnType<typeof setTimeout> | undefined;
++    let mounted = true;
++
++    const remainingFromDeadline = () =>
++      Math.max(0, deadlineRef.current - Date.now());
++
++    const syncAnimations = () => {
++      const remainingMs = remainingFromDeadline();
++      const elapsedMs = PAUSE_DURATION_MS - remainingMs;
++      const elapsedProgress = Math.min(
++        1,
++        Math.max(0, elapsedMs / PAUSE_DURATION_MS),
++      );
++
++      cancelAnimation(pauseFill);
++      pauseFill.value = elapsedProgress;
++      if (!reduceMotion && remainingMs > 0) {
++        pauseFill.value = withTiming(1, {
++          duration: remainingMs,
++          easing: Easing.linear,
++        });
++      }
++
++      cancelAnimation(orbScale);
++      if (reduceMotion || remainingMs === 0) {
++        orbScale.value = ORB_MIN_SCALE;
++      } else if (elapsedMs < BREATH_PHASE_MS) {
++        const inhaleProgress = elapsedMs / BREATH_PHASE_MS;
++        orbScale.value =
++          ORB_MIN_SCALE + (ORB_MAX_SCALE - ORB_MIN_SCALE) * inhaleProgress;
++        orbScale.value = withSequence(
++          withTiming(ORB_MAX_SCALE, {
++            duration: BREATH_PHASE_MS - elapsedMs,
++            easing: Easing.inOut(Easing.ease),
++          }),
++          withTiming(ORB_MIN_SCALE, {
++            duration: BREATH_PHASE_MS,
++            easing: Easing.inOut(Easing.ease),
++          }),
++        );
++      } else {
++        const exhaleProgress = (elapsedMs - BREATH_PHASE_MS) / BREATH_PHASE_MS;
++        orbScale.value =
++          ORB_MAX_SCALE - (ORB_MAX_SCALE - ORB_MIN_SCALE) * exhaleProgress;
++        orbScale.value = withTiming(ORB_MIN_SCALE, {
++          duration: remainingMs,
++          easing: Easing.inOut(Easing.ease),
++        });
++      }
+     };
+-  }, [breathOpacity, breathScale, ready, reduceMotion]);
+ 
+-  // The simulated continue action becomes available over the same calm pause
+-  // as the rings. Returning to Chain is intentionally always available.
+-  useEffect(() => {
+-    if (ready) {
+-      pauseFill.value = 1;
+-    } else if (reduceMotion) {
+-      pauseFill.value = 0;
+-    } else {
+-      pauseFill.value = 0;
+-      pauseFill.value = withTiming(1, {
+-        duration: COUNTDOWN_SECONDS * 1000,
+-        easing: Easing.inOut(Easing.cubic),
+-      });
+-    }
+-    return () => cancelAnimation(pauseFill);
+-  }, [pauseFill, ready, reduceMotion]);
+-
+-  // Derive the countdown from an absolute deadline so backgrounding does not
+-  // make the preview pause drift.
+-  useEffect(() => {
+-    const updateCountdown = () => {
+-      const remainingMs = Math.max(0, deadlineRef.current - Date.now());
+-      const remaining = Math.ceil(remainingMs / 1000);
+-      setCountdown((current) => current === remaining ? current : remaining);
++    const syncStatus = () => {
++      if (!mounted) return;
++
++      const remainingMs = remainingFromDeadline();
++      const nextCountdown = Math.ceil(remainingMs / 1_000);
++      const nextPhase: BreathPhase =
++        remainingMs === 0
++          ? "complete"
++          : remainingMs <= BREATH_PHASE_MS
++            ? "out"
++            : "in";
++
++      setCountdown((current) =>
++        current === nextCountdown ? current : nextCountdown,
++      );
++
++      if (phaseRef.current !== nextPhase) {
++        phaseRef.current = nextPhase;
++        setPhase(nextPhase);
++      }
++
+       if (remainingMs === 0) {
++        cancelAnimation(orbScale);
++        cancelAnimation(pauseFill);
++        orbScale.value = ORB_MIN_SCALE;
++        pauseFill.value = 1;
+         if (!readyRef.current) {
+           readyRef.current = true;
+           setReady(true);
+-          playFeedback('selection');
++          playFeedback("selection");
+         }
+         return;
+       }
+-      countdownTimer = setTimeout(updateCountdown, Math.min(1000, remainingMs));
++
++      if (reduceMotion) {
++        pauseFill.value = (PAUSE_DURATION_MS - remainingMs) / PAUSE_DURATION_MS;
++      }
++
++      const timeUntilCountdownChange =
++        remainingMs - Math.max(0, (nextCountdown - 1) * 1_000);
++      const timeUntilPhaseChange =
++        nextPhase === "in" ? remainingMs - BREATH_PHASE_MS : remainingMs;
++      statusTimer = setTimeout(
++        syncStatus,
++        Math.max(1, Math.min(timeUntilCountdownChange, timeUntilPhaseChange)),
++      );
+     };
+-    let countdownTimer: ReturnType<typeof setTimeout> | undefined;
+-    updateCountdown();
++
++    syncAnimations();
++    syncStatus();
++
++    const appStateSubscription = AppState.addEventListener(
++      "change",
++      (nextState) => {
++        if (statusTimer) {
++          clearTimeout(statusTimer);
++          statusTimer = undefined;
++        }
++        if (nextState === "active") {
++          syncAnimations();
++          syncStatus();
++        }
++      },
++    );
+ 
+     return () => {
+-      if (countdownTimer) clearTimeout(countdownTimer);
++      mounted = false;
++      if (statusTimer) clearTimeout(statusTimer);
++      appStateSubscription.remove();
++      cancelAnimation(orbScale);
++      cancelAnimation(pauseFill);
+     };
+-  }, []);
+-
+-  useEffect(() => () => {
+-    if (continueTimerRef.current) clearTimeout(continueTimerRef.current);
+-  }, []);
+-
+-  const breathPhase = ready
+-    ? 'Pause complete. Continue is now available.'
+-    : countdown > 8
+-      ? 'Breathe in'
+-      : countdown > 6
+-        ? 'Hold'
+-        : 'Let it go';
+-  const streakUnit = cadence === 'weekly' ? 'week' : 'day';
+-  const streakCopy = streak !== null && streak > 0
+-    ? ` · ${streak} ${streakUnit}${streak === 1 ? '' : 's'}`
+-    : '';
+-  const commitmentCopy = cadence === 'weekly' && weeklyTarget
+-    ? `Your target is ${weeklyTarget} check-in${weeklyTarget === 1 ? '' : 's'} this week. Take one breath, then decide without judgment.`
+-    : `You chose to protect ${chainName}. Take one breath, then decide without judgment.`;
++  }, [orbScale, pauseFill, reduceMotion]);
++
++  useEffect(() => {
++    const announcement =
++      phase === "in"
++        ? "Breathe in"
++        : phase === "out"
++          ? "Breathe out"
++          : "Pause complete";
++    void AccessibilityInfo.announceForAccessibility(announcement);
++  }, [phase]);
++
++  useEffect(
++    () => () => {
++      if (finishTimerRef.current) clearTimeout(finishTimerRef.current);
++    },
++    [],
++  );
++
++  function beginExit(): boolean {
++    if (isExitingRef.current) return false;
++    isExitingRef.current = true;
++    setIsExiting(true);
++    return true;
++  }
+ 
+   function handleReturn() {
+-    playFeedback('light');
+-    router.back();
++    if (!beginExit()) return;
++    playFeedback("light");
++    exitToGate();
+   }
+ 
+-  function handleContinue() {
+-    if (!ready || confirmingContinue) return;
+-    playFeedback('light');
+-    setConfirmingContinue(true);
+-    continueTimerRef.current = setTimeout(() => router.back(), reduceMotion ? 900 : 1500);
++  function handleFinish() {
++    if (!readyRef.current || !beginExit()) return;
++    playFeedback("light");
++    finishTimerRef.current = setTimeout(exitToGate, FINISH_EXIT_DELAY_MS);
+   }
+ 
++  const phaseLabel =
++    phase === "in"
++      ? "Breathe in"
++      : phase === "out"
++        ? "Breathe out"
++        : "Pause complete";
++
+   return (
+     <AmbientScreen tone="gate" style={styles.root}>
+-      {/* Close (X) for demo purposes */}
+-      <Pressable
+-        accessibilityRole="button"
+-        accessibilityLabel="Close Gate preview"
+-        onPress={() => router.back()}
+-        style={[styles.closeBtn, { top: topPad + 8, backgroundColor: colors.card, borderColor: colors.border }]}
+-      >
+-        <Ionicons name="close" size={21} color={colors.mutedForeground} />
+-      </Pressable>
+-
+       <ScrollView
+         style={styles.scroll}
+-        contentContainerStyle={[styles.inner, { paddingTop: topPad + 60, paddingBottom: botPad + 32 }]}
++        contentContainerStyle={[
++          styles.scrollContent,
++          {
++            paddingTop: topPad + SPACE.sm,
++            paddingBottom: bottomPad + SPACE.xl,
++          },
++        ]}
++        contentInsetAdjustmentBehavior="never"
+         showsVerticalScrollIndicator={false}
+         alwaysBounceVertical={false}
+       >
+-        {/* App represented by this visual preview */}
+-        <View style={styles.appBlock}>
+-          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[styles.appIconWrap, { backgroundColor: appColor + '22' }]}>
+-            <Ionicons name={appIcon} size={32} color={appColor} />
++        <View style={styles.frame}>
++          <View style={styles.topBar}>
++            <View style={styles.titleBlock}>
++              <Text
++                accessibilityRole="header"
++                style={[styles.eyebrow, { color: colors.primary }]}
++              >
++                GATE PREVIEW
++              </Text>
++              <Text
++                style={[styles.screenTitle, { color: colors.foreground }]}
++              >
++                Make space for a choice
++              </Text>
++            </View>
++            <Pressable
++              accessibilityRole="button"
++              accessibilityLabel="Close Gate preview"
++              accessibilityState={{ busy: isExiting }}
++              hitSlop={8}
++              onPress={handleReturn}
++              style={({ pressed }) => [
++                styles.closeButton,
++                {
++                  backgroundColor: colors.card,
++                  borderColor: colors.border,
++                  opacity: pressed ? OPACITY.pressed : 1,
++                },
++              ]}
++            >
++              <Ionicons
++                accessibilityElementsHidden
++                importantForAccessibility="no"
++                name="close"
++                size={20}
++                color={colors.mutedForeground}
++              />
++            </Pressable>
+           </View>
+-          <Text style={[styles.appName, { color: colors.mutedForeground }]}>
+-            Previewing {appName}
+-          </Text>
+-          <Text style={[styles.ruleLabel, { color: colors.mutedForeground }]}>No app is blocked</Text>
+-        </View>
+ 
+-        {/* Breathing circle */}
+-        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={styles.breathWrap}>
+-          {/* Outer glow rings */}
+-          <Animated.View
+-            style={[
+-              styles.breathRing3,
+-              { borderColor: colors.primary + '15' },
+-              breathStyle,
+-            ]}
+-          />
+-          <Animated.View
+-            style={[
+-              styles.breathRing2,
+-              { borderColor: colors.primary + '30' },
+-              breathStyle,
+-            ]}
+-          />
+-          <Animated.View
++          <View style={styles.previewContext}>
++            <View style={styles.appRow}>
++              <View
++                accessibilityElementsHidden
++                importantForAccessibility="no-hide-descendants"
++                style={[
++                  styles.appIcon,
++                  { backgroundColor: colors.card, borderColor: colors.border },
++                ]}
++              >
++                <Ionicons name={appIcon} size={26} color={appColor} />
++              </View>
++              <View style={styles.appCopy}>
++                <Text
++                  style={[
++                    styles.appOverline,
++                    { color: colors.mutedForeground },
++                  ]}
++                >
++                  PAUSE BEFORE
++                </Text>
++                <Text
++                  style={[styles.appName, { color: colors.foreground }]}
++                >
++                  {appName}
++                </Text>
++              </View>
++            </View>
++
++            <View
++              accessible
++              accessibilityLabel={"Chain: " + chainName}
++              style={[
++                styles.chainChip,
++                {
++                  backgroundColor: colors.primary + "18",
++                  borderColor: colors.primary + "52",
++                },
++              ]}
++            >
++              <Ionicons
++                accessibilityElementsHidden
++                importantForAccessibility="no"
++                name="link-outline"
++                size={13}
++                color={colors.primary}
++              />
++              <Text
++                style={[styles.chainChipText, { color: colors.primary }]}
++              >
++                {"CHAIN · " + chainName}
++              </Text>
++            </View>
++          </View>
++
++          <View style={styles.orbSlot}>
++            <Animated.View
++              style={[
++                styles.orb,
++                {
++                  backgroundColor: colors.primary,
++                  borderColor: colors.primary + "CC",
++                  shadowColor: colors.primary,
++                },
++                orbAnimatedStyle,
++              ]}
++            >
++              {ready ? (
++                <View style={styles.orbComplete}>
++                  <Ionicons
++                    accessibilityElementsHidden
++                    importantForAccessibility="no"
++                    name="checkmark"
++                    size={42}
++                    color={colors.primaryForeground}
++                  />
++                  <Text
++                    adjustsFontSizeToFit
++                    minimumFontScale={0.6}
++                    numberOfLines={2}
++                    style={[
++                      styles.orbPhase,
++                      { color: colors.primaryForeground },
++                    ]}
++                  >
++                    Pause complete
++                  </Text>
++                </View>
++              ) : (
++                <>
++                  <Text
++                    adjustsFontSizeToFit
++                    minimumFontScale={0.6}
++                    numberOfLines={2}
++                    style={[
++                      styles.orbPhase,
++                      { color: colors.primaryForeground },
++                    ]}
++                  >
++                    {phaseLabel}
++                  </Text>
++                  <View
++                    accessibilityElementsHidden
++                    importantForAccessibility="no-hide-descendants"
++                    style={styles.countdownRow}
++                  >
++                    <Text
++                      style={[
++                        styles.countdownNumber,
++                        { color: colors.primaryForeground },
++                      ]}
++                    >
++                      {countdown}
++                    </Text>
++                    <Text
++                      style={[
++                        styles.countdownUnit,
++                        { color: colors.primaryForeground },
++                      ]}
++                    >
++                      sec
++                    </Text>
++                  </View>
++                </>
++              )}
++            </Animated.View>
++          </View>
++
++          <View style={styles.prompt}>
++            <Text
++              style={[styles.promptTitle, { color: colors.foreground }]}
++            >
++              One breath. Then choose.
++            </Text>
++            <Text
++              style={[styles.promptBody, { color: colors.mutedForeground }]}
++            >
++              Notice the impulse without judgment. Returning to Gate is
++              available at any time.
++            </Text>
++          </View>
++
++          <View
+             style={[
+-              styles.breathRing1,
+-              { backgroundColor: colors.primary + '18', borderColor: colors.primary + '50' },
+-              breathStyle,
++              styles.previewNote,
++              { backgroundColor: colors.card, borderColor: colors.border },
+             ]}
+           >
+-            <Ionicons name="pause" size={36} color={colors.primary} />
+-          </Animated.View>
+-        </View>
++            <View
++              accessibilityElementsHidden
++              importantForAccessibility="no-hide-descendants"
++              style={[
++                styles.noteIcon,
++                { backgroundColor: colors.primary + "18" },
++              ]}
++            >
++              <Ionicons
++                name="information-outline"
++                size={17}
++                color={colors.primary}
++              />
++            </View>
++            <View style={styles.noteCopy}>
++              <Text
++                style={[styles.noteTitle, { color: colors.foreground }]}
++              >
++                Visual preview only
++              </Text>
++              <Text
++                style={[styles.noteBody, { color: colors.mutedForeground }]}
++              >
++                Chain does not open, block, or monitor {appName}. Apple app
++                controls are not connected in this build.
++              </Text>
++            </View>
++          </View>
+ 
+-        {/* Chain reminder */}
+-        <View style={styles.messageBlock}>
+-          <Text style={[styles.chainLine, { color: chainTextColor }]}>
+-            {`Protecting ${chainName}${streakCopy}`}
+-          </Text>
+-          <Text style={[styles.questionLine, { color: colors.foreground }]}>
+-            What do you want to do next?
+-          </Text>
+-          <Text accessibilityLiveRegion="polite" style={[styles.breathInstruction, { color: colors.primary }]}>{breathPhase}</Text>
+-          <Text style={[styles.supportingText, { color: colors.mutedForeground }]}>{commitmentCopy}</Text>
+-        </View>
++          <View style={styles.actions}>
++            <Pressable
++              accessibilityRole="button"
++              accessibilityLabel="Return to Gate"
++              accessibilityHint="Available throughout the pause"
++              accessibilityState={{ busy: isExiting }}
++              onPress={handleReturn}
++              style={({ pressed }) => [
++                styles.primaryButton,
++                {
++                  backgroundColor: colors.primary,
++                  borderColor: colors.primary,
++                  opacity: pressed ? OPACITY.pressed : 1,
++                },
++              ]}
++            >
++              <Ionicons
++                accessibilityElementsHidden
++                importantForAccessibility="no"
++                name="arrow-back"
++                size={18}
++                color={colors.primaryForeground}
++              />
++              <Text
++                style={[
++                  styles.primaryButtonText,
++                  { color: colors.primaryForeground },
++                ]}
++              >
++                Return to Gate
++              </Text>
++            </Pressable>
+ 
+-        {/* Action buttons */}
+-        <View style={styles.actions}>
+-          <Pressable
+-            accessibilityRole="button"
+-            accessibilityLabel="Return to Gate"
+-            accessibilityState={{ disabled: confirmingContinue }}
+-            onPress={handleReturn}
+-            disabled={confirmingContinue}
+-            style={({ pressed }) => [
+-              styles.returnBtn,
+-              { backgroundColor: chainColor, borderColor: chainColor, opacity: confirmingContinue ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 },
+-            ]}
+-          >
+-            <Text style={[styles.returnText, { color: returnTextColor }]}>Return to Gate</Text>
+-          </Pressable>
+-
+-          <Pressable
+-            accessibilityRole="button"
+-            accessibilityLabel={ready ? `Continue toward ${appName} in this preview` : 'Continue is available after the pause'}
+-            accessibilityState={{ disabled: !ready || confirmingContinue, busy: confirmingContinue }}
+-            onPress={handleContinue}
+-            disabled={!ready || confirmingContinue}
+-            style={({ pressed }) => [styles.continueBtn, { borderColor: colors.border, backgroundColor: colors.card, opacity: pressed && ready ? OPACITY.pressed : 1 }]}
+-          >
+-            <Animated.View pointerEvents="none" style={[styles.continueFill, { backgroundColor: colors.primary + '24' }, pauseFillStyle]} />
+-            <Text style={[styles.continueText, { color: ready ? colors.foreground : colors.mutedForeground }]}>{confirmingContinue ? 'Choice acknowledged' : ready ? `Continue toward ${appName}` : `Continue in ${countdown}s`}</Text>
+-          </Pressable>
+-        </View>
++            <Pressable
++              accessibilityRole="button"
++              accessibilityLabel={
++                ready
++                  ? "Finish preview"
++                  : "Finish preview, available after the pause"
++              }
++              accessibilityHint={
++                ready
++                  ? "Returns to Gate"
++                  : "Wait for the eight-second pause to complete"
++              }
++              accessibilityState={{
++                disabled: !ready || isExiting,
++                busy: isExiting,
++              }}
++              disabled={!ready || isExiting}
++              onPress={handleFinish}
++              style={({ pressed }) => [
++                styles.secondaryButton,
++                {
++                  backgroundColor: colors.card,
++                  borderColor: ready ? colors.primary + "80" : colors.border,
++                  opacity: pressed ? OPACITY.pressed : 1,
++                },
++              ]}
++            >
++              <Animated.View
++                pointerEvents="none"
++                style={[
++                  styles.pauseFill,
++                  { backgroundColor: colors.primary + "26" },
++                  pauseFillStyle,
++                ]}
++              />
++              <Text
++                style={[
++                  styles.secondaryButtonText,
++                  { color: ready ? colors.foreground : colors.mutedForeground },
++                ]}
++              >
++                {isExiting
++                  ? "Finishing preview…"
++                  : ready
++                    ? "Finish preview"
++                    : "Finish preview · " + countdown + "s"}
++              </Text>
++            </Pressable>
++          </View>
+ 
+-        <View style={[styles.demoTag, { backgroundColor: colors.card, borderColor: colors.border }]}>
+-          <Text style={[styles.demoText, { color: colors.mutedForeground }]}>PREVIEW · NOT COUNTED</Text>
++          <Text
++            style={[styles.footer, { color: colors.mutedForeground }]}
++          >
++            PAUSE GATE · APP CONTROLS NOT CONNECTED
++          </Text>
+         </View>
+       </ScrollView>
+-      {confirmingContinue && <View pointerEvents="none" accessibilityRole="alert" accessibilityLiveRegion="polite" style={[styles.confirmation, { bottom: botPad + SPACE.md, backgroundColor: colors.card, borderColor: colors.primary + '66' }]}><View style={[styles.confirmationIcon, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="checkmark" size={18} color={colors.primary} /></View><View style={{ flex: 1 }}><Text style={[styles.confirmationTitle, { color: colors.foreground }]}>Preview complete</Text><Text style={[styles.confirmationBody, { color: colors.mutedForeground }]}>With native Gate connected, {appName} would open now. Nothing was opened or counted here.</Text></View></View>}
+     </AmbientScreen>
+   );
+ }
+@@ -321,134 +611,225 @@ const styles = StyleSheet.create({
+   root: {
+     flex: 1,
+   },
+-  closeBtn: {
+-    position: 'absolute',
+-    right: SPACE.lg,
+-    zIndex: 10,
++  scroll: {
++    flex: 1,
++  },
++  scrollContent: {
++    flexGrow: 1,
++    alignItems: "center",
++    paddingHorizontal: SPACE.lg,
++  },
++  frame: {
++    width: "100%",
++    maxWidth: 520,
++    flexGrow: 1,
++    gap: SPACE.lg,
++  },
++  topBar: {
++    width: "100%",
++    flexDirection: "row",
++    alignItems: "flex-start",
++    justifyContent: "space-between",
++    gap: SPACE.md,
++  },
++  titleBlock: {
++    flex: 1,
++    gap: SPACE.xxs,
++  },
++  eyebrow: {
++    ...TYPE.eyebrow,
++  },
++  screenTitle: {
++    ...TYPE.modalTitle,
++  },
++  closeButton: {
+     width: CONTROL.minimumTarget,
+     height: CONTROL.minimumTarget,
+     borderRadius: RADIUS.capsule,
+     borderWidth: StyleSheet.hairlineWidth,
+-    alignItems: 'center',
+-    justifyContent: 'center',
++    alignItems: "center",
++    justifyContent: "center",
++    flexShrink: 0,
++  },
++  previewContext: {
++    alignItems: "center",
++    gap: SPACE.sm,
++  },
++  appRow: {
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "center",
++    gap: SPACE.sm,
++    maxWidth: "100%",
++  },
++  appIcon: {
++    width: 52,
++    height: 52,
++    borderRadius: RADIUS.control,
++    borderWidth: StyleSheet.hairlineWidth,
++    alignItems: "center",
++    justifyContent: "center",
++    flexShrink: 0,
+   },
+-  inner: {
+-    flexGrow: 1,
+-    alignItems: 'center',
+-    justifyContent: 'space-between',
+-    paddingHorizontal: SPACE.xl,
+-    gap: SPACE.lg,
++  appCopy: {
++    flexShrink: 1,
++    gap: SPACE.hairline,
+   },
+-  scroll: { flex: 1 },
+-  appBlock: {
+-    alignItems: 'center',
+-    gap: SPACE.xs,
++  appOverline: {
++    ...TYPE.eyebrow,
++    fontSize: 10,
++    lineHeight: 14,
+   },
+-  appIconWrap: {
+-    width: 64,
+-    height: 64,
+-    borderRadius: RADIUS.card,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-  },
+-  appName: TYPE.body,
+-  ruleLabel: TYPE.metadata,
+-  breathWrap: {
+-    width: 200,
+-    height: 200,
++  appName: {
++    ...TYPE.sectionTitle,
++  },
++  chainChip: {
++    maxWidth: "100%",
++    minHeight: 28,
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "center",
++    gap: SPACE.xxs,
++    paddingHorizontal: SPACE.sm,
++    paddingVertical: SPACE.xxs,
++    borderRadius: RADIUS.capsule,
++    borderWidth: StyleSheet.hairlineWidth,
++  },
++  chainChipText: {
++    ...TYPE.eyebrow,
++    fontSize: 10,
++    lineHeight: 14,
++    flexShrink: 1,
++    textAlign: "center",
++  },
++  orbSlot: {
++    height: 198,
++    alignItems: "center",
++    justifyContent: "center",
+     flexShrink: 0,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-  },
+-  breathRing3: {
+-    position: 'absolute',
+-    width: 200,
+-    height: 200,
+-    borderRadius: 100,
+-    borderWidth: 1,
+   },
+-  breathRing2: {
+-    position: 'absolute',
+-    width: 160,
+-    height: 160,
+-    borderRadius: 80,
+-    borderWidth: 1.5,
+-  },
+-  breathRing1: {
+-    width: 120,
+-    height: 120,
+-    borderRadius: 60,
+-    borderWidth: 2,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-  },
+-  messageBlock: {
+-    alignItems: 'center',
++  orb: {
++    width: 180,
++    height: 180,
++    borderRadius: 90,
++    borderWidth: 1,
++    alignItems: "center",
++    justifyContent: "center",
+     gap: SPACE.xs,
++    shadowOffset: { width: 0, height: 10 },
++    shadowOpacity: 0.25,
++    shadowRadius: 28,
++    elevation: 8,
++  },
++  orbComplete: {
++    alignItems: "center",
++    justifyContent: "center",
++    gap: SPACE.xxs,
+   },
+-  chainLine: {
++  orbPhase: {
+     ...TYPE.sectionTitle,
+-    textAlign: 'center',
++    textAlign: "center",
++  },
++  countdownRow: {
++    flexDirection: "row",
++    alignItems: "baseline",
++    gap: SPACE.xxs,
++  },
++  countdownNumber: {
++    fontSize: 34,
++    lineHeight: 39,
++    fontFamily: "Inter_700Bold",
++    letterSpacing: -0.8,
++  },
++  countdownUnit: {
++    ...TYPE.metadata,
++    opacity: 0.78,
+   },
+-  questionLine: {
++  prompt: {
++    alignItems: "center",
++    gap: SPACE.xs,
++  },
++  promptTitle: {
+     ...TYPE.modalTitle,
+-    textAlign: 'center',
++    textAlign: "center",
++  },
++  promptBody: {
++    ...TYPE.body,
++    maxWidth: 390,
++    textAlign: "center",
++  },
++  previewNote: {
++    width: "100%",
++    flexDirection: "row",
++    alignItems: "flex-start",
++    gap: SPACE.sm,
++    borderRadius: RADIUS.card,
++    borderWidth: StyleSheet.hairlineWidth,
++    padding: SPACE.md,
++  },
++  noteIcon: {
++    width: 30,
++    height: 30,
++    borderRadius: RADIUS.capsule,
++    alignItems: "center",
++    justifyContent: "center",
++    flexShrink: 0,
++  },
++  noteCopy: {
++    flex: 1,
++    gap: SPACE.xxs,
++  },
++  noteTitle: {
++    ...TYPE.bodyStrong,
++  },
++  noteBody: {
++    ...TYPE.caption,
+   },
+-  breathInstruction: { ...TYPE.sectionTitle, marginTop: SPACE.hairline, textAlign: 'center' },
+-  supportingText: { ...TYPE.caption, fontFamily: 'Inter_500Medium', textAlign: 'center', marginTop: SPACE.xxs, maxWidth: 320 },
+   actions: {
+-    width: '100%',
++    width: "100%",
+     gap: SPACE.sm,
+   },
+-  returnBtn: {
+-    width: '100%',
++  primaryButton: {
++    width: "100%",
+     minHeight: CONTROL.prominentButtonHeight,
+-    paddingVertical: SPACE.md,
++    flexDirection: "row",
++    alignItems: "center",
++    justifyContent: "center",
++    gap: SPACE.xs,
++    paddingHorizontal: SPACE.md,
++    paddingVertical: SPACE.sm,
+     borderRadius: RADIUS.capsule,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+     borderWidth: 1,
+   },
+-  returnText: {
++  primaryButtonText: {
+     ...TYPE.sectionTitle,
+-    textAlign: 'center',
+-    paddingHorizontal: SPACE.md,
++    textAlign: "center",
+   },
+-  continueBtn: {
+-    width: '100%',
+-    alignItems: 'center',
+-    justifyContent: 'center',
++  secondaryButton: {
++    width: "100%",
+     minHeight: CONTROL.prominentButtonHeight,
++    alignItems: "center",
++    justifyContent: "center",
++    overflow: "hidden",
++    paddingHorizontal: SPACE.md,
++    paddingVertical: SPACE.sm,
+     borderRadius: RADIUS.capsule,
+     borderWidth: StyleSheet.hairlineWidth,
+-    overflow: 'hidden',
+   },
+-  continueFill: { position: 'absolute', top: 0, bottom: 0, left: 0, borderRadius: RADIUS.capsule },
+-  continueText: {
+-    ...TYPE.bodyStrong,
+-    paddingHorizontal: SPACE.md,
+-    textAlign: 'center',
++  pauseFill: {
++    position: "absolute",
++    top: 0,
++    bottom: 0,
++    left: 0,
+   },
+-  demoTag: {
+-    paddingHorizontal: SPACE.md,
+-    paddingVertical: SPACE.xs,
+-    borderRadius: RADIUS.capsule,
+-    borderWidth: StyleSheet.hairlineWidth,
++  secondaryButtonText: {
++    ...TYPE.bodyStrong,
++    textAlign: "center",
+   },
+-  demoText: TYPE.metadata,
+-  confirmation: {
+-    position: 'absolute',
+-    left: SPACE.lg,
+-    right: SPACE.lg,
+-    minHeight: 72,
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    gap: SPACE.sm,
+-    borderWidth: StyleSheet.hairlineWidth,
+-    borderRadius: RADIUS.card,
+-    padding: SPACE.md,
++  footer: {
++    ...TYPE.eyebrow,
++    alignSelf: "center",
++    textAlign: "center",
++    opacity: 0.72,
+   },
+-  confirmationIcon: { width: 36, height: 36, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
+-  confirmationTitle: TYPE.bodyStrong,
+-  confirmationBody: { ...TYPE.caption, marginTop: SPACE.hairline },
+ });
+diff --git a/artifacts/chain/components/ui/SevenChoiceSelector.tsx b/artifacts/chain/components/ui/SevenChoiceSelector.tsx
+new file mode 100644
+index 0000000..13f52a7
+--- /dev/null
++++ b/artifacts/chain/components/ui/SevenChoiceSelector.tsx
+@@ -0,0 +1,142 @@
++import React from 'react';
++import { ScrollView, StyleSheet, Text, View } from 'react-native';
++import AnimatedPressable from '@/components/AnimatedPressable';
++import { CONTROL, RADIUS, TYPE } from '@/constants/designSystem';
++
++export type SevenChoiceOption = {
++  label: string;
++  value: number;
++  accessibilityLabel: string;
++};
++
++export type SevenChoiceSelectorProps = {
++  options: readonly SevenChoiceOption[];
++  selectionMode: 'single' | 'multiple';
++  selectedValues: readonly number[];
++  onSelectionChange: (selectedValues: number[]) => void;
++  accentColor: string;
++  selectedTextColor: string;
++  textColor: string;
++  borderColor: string;
++  backgroundColor: string;
++  accessibilityLabel: string;
++};
++
++const CHOICE_COUNT = 7;
++const MINIMUM_ROW_WIDTH = CONTROL.minimumTarget * CHOICE_COUNT;
++
++/**
++ * A compact seven-value selector. Each 36pt circle sits inside a 44pt native
++ * press target, while the row only becomes horizontally scrollable below the
++ * minimum width needed by those targets.
++ */
++export function SevenChoiceSelector({
++  options,
++  selectionMode,
++  selectedValues,
++  onSelectionChange,
++  accentColor,
++  selectedTextColor,
++  textColor,
++  borderColor,
++  backgroundColor,
++  accessibilityLabel,
++}: SevenChoiceSelectorProps) {
++  if (options.length !== CHOICE_COUNT) {
++    throw new Error(`SevenChoiceSelector requires exactly ${CHOICE_COUNT} options.`);
++  }
++
++  const selected = new Set(selectedValues);
++
++  function select(value: number) {
++    if (selectionMode === 'single') {
++      if (!selected.has(value) || selectedValues.length !== 1) {
++        onSelectionChange([value]);
++      }
++      return;
++    }
++
++    const nextSelected = new Set(selectedValues);
++    if (nextSelected.has(value)) nextSelected.delete(value);
++    else nextSelected.add(value);
++
++    // Always emit values in visual order so Sunday and other trailing choices
++    // remain stable after a multiple-selection update.
++    onSelectionChange(options.filter((option) => nextSelected.has(option.value)).map((option) => option.value));
++  }
++
++  return (
++    <View
++      accessibilityLabel={accessibilityLabel}
++      accessibilityRole={selectionMode === 'single' ? 'radiogroup' : undefined}
++    >
++      <ScrollView
++        horizontal
++        alwaysBounceHorizontal={false}
++        directionalLockEnabled
++        nestedScrollEnabled
++        showsHorizontalScrollIndicator={false}
++        contentContainerStyle={[styles.row, { minWidth: MINIMUM_ROW_WIDTH }]}
++      >
++        {options.map((option) => {
++          const isSelected = selected.has(option.value);
++          return (
++            <AnimatedPressable
++              key={option.value}
++              accessibilityRole={selectionMode === 'single' ? 'radio' : 'checkbox'}
++              accessibilityLabel={option.accessibilityLabel}
++              accessibilityState={{ checked: isSelected }}
++              onPress={() => select(option.value)}
++              scaleTo={0.92}
++              containerStyle={styles.target}
++              style={[
++                styles.circle,
++                {
++                  backgroundColor: isSelected ? accentColor : backgroundColor,
++                  borderColor: isSelected ? accentColor : borderColor,
++                  borderWidth: isSelected ? 2 : StyleSheet.hairlineWidth,
++                },
++              ]}
++            >
++              <Text
++                adjustsFontSizeToFit
++                minimumFontScale={0.75}
++                numberOfLines={1}
++                style={[styles.label, { color: isSelected ? selectedTextColor : textColor }]}
++              >
++                {option.label}
++              </Text>
++            </AnimatedPressable>
++          );
++        })}
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  row: {
++    flexGrow: 1,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'space-between',
++  },
++  target: {
++    width: CONTROL.minimumTarget,
++    height: CONTROL.minimumTarget,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  circle: {
++    width: 36,
++    height: 36,
++    borderRadius: RADIUS.capsule,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  label: {
++    ...TYPE.bodyStrong,
++    maxWidth: 30,
++    textAlign: 'center',
++  },
++});
+diff --git a/artifacts/chain/domain/gateWindows.ts b/artifacts/chain/domain/gateWindows.ts
+index f2d42f7..ce6f0a9 100644
+--- a/artifacts/chain/domain/gateWindows.ts
++++ b/artifacts/chain/domain/gateWindows.ts
+@@ -33,6 +33,8 @@ export type GateWindowsState = {
+   archivedMinutesByWindow: GateWindowHistoryByWindow;
+ };
+ 
++type NamedGateWindow = Pick<GateWindow, 'id' | 'name'>;
++
+ export const GATE_WINDOWS_SCHEMA_VERSION = 2;
+ 
+ const clampInteger = (value: unknown, minimum: number, maximum: number, fallback: number) =>
+@@ -40,6 +42,49 @@ const clampInteger = (value: unknown, minimum: number, maximum: number, fallback
+     ? Math.max(minimum, Math.min(maximum, Math.round(value)))
+     : fallback;
+ 
++/** Canonical display form used when comparing or saving a Window name. */
++export function normalizeGateWindowName(name: string) {
++  return name.normalize('NFKC').replace(/\s+/gu, ' ').trim();
++}
++
++/** A locale-stable approximation of Unicode default case folding for name keys. */
++export function gateWindowNameKey(name: string) {
++  return normalizeGateWindowName(name)
++    .toLocaleLowerCase('en-US')
++    // Lowercasing alone does not fold these common multi/contextual forms.
++    .replace(/\u00df/gu, 'ss')
++    .replace(/\u03c2/gu, '\u03c3')
++    .normalize('NFKC');
++}
++
++export function isGateWindowNameTaken(
++  name: string,
++  windows: readonly NamedGateWindow[],
++  excludedWindowId?: string,
++) {
++  const key = gateWindowNameKey(name);
++  if (!key) return false;
++  return windows.some((window) => (
++    window.id !== excludedWindowId && gateWindowNameKey(window.name) === key
++  ));
++}
++
++/** Return the base name, or its first free human-friendly suffix starting at 2. */
++export function nextAvailableGateWindowName(
++  baseName: string,
++  windows: readonly NamedGateWindow[],
++  excludedWindowId?: string,
++) {
++  const base = normalizeGateWindowName(baseName);
++  if (!base || !isGateWindowNameTaken(base, windows, excludedWindowId)) return base;
++
++  for (let suffix = 2; suffix < Number.MAX_SAFE_INTEGER; suffix += 1) {
++    const candidate = `${base} ${suffix}`;
++    if (!isGateWindowNameTaken(candidate, windows, excludedWindowId)) return candidate;
++  }
++  return base;
++}
++
+ export function isValidGateDateKey(value: string) {
+   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+   if (!match) return false;
+@@ -78,6 +123,7 @@ export function normalizeGateWindow(value: unknown): GateWindow | undefined {
+     : undefined;
+   return {
+     id: window.id.trim(),
++    // Keep inherited display data intact; canonicalize only explicit editor saves.
+     name: window.name.trim() || 'Protection window',
+     startHour: clampInteger(window.startHour, 0, 23, 9),
+     startMinute: clampInteger(window.startMinute, 0, 59, 0),
+@@ -189,6 +235,55 @@ export const formatGateWindowMinutes = (minutes: number) => minutes >= 60
+   ? `${Math.floor(minutes / 60)}h${minutes % 60 ? ` ${minutes % 60}m` : ''}`
+   : `${minutes}m`;
+ 
++const GATE_WINDOW_DAY_OPTIONS = [
++  { value: 1, shortLabel: 'Mon' },
++  { value: 2, shortLabel: 'Tue' },
++  { value: 3, shortLabel: 'Wed' },
++  { value: 4, shortLabel: 'Thu' },
++  { value: 5, shortLabel: 'Fri' },
++  { value: 6, shortLabel: 'Sat' },
++  { value: 0, shortLabel: 'Sun' },
++] as const;
++
++export function gateWindowDescriptor(window: GateWindow) {
++  if (window.mode === 'onDemand') {
++    return window.onDemandDurationMinutes === null
++      ? 'On demand · Open-ended'
++      : `On demand · ${formatGateWindowMinutes(window.onDemandDurationMinutes ?? 60)}`;
++  }
++
++  const selectedDays = new Set(window.days.filter((day) => Number.isInteger(day) && day >= 0 && day <= 6));
++  const everyDay = GATE_WINDOW_DAY_OPTIONS.every(({ value }) => selectedDays.has(value));
++  const weekdays = selectedDays.size === 5
++    && GATE_WINDOW_DAY_OPTIONS.slice(0, 5).every(({ value }) => selectedDays.has(value));
++  const repeat = everyDay
++    ? 'Every day'
++    : weekdays
++      ? 'Weekdays'
++      : GATE_WINDOW_DAY_OPTIONS
++        .filter(({ value }) => selectedDays.has(value))
++        .map(({ shortLabel }) => shortLabel)
++        .join(', ') || 'No days';
++  return `${repeat} · ${formatGateHour(window.startHour, window.startMinute)}–${formatGateHour(window.endHour, window.endMinute)}`;
++}
++
++/**
++ * Disambiguate only inherited duplicates that would otherwise render identically.
++ * The stored name is never changed and collection order defines the stable ordinal.
++ */
++export function gateWindowDisplayName(window: GateWindow, windows: readonly GateWindow[]) {
++  const key = gateWindowNameKey(window.name);
++  const descriptor = gateWindowDescriptor(window);
++  const matching = windows.filter((candidate) => (
++    gateWindowNameKey(candidate.name) === key && gateWindowDescriptor(candidate) === descriptor
++  ));
++  if (matching.length < 2) return window.name;
++
++  let index = matching.indexOf(window);
++  if (index < 0) index = matching.findIndex((candidate) => candidate.id === window.id);
++  return index < 0 ? window.name : `${window.name} · Window ${index + 1}`;
++}
++
+ export function gateWindowSchedule(window: GateWindow) {
+   if (window.mode === 'onDemand') {
+     return window.onDemandDurationMinutes === null
+diff --git a/artifacts/chain/lib/gateWindows.ts b/artifacts/chain/lib/gateWindows.ts
+index 45de838..e7ed48e 100644
+--- a/artifacts/chain/lib/gateWindows.ts
++++ b/artifacts/chain/lib/gateWindows.ts
+@@ -17,9 +17,15 @@ export {
+   formatGateHour,
+   formatGateWindowMinutes,
+   gateDateKey,
++  gateWindowDescriptor,
++  gateWindowDisplayName,
+   gateWindowDurationMinutes,
++  gateWindowNameKey,
+   gateWindowSchedule,
+   getGateWindowStatus,
++  isGateWindowNameTaken,
++  nextAvailableGateWindowName,
++  normalizeGateWindowName,
+   removeGateWindow,
+   startGateWindowOnDemand,
+   endGateWindowOnDemand,
+diff --git a/artifacts/chain/tests/gate-window-names.test.mjs b/artifacts/chain/tests/gate-window-names.test.mjs
+new file mode 100644
+index 0000000..bb78208
+--- /dev/null
++++ b/artifacts/chain/tests/gate-window-names.test.mjs
+@@ -0,0 +1,132 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++
++import {
++  gateWindowDescriptor,
++  gateWindowDisplayName,
++  gateWindowNameKey,
++  isGateWindowNameTaken,
++  nextAvailableGateWindowName,
++  normalizeGateWindowName,
++} from '../domain/gateWindows.ts';
++
++function makeWindow(overrides = {}) {
++  return {
++    id: 'deep-work',
++    name: 'Deep work',
++    startHour: 9,
++    startMinute: 0,
++    endHour: 11,
++    endMinute: 0,
++    days: [1, 2, 3, 4, 5],
++    appIds: [],
++    mode: 'scheduled',
++    ...overrides,
++  };
++}
++
++test('Window names normalize Unicode compatibility forms and contiguous whitespace', () => {
++  assert.equal(normalizeGateWindowName('\tＤｅｅｐ\u00a0　work\n'), 'Deep work');
++  assert.equal(normalizeGateWindowName('  Cafe\u0301  '), 'Café');
++  assert.equal(normalizeGateWindowName('Morning\n\t reset'), 'Morning reset');
++  assert.equal(normalizeGateWindowName('   '), '');
++});
++
++test('Window name keys use normalized, locale-stable case folding', () => {
++  assert.equal(gateWindowNameKey(' DEEP\u00a0WORK '), gateWindowNameKey('ｄｅｅｐ work'));
++  assert.equal(gateWindowNameKey('Straße'), gateWindowNameKey('STRASSE'));
++  assert.equal(gateWindowNameKey('ΟΣ'), gateWindowNameKey('οσ'));
++  assert.equal(gateWindowNameKey('Morning reset'), 'morning reset');
++});
++
++test('taken-name checks honor normalization and exclude only the edited Window id', () => {
++  const windows = [
++    makeWindow({ id: 'first', name: 'Deep work' }),
++    makeWindow({ id: 'legacy-copy', name: 'ＤＥＥＰ　ＷＯＲＫ' }),
++    makeWindow({ id: 'other', name: 'Wind down' }),
++  ];
++
++  assert.equal(isGateWindowNameTaken(' deep\tWORK ', windows), true);
++  assert.equal(isGateWindowNameTaken('deep work', windows, 'first'), true);
++  assert.equal(isGateWindowNameTaken('deep work', windows, 'legacy-copy'), true);
++  assert.equal(isGateWindowNameTaken('wind down', windows, 'other'), false);
++  assert.equal(isGateWindowNameTaken('   ', windows), false);
++});
++
++test('next available Window names keep the base or fill the first free suffix', () => {
++  assert.equal(nextAvailableGateWindowName('  Deep\twork  ', []), 'Deep work');
++  assert.equal(nextAvailableGateWindowName('Deep work', [makeWindow()]), 'Deep work 2');
++
++  const withGap = [
++    makeWindow({ id: 'base', name: 'DEEP WORK' }),
++    makeWindow({ id: 'two', name: 'Deep\u00a0work 2' }),
++    makeWindow({ id: 'four', name: 'Ｄｅｅｐ　ｗｏｒｋ　４' }),
++  ];
++  assert.equal(nextAvailableGateWindowName('Deep work', withGap), 'Deep work 3');
++  assert.equal(nextAvailableGateWindowName('Deep work', withGap, 'base'), 'Deep work');
++
++  const suffixWithoutBase = [makeWindow({ id: 'two', name: 'Deep work 2' })];
++  assert.equal(nextAvailableGateWindowName('Deep work', suffixWithoutBase), 'Deep work');
++  assert.equal(nextAvailableGateWindowName('   ', withGap), '');
++});
++
++test('scheduled Window descriptors summarize weekday, daily and custom repeats', () => {
++  assert.equal(
++    gateWindowDescriptor(makeWindow()),
++    'Weekdays · 9:00 AM–11:00 AM',
++  );
++  assert.equal(
++    gateWindowDescriptor(makeWindow({ days: [0, 6, 5, 4, 3, 2, 1] })),
++    'Every day · 9:00 AM–11:00 AM',
++  );
++  assert.equal(
++    gateWindowDescriptor(makeWindow({ days: [0, 3, 1, 3], startHour: 22, startMinute: 30, endHour: 0, endMinute: 5 })),
++    'Mon, Wed, Sun · 10:30 PM–12:05 AM',
++  );
++  assert.equal(
++    gateWindowDescriptor(makeWindow({ days: [] })),
++    'No days · 9:00 AM–11:00 AM',
++  );
++});
++
++test('on-demand Window descriptors distinguish bounded and open-ended sessions', () => {
++  assert.equal(
++    gateWindowDescriptor(makeWindow({ mode: 'onDemand', days: [], onDemandDurationMinutes: 90 })),
++    'On demand · 1h 30m',
++  );
++  assert.equal(
++    gateWindowDescriptor(makeWindow({ mode: 'onDemand', days: [], onDemandDurationMinutes: null })),
++    'On demand · Open-ended',
++  );
++  assert.equal(
++    gateWindowDescriptor(makeWindow({ mode: 'onDemand', days: [], onDemandDurationMinutes: undefined })),
++    'On demand · 1h',
++  );
++});
++
++test('legacy duplicates with the same name key and descriptor receive stable display ordinals', () => {
++  const first = makeWindow({ id: 'first', name: 'Deep work' });
++  const second = makeWindow({ id: 'second', name: 'DEEP\u00a0WORK' });
++  const third = makeWindow({ id: 'third', name: 'Deep work' });
++  const windows = [first, second, third];
++  const before = structuredClone(windows);
++
++  assert.equal(gateWindowDisplayName(first, windows), 'Deep work · Window 1');
++  assert.equal(gateWindowDisplayName(second, windows), 'DEEP\u00a0WORK · Window 2');
++  assert.equal(gateWindowDisplayName(third, windows), 'Deep work · Window 3');
++  assert.equal(gateWindowDisplayName({ ...second }, windows), 'DEEP\u00a0WORK · Window 2');
++  assert.deepEqual(windows, before);
++});
++
++test('display ordinals do not combine same-name Windows with different descriptors', () => {
++  const weekdays = makeWindow({ id: 'weekdays' });
++  const weekend = makeWindow({ id: 'weekend', days: [6, 0] });
++  const differentlyNamed = makeWindow({ id: 'other', name: 'Morning reset' });
++  const exactCopy = makeWindow({ id: 'copy' });
++
++  assert.equal(gateWindowDisplayName(weekend, [weekdays, weekend]), 'Deep work');
++  assert.equal(gateWindowDisplayName(differentlyNamed, [weekdays, differentlyNamed]), 'Morning reset');
++  assert.equal(gateWindowDisplayName(weekdays, [weekdays, weekend, exactCopy]), 'Deep work · Window 1');
++  assert.equal(gateWindowDisplayName(exactCopy, [weekdays, weekend, exactCopy]), 'Deep work · Window 2');
++  assert.equal(gateWindowDisplayName(exactCopy, [exactCopy, weekdays]), 'Deep work · Window 1');
++});

@@ -1,0 +1,507 @@
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index 000e23d..1548eaf 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -247,7 +247,11 @@ function ChainIntervention({
+           <Text style={[TYPE.cardTitle, { color: colors.foreground }]} numberOfLines={2}>
+             {recovering ? `One miss does not end ${chain.name}.` : taskText ?? `Keep ${chain.name} moving.`}
+           </Text>
+-          <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>
++          <Text
++            ellipsizeMode="tail"
++            numberOfLines={2}
++            style={[TYPE.caption, { color: colors.mutedForeground, flexShrink: 1 }]}
++          >
+             {recovering
+               ? `${chain.minimumLabel} is enough to return today.`
+               : `On a hard day, ${chain.minimumLabel} still keeps the promise.`}
+@@ -255,7 +259,7 @@ function ChainIntervention({
+         </View>
+       </View>
+       <AppButton
+-        label={`Log minimum · ${chain.minimumLabel}`}
++        label="Log minimum"
+         icon="leaf-outline"
+         onPress={onMinimum}
+         accentColor={chain.color}
+diff --git a/artifacts/chain/app/(tabs)/plan.tsx b/artifacts/chain/app/(tabs)/plan.tsx
+index 86edf9b..b0b7c3a 100644
+--- a/artifacts/chain/app/(tabs)/plan.tsx
++++ b/artifacts/chain/app/(tabs)/plan.tsx
+@@ -1,4 +1,4 @@
+-import React, { useCallback, useEffect, useRef, useState } from 'react';
++import React, { useEffect, useRef, useState } from 'react';
+ import {
+   Alert,
+   Animated,
+@@ -19,7 +19,7 @@ import { useReducedMotion } from 'react-native-reanimated';
+ import AsyncStorage from '@react-native-async-storage/async-storage';
+ import { Ionicons } from '@expo/vector-icons';
+ import { AmbientScreen, GlassSurface } from '@/components/AmbientSurface';
+-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
++import { router, useLocalSearchParams } from 'expo-router';
+ import { useColors } from '@/hooks/useColors';
+ import { EXTRA_CHAIN_COLORS } from '@/constants/colors';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -27,7 +27,6 @@ import { Chain, getTodayStr, isRestDay, useChains } from '@/context/ChainsContex
+ import { PlanItem, usePlan } from '@/context/PlanContext';
+ import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+ import { cancelPlanReminder, getPlanNotificationPermission, requestPlanNotificationPermission, scheduleMorningBriefing, schedulePlanReminder } from '@/lib/planNotifications';
+-import { GateWindow, gateWindowDescriptor, gateWindowDisplayName, getGateWindowsSnapshot } from '@/lib/gateWindows';
+ import { reportDiagnostic } from '@/lib/diagnostics';
+ import { CONTROL, MOTION, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { playFeedback } from '@/lib/feedback';
+@@ -51,8 +50,6 @@ const WEEKDAY_OPTIONS = [
+   { label: 'S', value: 0, accessibilityLabel: 'Sunday' },
+ ] as const;
+ 
+-type GateWindowsLoadState = 'loading' | 'ready' | 'failed';
+-
+ function getPlanLabel(dateKey: string): string {
+   const [year, month, day] = dateKey.split('-').map(Number);
+   const d = new Date(year, month - 1, day);
+@@ -78,6 +75,7 @@ function formatBriefingTime(hour: number | null) {
+ export default function PlanScreen() {
+   const colors = useColors();
+   const insets = useSafeAreaInsets();
++  const { fontScale } = useWindowDimensions();
+   const { chains, setDayStatus, isProtectedToday } = useChains();
+   const { items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem } = usePlan();
+   const { taskId, planDate } = useLocalSearchParams<{ taskId?: string; planDate?: string }>();
+@@ -88,9 +86,6 @@ export default function PlanScreen() {
+   const [selectedReminder, setSelectedReminder] = useState<number | undefined>();
+   const [selectedRepeatDays, setSelectedRepeatDays] = useState<number[]>([]);
+   const [selectedDuration, setSelectedDuration] = useState<number | undefined>();
+-  const [gateWindows, setGateWindows] = useState<GateWindow[]>([]);
+-  const [gateWindowsLoadState, setGateWindowsLoadState] = useState<GateWindowsLoadState>('loading');
+-  const [selectedGateWindowId, setSelectedGateWindowId] = useState<string | undefined>();
+   const [isPriority, setIsPriority] = useState(false);
+   const [showInput, setShowInput] = useState(false);
+   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+@@ -144,22 +139,6 @@ export default function PlanScreen() {
+       .catch((error) => reportDiagnostic({ area: 'storage', operation: 'morningBriefing.read', severity: 'warning', error }));
+   }, []);
+ 
+-  useFocusEffect(useCallback(() => {
+-    let cancelled = false;
+-    setGateWindowsLoadState('loading');
+-    void getGateWindowsSnapshot()
+-      .then((result) => {
+-        if (cancelled) return;
+-        setGateWindows(result.windows);
+-        setGateWindowsLoadState(result.status);
+-      })
+-      .catch((error) => {
+-        if (!cancelled) setGateWindowsLoadState('failed');
+-        reportDiagnostic({ area: 'storage', operation: 'plan.gateWindows.read', severity: 'warning', error });
+-      });
+-    return () => { cancelled = true; };
+-  }, []));
+-
+   async function setMorningBriefing(hour: number): Promise<boolean> {
+     if (briefingBusyRef.current) return false;
+     briefingBusyRef.current = true;
+@@ -265,7 +244,6 @@ export default function PlanScreen() {
+     setSelectedReminder(undefined);
+     setSelectedRepeatDays([]);
+     setSelectedDuration(undefined);
+-    setSelectedGateWindowId(undefined);
+     setIsPriority(false);
+     setShowInput(false);
+     setShowAdvancedOptions(false);
+@@ -331,7 +309,9 @@ export default function PlanScreen() {
+       isPriority,
+       repeatDays: selectedRepeatDays,
+       durationMinutes: selectedDuration,
+-      gateWindowId: selectedGateWindowId,
++      // Gate Windows now live exclusively in Gate. Keep a legacy association
++      // untouched when editing so hiding the UI never destroys persisted data.
++      gateWindowId: editingItem?.gateWindowId,
+     };
+     const isEditing = Boolean(editingItem);
+     const item = isEditing ? updateItem(editingItem!.id, options) : addItem(options);
+@@ -456,9 +436,8 @@ export default function PlanScreen() {
+     setIsPriority(item.isPriority === true);
+     setSelectedRepeatDays(item.repeatDays || []);
+     setSelectedDuration(item.durationMinutes);
+-    setSelectedGateWindowId(item.gateWindowId);
+     setShowInput(true);
+-    setShowAdvancedOptions(Boolean(item.repeatDays?.length || item.durationMinutes || item.reminderMinutes !== undefined || item.gateWindowId || (!item.chainId && item.color)));
++    setShowAdvancedOptions(Boolean(item.repeatDays?.length || item.durationMinutes || item.reminderMinutes !== undefined || (!item.chainId && item.color)));
+   }
+ 
+   async function handleToggle(item: PlanItem) {
+@@ -721,10 +700,6 @@ export default function PlanScreen() {
+             key={item.id}
+             item={item}
+             chainName={chains.find((chain) => chain.id === item.chainId)?.name}
+-            gateWindow={gateWindows.find((window) => window.id === item.gateWindowId)}
+-            gateWindowId={item.gateWindowId}
+-            gateWindows={gateWindows}
+-            gateWindowsLoadState={gateWindowsLoadState}
+             highlighted={item.id === highlightedItemId}
+             newlyAdded={item.id === newlyAddedItemId}
+             reminderSyncing={reminderSyncingItemIds.has(item.id)}
+@@ -759,7 +734,12 @@ export default function PlanScreen() {
+           <View style={[styles.briefingIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sunny-outline" size={18} color={colors.primary} /></View>
+           <View style={styles.briefingCopy}>
+             <Text style={[styles.briefingTitle, { color: colors.foreground }]}>Morning briefing</Text>
+-            <Text style={[styles.briefingBody, { color: colors.mutedForeground }]}>A quiet prompt to open your plan.</Text>
++            <Text
++              numberOfLines={fontScale < 1.35 ? 1 : undefined}
++              style={[styles.briefingBody, { color: colors.mutedForeground }]}
++            >
++              Start with clarity.
++            </Text>
+           </View>
+           <Text style={[styles.briefingValue, { color: briefingHour === null ? colors.mutedForeground : colors.primary }]}>{formatBriefingTime(briefingHour)}</Text>
+           <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+@@ -819,10 +799,6 @@ export default function PlanScreen() {
+                   setRepeatDays={setSelectedRepeatDays}
+                   selectedDuration={selectedDuration}
+                   setSelectedDuration={setSelectedDuration}
+-                  gateWindows={gateWindows}
+-                  gateWindowsLoadState={gateWindowsLoadState}
+-                  selectedGateWindowId={selectedGateWindowId}
+-                  setSelectedGateWindowId={setSelectedGateWindowId}
+                   showAdvancedOptions={showAdvancedOptions}
+                   setShowAdvancedOptions={setShowAdvancedOptions}
+                 />
+@@ -899,12 +875,11 @@ function ChainReflection({ chain, done, minimum, frozen, resting, isLast }: { ch
+   </View>;
+ }
+ 
+-function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, selectedTaskColor, setSelectedTaskColor, selectedTime, setSelectedTime, openTimePicker, selectedReminder, setSelectedReminder, allowPriority, priorityForToday, isPriority, setIsPriority, repeatDays, setRepeatDays, selectedDuration, setSelectedDuration, gateWindows, gateWindowsLoadState, selectedGateWindowId, setSelectedGateWindowId, showAdvancedOptions, setShowAdvancedOptions }: any) {
++function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, selectedTaskColor, setSelectedTaskColor, selectedTime, setSelectedTime, openTimePicker, selectedReminder, setSelectedReminder, allowPriority, priorityForToday, isPriority, setIsPriority, repeatDays, setRepeatDays, selectedDuration, setSelectedDuration, showAdvancedOptions, setShowAdvancedOptions }: any) {
+   const timeScrollRef = useRef<ScrollView>(null);
+   const detailsCount = Number(Boolean(selectedTaskColor && !selectedChainId))
+     + Number(repeatDays.length > 0)
+     + Number(Boolean(selectedDuration))
+-    + Number(Boolean(selectedGateWindowId))
+     + Number(Boolean(selectedTime) && selectedReminder !== undefined);
+ 
+   useEffect(() => {
+@@ -926,7 +901,7 @@ function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, sel
+     <Text style={[styles.chainHelper, { color: colors.mutedForeground }]}>Only link tasks that move that chain forward. Unlinked tasks stay neutral.</Text>
+     <FlatList data={[{ id: '', name: 'No chain', color: colors.mutedForeground }, ...chains]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(chain) => chain.id} contentContainerStyle={styles.chainChoices} renderItem={({ item: chain }) => { const selected = (chain.id || undefined) === selectedChainId; return <Pressable accessibilityRole="radio" accessibilityLabel={chain.id ? `Link to ${chain.name}` : 'Do not link a chain'} accessibilityState={{ selected }} onPress={() => setSelectedChainId(chain.id || undefined)} style={[styles.chainChip, { borderColor: selected ? chain.color : colors.border, backgroundColor: selected ? chain.color + '1F' : colors.background }]}><View style={[styles.chainChipDot, { backgroundColor: chain.color }]} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{chain.name}</Text></Pressable>; }} />
+     {allowPriority && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>{priorityForToday ? 'TODAY\'S ONE THING · OPTIONAL' : 'TOMORROW\'S ONE THING · OPTIONAL'}</Text><Pressable accessibilityRole="switch" accessibilityLabel="Make this your one thing" accessibilityState={{ checked: isPriority }} onPress={() => setIsPriority(!isPriority)} style={[styles.priorityPick, { borderColor: isPriority ? colors.primary : colors.border, backgroundColor: isPriority ? colors.primary + '1A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sparkles-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Make this your one thing</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>The task that matters most {priorityForToday ? 'today' : 'tomorrow'}.</Text></View>{isPriority && <Ionicons name="checkmark-circle" size={19} color={colors.primary} />}</Pressable></>}
+-    <Pressable accessibilityRole="button" accessibilityLabel="Task details" accessibilityHint="Opens color, repeat, focus, Gate and reminder options" accessibilityState={{ expanded: showAdvancedOptions }} onPress={() => { Keyboard.dismiss(); setShowAdvancedOptions(true); }} style={[styles.detailsToggle, { borderColor: detailsCount ? colors.primary + '70' : colors.border, backgroundColor: detailsCount ? colors.primary + '0A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="options-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Task details</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{detailsCount ? `${detailsCount} ${detailsCount === 1 ? 'detail' : 'details'} set` : 'Color, repeat, focus, Gate and reminders.'}</Text></View><Ionicons name="chevron-forward" size={18} color={detailsCount ? colors.primary : colors.mutedForeground} /></Pressable>
++    <Pressable accessibilityRole="button" accessibilityLabel="Task details" accessibilityHint="Opens color, repeat, focus and reminder options" accessibilityState={{ expanded: showAdvancedOptions }} onPress={() => { Keyboard.dismiss(); setShowAdvancedOptions(true); }} style={[styles.detailsToggle, { borderColor: detailsCount ? colors.primary + '70' : colors.border, backgroundColor: detailsCount ? colors.primary + '0A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="options-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Task details</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{detailsCount ? `${detailsCount} ${detailsCount === 1 ? 'detail' : 'details'} set` : 'Color, repeat, focus and reminders.'}</Text></View><Ionicons name="chevron-forward" size={18} color={detailsCount ? colors.primary : colors.mutedForeground} /></Pressable>
+     <TaskDetailsSheet
+       visible={showAdvancedOptions}
+       onClose={() => setShowAdvancedOptions(false)}
+@@ -942,15 +917,11 @@ function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, sel
+       setRepeatDays={setRepeatDays}
+       selectedDuration={selectedDuration}
+       setSelectedDuration={setSelectedDuration}
+-      gateWindows={gateWindows}
+-      gateWindowsLoadState={gateWindowsLoadState}
+-      selectedGateWindowId={selectedGateWindowId}
+-      setSelectedGateWindowId={setSelectedGateWindowId}
+     />
+   </View>;
+ }
+ 
+-type TaskDetailSection = 'accent' | 'repeat' | 'focus' | 'gate' | 'reminder' | null;
++type TaskDetailSection = 'accent' | 'repeat' | 'focus' | 'reminder' | null;
+ 
+ function TaskDetailSectionRow({ icon, title, summary, active, configured, disabled, onPress, colors }: any) {
+   return <Pressable
+@@ -969,41 +940,12 @@ function TaskDetailSectionRow({ icon, title, summary, active, configured, disabl
+   </Pressable>;
+ }
+ 
+-function TaskDetailsSheet({ visible, onClose, colors, selectedChainId, selectedChainName, selectedTaskColor, setSelectedTaskColor, selectedTime, selectedReminder, setSelectedReminder, repeatDays, setRepeatDays, selectedDuration, setSelectedDuration, gateWindows, gateWindowsLoadState, selectedGateWindowId, setSelectedGateWindowId }: any) {
++function TaskDetailsSheet({ visible, onClose, colors, selectedChainId, selectedChainName, selectedTaskColor, setSelectedTaskColor, selectedTime, selectedReminder, setSelectedReminder, repeatDays, setRepeatDays, selectedDuration, setSelectedDuration }: any) {
+   const insets = useSafeAreaInsets();
+   const reduceMotion = useReducedMotion();
+   const { height } = useWindowDimensions();
+   const [openSection, setOpenSection] = useState<TaskDetailSection>(null);
+-  const selectedWindow = gateWindows.find((window: GateWindow) => window.id === selectedGateWindowId);
+   const accentLocked = Boolean(selectedChainId);
+-  const gateUnavailable = gateWindowsLoadState === 'ready' && gateWindows.length === 0 && !selectedGateWindowId;
+-  const missingWindowConfirmed = Boolean(selectedGateWindowId && !selectedWindow && gateWindowsLoadState === 'ready');
+-  const gateSummary = selectedWindow
+-    ? gateWindowsLoadState === 'ready'
+-      ? `${gateWindowDisplayName(selectedWindow, gateWindows)} · ${gateWindowDescriptor(selectedWindow)}`
+-      : gateWindowsLoadState === 'failed'
+-        ? `Last saved: ${gateWindowDisplayName(selectedWindow, gateWindows)} · ${gateWindowDescriptor(selectedWindow)}`
+-        : `Checking ${gateWindowDisplayName(selectedWindow, gateWindows)}…`
+-    : selectedGateWindowId
+-      ? gateWindowsLoadState === 'loading'
+-        ? 'Checking the linked Window…'
+-        : gateWindowsLoadState === 'failed'
+-          ? 'The linked Window could not be checked.'
+-          : 'The linked Window no longer exists.'
+-      : gateWindowsLoadState === 'loading'
+-        ? 'Loading saved Windows…'
+-        : gateWindowsLoadState === 'failed'
+-          ? 'Windows are unavailable right now.'
+-          : gateUnavailable
+-            ? 'Create a Window in Gate first.'
+-            : 'Link protection context to this task.';
+-  const gateStatusNotice = gateWindowsLoadState === 'failed'
+-    ? { title: 'Windows unavailable right now', body: selectedGateWindowId ? 'Showing last-saved details. You can remove this link, but choose another Window after Chain confirms your saved data.' : 'Showing last-saved details. Choose a Window after Chain confirms your saved data.', destructive: false }
+-    : gateWindowsLoadState === 'loading'
+-      ? { title: 'Loading saved Windows', body: 'Chain is checking this task’s protection context.', destructive: false }
+-      : missingWindowConfirmed
+-        ? { title: 'Window unavailable', body: 'Choose another Window or remove this link.', destructive: true }
+-        : null;
+ 
+   useEffect(() => {
+     if (!visible) setOpenSection(null);
+@@ -1065,22 +1007,6 @@ function TaskDetailsSheet({ visible, onClose, colors, selectedChainId, selectedC
+             {DURATION_OPTIONS.map((minutes) => { const selected = selectedDuration === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={`Focus for ${formatDurationLabel(minutes)}`} accessibilityState={{ selected }} onPress={() => setSelectedDuration(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{formatDurationLabel(minutes)}</Text></Pressable>; })}
+           </ScrollView>}
+ 
+-          <TaskDetailSectionRow
+-            icon="shield-checkmark-outline"
+-            title="Gate Window"
+-            summary={gateSummary}
+-            active={openSection === 'gate'}
+-            configured={Boolean(selectedGateWindowId)}
+-            disabled={gateUnavailable}
+-            onPress={() => toggleSection('gate')}
+-            colors={colors}
+-          />
+-          {openSection === 'gate' && <View style={styles.windowChoices}>
+-            {gateStatusNotice && <View accessibilityRole={gateStatusNotice.destructive ? 'alert' : undefined} style={[styles.unavailableWindow, { backgroundColor: (gateStatusNotice.destructive ? colors.destructive : colors.primary) + '12', borderColor: (gateStatusNotice.destructive ? colors.destructive : colors.primary) + '45' }]}><Ionicons name={gateStatusNotice.destructive ? 'alert-circle-outline' : gateWindowsLoadState === 'loading' ? 'hourglass-outline' : 'information-circle-outline'} size={17} color={gateStatusNotice.destructive ? colors.destructive : colors.primary} /><View style={styles.windowChoiceCopy}><Text style={[styles.windowChoiceTitle, { color: gateStatusNotice.destructive ? colors.destructive : colors.foreground }]}>{gateStatusNotice.title}</Text><Text style={[styles.windowChoiceSummary, { color: colors.mutedForeground }]}>{gateStatusNotice.body}</Text></View></View>}
+-            <Pressable accessibilityRole="radio" accessibilityLabel="No Gate Window" accessibilityState={{ selected: !selectedGateWindowId }} onPress={() => setSelectedGateWindowId(undefined)} style={[styles.windowChoice, { borderColor: !selectedGateWindowId ? colors.primary : colors.border, backgroundColor: !selectedGateWindowId ? colors.primary + '12' : colors.background }]}><View style={[styles.windowChoiceIcon, { backgroundColor: colors.mutedForeground + '16' }]}><Ionicons name="remove-outline" size={16} color={colors.mutedForeground} /></View><View style={styles.windowChoiceCopy}><Text style={[styles.windowChoiceTitle, { color: colors.foreground }]}>No Window</Text><Text style={[styles.windowChoiceSummary, { color: colors.mutedForeground }]}>Keep this task independent from Gate.</Text></View>{!selectedGateWindowId && <Ionicons name="checkmark-circle" size={19} color={colors.primary} />}</Pressable>
+-            {gateWindows.map((window: GateWindow) => { const selected = window.id === selectedGateWindowId; const displayName = gateWindowDisplayName(window, gateWindows); const selectionDisabled = gateWindowsLoadState !== 'ready'; return <Pressable key={window.id} accessibilityRole="radio" accessibilityLabel={`${displayName}, ${gateWindowDescriptor(window)}`} accessibilityState={{ selected, disabled: selectionDisabled }} disabled={selectionDisabled} onPress={() => setSelectedGateWindowId(window.id)} style={[styles.windowChoice, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '12' : colors.background, opacity: selectionDisabled ? OPACITY.disabled : 1 }]}><View style={[styles.windowChoiceIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="shield-checkmark-outline" size={16} color={colors.primary} /></View><View style={styles.windowChoiceCopy}><Text style={[styles.windowChoiceTitle, { color: colors.foreground }]} numberOfLines={1}>{displayName}</Text><Text style={[styles.windowChoiceSummary, { color: colors.mutedForeground }]} numberOfLines={2}>{gateWindowDescriptor(window)}</Text></View>{selected && <Ionicons name="checkmark-circle" size={19} color={colors.primary} />}</Pressable>; })}
+-          </View>}
+-
+           <TaskDetailSectionRow
+             icon="notifications-outline"
+             title="Reminder"
+@@ -1102,7 +1028,7 @@ function TaskDetailsSheet({ visible, onClose, colors, selectedChainId, selectedC
+   </Modal>;
+ }
+ 
+-function PlanItemRow({ item, chainName, gateWindow, gateWindowId, gateWindows, gateWindowsLoadState, highlighted, newlyAdded, reminderSyncing, isLast, locked, completionLocked, onToggle, onEdit, onMore }: { item: PlanItem; chainName?: string; gateWindow?: GateWindow; gateWindowId?: string; gateWindows: GateWindow[]; gateWindowsLoadState: GateWindowsLoadState; highlighted: boolean; newlyAdded: boolean; reminderSyncing: boolean; isLast: boolean; locked: boolean; completionLocked: boolean; onToggle: () => void; onEdit: () => void; onMore: () => void }) {
++function PlanItemRow({ item, chainName, highlighted, newlyAdded, reminderSyncing, isLast, locked, completionLocked, onToggle, onEdit, onMore }: { item: PlanItem; chainName?: string; highlighted: boolean; newlyAdded: boolean; reminderSyncing: boolean; isLast: boolean; locked: boolean; completionLocked: boolean; onToggle: () => void; onEdit: () => void; onMore: () => void }) {
+   const colors = useColors();
+   const reduceMotion = useReducedMotion();
+   const accentColor = item.color || UNLINKED_TASK_COLOR;
+@@ -1111,22 +1037,6 @@ function PlanItemRow({ item, chainName, gateWindow, gateWindowId, gateWindows, g
+   const chainTextAccent = readableAccentColor(accentColor, colors.cardSolid);
+   const borderColor = highlighted ? displayAccent : item.isPriority ? colors.primary : item.completed ? displayAccent + '48' : colors.border;
+   const backgroundColor = highlighted ? accentColor + '14' : item.isPriority ? colors.primary + '0D' : item.completed ? accentColor + '12' : colors.card;
+-  const gateWindowLabel = gateWindow
+-    ? gateWindowsLoadState === 'ready'
+-      ? `${gateWindowDisplayName(gateWindow, gateWindows)} · ${gateWindowDescriptor(gateWindow)}`
+-      : gateWindowsLoadState === 'failed'
+-        ? `${gateWindowDisplayName(gateWindow, gateWindows)} · Last saved Window`
+-        : `Checking ${gateWindowDisplayName(gateWindow, gateWindows)}…`
+-    : gateWindowId
+-      ? gateWindowsLoadState === 'loading'
+-        ? 'Loading linked Window…'
+-        : gateWindowsLoadState === 'failed'
+-          ? 'Linked Window unavailable right now'
+-          : 'Linked Window no longer exists'
+-      : undefined;
+-  const missingWindowConfirmed = Boolean(gateWindowId && !gateWindow && gateWindowsLoadState === 'ready');
+-  const gateWindowConfirmed = Boolean(gateWindow && gateWindowsLoadState === 'ready');
+-  const gateBadgeColor = gateWindowConfirmed ? colors.primary : missingWindowConfirmed ? colors.destructive : colors.mutedForeground;
+   const arrival = useRef(new Animated.Value(1)).current;
+   useEffect(() => {
+     if (!newlyAdded || reduceMotion) {
+@@ -1142,10 +1052,9 @@ function PlanItemRow({ item, chainName, gateWindow, gateWindowId, gateWindows, g
+     <GlassSurface pointerEvents="none" accentColor={displayAccent} style={StyleSheet.absoluteFill} />
+     <View style={[styles.planBar, { backgroundColor: item.completed ? displayAccent + 'A8' : displayAccent }]} />
+     <Pressable accessibilityRole="checkbox" accessibilityLabel={reminderSyncing ? `Saving reminder for ${item.text}` : item.completed ? `Mark ${item.text} incomplete` : `Complete ${item.text}`} accessibilityState={{ checked: item.completed, disabled: completionLocked, busy: reminderSyncing }} hitSlop={8} disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? displayAccent : completionLocked ? 'transparent' : displayAccent + '14', borderColor: item.completed ? displayAccent : completionLocked ? colors.mutedForeground : displayAccent, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <Ionicons name="checkmark" size={13} color={readableTextColor(displayAccent)} /> : reminderSyncing ? <Ionicons name="hourglass-outline" size={12} color={colors.mutedForeground} /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
+-    <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${item.text}${gateWindowLabel ? `. Gate Window: ${gateWindowLabel}` : ''}`} accessibilityState={{ disabled: locked }} disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
++    <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${item.text}`} accessibilityState={{ disabled: locked }} disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
+       <View style={styles.planMeta}>{item.isPriority && <View style={[styles.priorityBadge, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="sparkles" size={10} color={colors.primary} /><Text style={[styles.priorityBadgeText, { color: colors.primary }]}>ONE THING</Text></View>}{completionLocked && !locked && <View style={[styles.tomorrowBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /><Text style={[styles.tomorrowBadgeText, { color: colors.mutedForeground }]}>TOMORROW</Text></View>}{item.timeSlot ? <Text style={[styles.planTime, { color: textAccent }]}>{item.timeSlot}{item.durationMinutes ? `  ·  ${formatDurationLabel(item.durationMinutes)}` : ''}{item.reminderMinutes !== undefined ? `  ·  ${item.reminderMinutes === 0 ? 'AT START' : `${item.reminderMinutes} MIN REMINDER`}` : ''}</Text> : <Text style={[styles.planTime, { color: item.isPriority ? colors.primary : colors.mutedForeground }]}>{item.durationMinutes ? `${formatDurationLabel(item.durationMinutes)} BLOCK` : 'ANYTIME'}</Text>}{chainName && <View style={[styles.linkBadge, { backgroundColor: accentColor + '1A' }]}><Ionicons name="link-outline" size={10} color={chainTextAccent} /><Text style={[styles.linkBadgeText, { color: chainTextAccent }]}>{chainName}</Text></View>}</View>
+       <Text style={[styles.planText, { color: item.completed ? colors.foreground + 'A6' : colors.foreground, textDecorationLine: item.completed ? 'line-through' : 'none', textDecorationColor: item.completed ? colors.primary : undefined, textDecorationStyle: 'solid' }]} numberOfLines={2}>{item.text}</Text>
+-      {gateWindowId && gateWindowLabel && <View style={[styles.gateWindowBadge, { backgroundColor: gateBadgeColor + '12', borderColor: gateBadgeColor + '40' }]}><Ionicons name={gateWindowConfirmed ? 'shield-checkmark-outline' : gateWindowsLoadState === 'loading' ? 'hourglass-outline' : missingWindowConfirmed ? 'alert-circle-outline' : 'information-circle-outline'} size={13} color={gateBadgeColor} /><Text style={[styles.gateWindowBadgeText, { color: missingWindowConfirmed ? colors.destructive : colors.foreground }]} numberOfLines={1}>{gateWindowLabel}</Text></View>}
+     </Pressable>
+     {locked ? <Ionicons name={reminderSyncing ? 'hourglass-outline' : 'lock-closed-outline'} size={16} color={colors.mutedForeground} /> : <Pressable accessibilityRole="button" accessibilityLabel={`More actions for ${item.text}`} onPress={onMore} style={styles.moreButton}><Ionicons name="ellipsis-horizontal" size={20} color={colors.mutedForeground} /></Pressable>}
+   </Animated.View>;
+@@ -1291,7 +1200,7 @@ const styles = StyleSheet.create({
+   briefingIcon: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.control, alignItems: 'center', justifyContent: 'center' },
+   briefingCopy: { flex: 1, minWidth: 0 },
+   briefingTitle: { ...TYPE.bodyStrong },
+-  briefingBody: { ...TYPE.caption, marginTop: SPACE.hairline },
++  briefingBody: { ...TYPE.caption, marginTop: SPACE.hairline, flexShrink: 1 },
+   briefingValue: { ...TYPE.metadata, flexShrink: 0 },
+   briefingSheet: { maxHeight: '86%', borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.lg, paddingTop: SPACE.xs },
+   briefingOptionsScroll: { flexShrink: 1, minHeight: 0 },
+@@ -1341,8 +1250,6 @@ const styles = StyleSheet.create({
+   tomorrowBadge: { flexDirection: 'row', alignItems: 'center', gap: SPACE.xxs, paddingHorizontal: SPACE.xs, paddingVertical: SPACE.xxs, borderRadius: RADIUS.compact },
+   tomorrowBadgeText: { ...TYPE.metadata, letterSpacing: 0.6 },
+   planText: { fontSize: 15, lineHeight: 21, fontFamily: 'Inter_500Medium' },
+-  gateWindowBadge: { alignSelf: 'flex-start', maxWidth: '100%', minHeight: 26, flexDirection: 'row', alignItems: 'center', gap: SPACE.xxs, borderRadius: RADIUS.compact, borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.xs, paddingVertical: SPACE.xxs },
+-  gateWindowBadgeText: { ...TYPE.metadata, flexShrink: 1 },
+   moreButton: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, alignItems: 'center', justifyContent: 'center' },
+   addCard: { borderRadius: RADIUS.card, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, marginTop: SPACE.xxs, overflow: 'hidden' },
+   addTrigger: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, padding: SPACE.md },
+@@ -1405,13 +1312,6 @@ const styles = StyleSheet.create({
+   colorChoice: { minWidth: CONTROL.minimumTarget, height: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xs, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.sm },
+   colorChoiceDot: { width: 20, height: 20, borderRadius: RADIUS.capsule },
+   colorChoiceText: { ...TYPE.caption, fontFamily: 'Inter_600SemiBold' },
+-  windowChoices: { gap: SPACE.xs, paddingVertical: SPACE.sm },
+-  windowChoice: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm },
+-  unavailableWindow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm },
+-  windowChoiceIcon: { width: 34, height: 34, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
+-  windowChoiceCopy: { flex: 1, minWidth: 0 },
+-  windowChoiceTitle: { ...TYPE.bodyStrong },
+-  windowChoiceSummary: { ...TYPE.caption, marginTop: SPACE.xxs },
+   taskDetailsDone: { minHeight: CONTROL.buttonHeight, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.button, borderCurve: 'continuous', marginTop: SPACE.xs },
+   taskDetailsDoneText: { ...TYPE.bodyStrong },
+   reminderNotice: { ...TYPE.metadata, fontFamily: 'Inter_400Regular', paddingHorizontal: SPACE.md, paddingBottom: SPACE.xxs },
+diff --git a/artifacts/chain/app/_layout.tsx b/artifacts/chain/app/_layout.tsx
+index e58c80f..b1226b8 100644
+--- a/artifacts/chain/app/_layout.tsx
++++ b/artifacts/chain/app/_layout.tsx
+@@ -49,9 +49,16 @@ function RootLayoutNav() {
+         name="chain/[id]"
+         options={{
+           headerShown: false,
++          presentation: 'card',
++          animation: 'simple_push',
+           gestureEnabled: true,
+           gestureDirection: 'horizontal',
+-          fullScreenGestureEnabled: false,
++          // Chain details should behave like a native iOS drill-down. Keeping
++          // this explicit avoids the route falling back to an edge-only
++          // gesture when inherited Stack options change.
++          fullScreenGestureEnabled: true,
++          animationMatchesGesture: true,
++          fullScreenGestureShadowEnabled: true,
+         }}
+       />
+       <Stack.Screen name="pause-gate-demo" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade' }} />
+diff --git a/artifacts/chain/app/chain/new.tsx b/artifacts/chain/app/chain/new.tsx
+index 3ccd5a5..91d42f0 100644
+--- a/artifacts/chain/app/chain/new.tsx
++++ b/artifacts/chain/app/chain/new.tsx
+@@ -18,6 +18,7 @@ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme
+ import { useChains } from '@/context/ChainsContext';
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import { AppButton, IconButton, Surface } from '@/components/ui/AppUI';
++import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
+ import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+ import { playFeedback } from '@/lib/feedback';
+ 
+@@ -62,6 +63,12 @@ const COLOR_NAMES: Record<string, string> = {
+   '#22D3EE': 'Cyan', '#EF4444': 'Red', '#4F46E5': 'Indigo',
+ };
+ 
++const WEEKLY_TARGET_OPTIONS = [1, 2, 3, 4, 5, 6, 7].map((target) => ({
++  label: String(target),
++  value: target,
++  accessibilityLabel: `${target} ${target === 1 ? 'day' : 'days'} each week`,
++}));
++
+ export default function NewChainScreen() {
+   const colors = useColors();
+   const insets = useSafeAreaInsets();
+@@ -203,7 +210,7 @@ export default function NewChainScreen() {
+           <Pressable accessibilityRole="radio" accessibilityLabel="Daily Chain" accessibilityState={{ checked: cadence === 'daily' }} onPress={() => setCadence('daily')} style={[styles.cadenceCard, { backgroundColor: cadence === 'daily' ? selectedColor + '18' : colors.card, borderColor: cadence === 'daily' ? selectedColor : colors.border }]}><Ionicons name="today-outline" size={18} color={cadence === 'daily' ? readableAccentColor(selectedColor, colors.cardSolid) : colors.mutedForeground} /><View style={styles.cadenceCopy}><Text style={[styles.cadenceTitle, { color: colors.foreground }]}>Daily</Text><Text style={[styles.cadenceBody, { color: colors.mutedForeground }]}>Build a daily streak.</Text></View></Pressable>
+           <Pressable accessibilityRole="radio" accessibilityLabel="Weekly goal Chain" accessibilityState={{ checked: cadence === 'weekly' }} onPress={() => setCadence('weekly')} style={[styles.cadenceCard, { backgroundColor: cadence === 'weekly' ? selectedColor + '18' : colors.card, borderColor: cadence === 'weekly' ? selectedColor : colors.border }]}><Ionicons name="calendar-outline" size={18} color={cadence === 'weekly' ? readableAccentColor(selectedColor, colors.cardSolid) : colors.mutedForeground} /><View style={styles.cadenceCopy}><Text style={[styles.cadenceTitle, { color: colors.foreground }]}>Weekly goal</Text><Text style={[styles.cadenceBody, { color: colors.mutedForeground }]}>Complete a target each week.</Text></View></Pressable>
+         </View>
+-        {cadence === 'weekly' && <Surface style={styles.targetCard}><View><Text style={[styles.targetTitle, { color: colors.foreground }]}>How many days?</Text><Text style={[styles.targetBody, { color: colors.mutedForeground }]}>Your streak grows when you reach this each week.</Text></View><View style={styles.targetChoices}>{[1, 2, 3, 4, 5, 6, 7].map((target) => { const selected = target === weeklyTarget; return <View key={target} style={styles.targetChoiceCell}><Pressable accessibilityRole="radio" accessibilityLabel={`${target} ${target === 1 ? 'day' : 'days'} each week`} accessibilityState={{ checked: selected }} onPress={() => { setWeeklyTarget(target); playFeedback('selection'); }} style={[styles.targetPill, { backgroundColor: selected ? selectedColor : colors.background, borderColor: selected ? selectedColor : colors.border }]}><Text style={[styles.targetText, { color: selected ? readableTextColor(selectedColor) : colors.mutedForeground }]}>{target}</Text></Pressable></View>; })}</View></Surface>}
++        {cadence === 'weekly' && <Surface style={styles.targetCard}><View><Text style={[styles.targetTitle, { color: colors.foreground }]}>How many days?</Text><Text style={[styles.targetBody, { color: colors.mutedForeground }]}>Your streak grows when you reach this each week.</Text></View><SevenChoiceSelector options={WEEKLY_TARGET_OPTIONS} selectionMode="single" selectedValues={[weeklyTarget]} onSelectionChange={([target]) => { if (target) { setWeeklyTarget(target); playFeedback('selection'); } }} accentColor={selectedColor} selectedTextColor={readableTextColor(selectedColor)} textColor={colors.mutedForeground} borderColor={colors.border} backgroundColor={colors.background} accessibilityLabel="Weekly target" /></Surface>}
+ 
+         <Text style={[styles.label, { color: colors.mutedForeground }]}>CHAIN COLOR</Text>
+         <View style={styles.colorRow}>
+@@ -344,10 +351,6 @@ const styles = StyleSheet.create({
+   targetCard: { borderRadius: RADIUS.control, borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm, gap: SPACE.sm },
+   targetTitle: TYPE.bodyStrong,
+   targetBody: { ...TYPE.caption, marginTop: SPACE.hairline },
+-  targetChoices: { flexDirection: 'row', flexWrap: 'wrap' },
+-  targetChoiceCell: { width: '25%', alignItems: 'center', marginBottom: SPACE.xs },
+-  targetPill: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.compact, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+-  targetText: TYPE.metadata,
+   swatchRing: {
+     borderRadius: RADIUS.capsule,
+     padding: 3,
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 303978a..646f96d 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -1,6 +1,7 @@
+ import React, { useCallback, useEffect, useRef, useState } from 'react';
+-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
++import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+ import { useReducedMotion } from 'react-native-reanimated';
++import Svg, { Path } from 'react-native-svg';
+ import { Ionicons } from '@expo/vector-icons';
+ import { router } from 'expo-router';
+ import { useColors } from '@/hooks/useColors';
+@@ -31,6 +32,7 @@ const GLASS_SURFACE_COLOR = '#121214';
+ 
+ export default function ChainCard({ chain }: Props) {
+   const colors = useColors();
++  const reducedMotion = useReducedMotion();
+   const { toggleToday, isCompletedToday, isProtectedToday, isFrozenToday } = useChains();
+   const done = isCompletedToday(chain);
+   const protectedToday = isProtectedToday(chain);
+@@ -51,6 +53,8 @@ export default function ChainCard({ chain }: Props) {
+   const mutationBusyRef = useRef(false);
+   const prevDoneRef = useRef(keptToday);
+   const prevWeeklyProgressRef = useRef(weeklyProgress);
++  const previousCompletedRef = useRef(done);
++  const checkArrival = useRef(new Animated.Value(1)).current;
+ 
+   useEffect(() => {
+     if (!prevDoneRef.current && keptToday && MILESTONES.has(streak)) {
+@@ -70,6 +74,27 @@ export default function ChainCard({ chain }: Props) {
+     prevWeeklyProgressRef.current = weeklyProgress;
+   }, [chain.cadence, chain.weeklyTarget, weeklyProgress]);
+ 
++  useEffect(() => {
++    const becameComplete = done && !previousCompletedRef.current;
++    previousCompletedRef.current = done;
++    if (!becameComplete) return;
++
++    if (reducedMotion) {
++      checkArrival.setValue(1);
++      return;
++    }
++
++    checkArrival.setValue(0);
++    const animation = Animated.timing(checkArrival, {
++      toValue: 1,
++      duration: 220,
++      easing: Easing.out(Easing.cubic),
++      useNativeDriver: true,
++    });
++    animation.start();
++    return () => animation.stop();
++  }, [checkArrival, done, reducedMotion]);
++
+   const handleCheck = useCallback(async () => {
+     if (restingToday || mutationBusyRef.current) return;
+     mutationBusyRef.current = true;
+@@ -165,7 +190,29 @@ export default function ChainCard({ chain }: Props) {
+             {frozen ? (
+               <Ionicons name="snow" size={18} color={statusForeground} />
+             ) : keptToday ? (
+-              <Ionicons name={done ? 'checkmark' : 'leaf-outline'} size={19} color={statusForeground} />
++              done ? (
++                <Animated.View
++                  style={{
++                    opacity: checkArrival,
++                    transform: [{
++                      scale: checkArrival.interpolate({ inputRange: [0, 1], outputRange: [0.86, 1] }),
++                    }],
++                  }}
++                >
++                  <Svg width={23} height={23} viewBox="0 0 24 24" aria-hidden>
++                    <Path
++                      d="M7.1 12.4 10.3 15.6 17.2 8.7"
++                      fill="none"
++                      stroke={statusForeground}
++                      strokeWidth={3.1}
++                      strokeLinecap="round"
++                      strokeLinejoin="round"
++                    />
++                  </Svg>
++                </Animated.View>
++              ) : (
++                <Ionicons name="leaf-outline" size={19} color={statusForeground} />
++              )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+             ) : null}

@@ -1,24 +1,28 @@
-import { Link, Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
+import { AmbientScreen } from '@/components/AmbientSurface';
+import { AppButton, Surface } from '@/components/ui/AppUI';
+import { CONTROL, SPACE, TYPE } from '@/constants/designSystem';
+import { readableAccentColor } from '@/constants/sectionTheme';
 import { useColors } from '@/hooks/useColors';
 
 export default function NotFoundScreen() {
-  const colors = useColors();
+  const colors = useColors('today');
+  const accentText = readableAccentColor(colors.primary, colors.cardSolid);
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Oops!' }} />
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <Text style={[styles.title, { color: colors.foreground }]}>
-          This screen doesn&apos;t exist.
-        </Text>
-
-        <Link href="/" style={styles.link}>
-          <Text style={[styles.linkText, { color: colors.primary }]}>
-            Go to home screen!
-          </Text>
-        </Link>
-      </View>
+      <Stack.Screen options={{ headerShown: false }} />
+      <AmbientScreen tone="neutral" style={styles.container}>
+        <Surface elevated accentColor={colors.primary} style={styles.card}>
+          <Text style={[TYPE.eyebrow, { color: accentText }]}>CHAIN</Text>
+          <Text style={[TYPE.modalTitle, { color: colors.foreground }]}>This screen isn’t here.</Text>
+          <Text style={[TYPE.body, { color: colors.mutedForeground }]}>Your data is safe. Return to your Chains and keep going.</Text>
+          <View style={styles.action}>
+            <AppButton label="Return to Chains" onPress={() => router.replace('/(tabs)')} />
+          </View>
+        </Surface>
+      </AmbientScreen>
     </>
   );
 }
@@ -26,19 +30,9 @@ export default function NotFoundScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    paddingHorizontal: CONTROL.screenHorizontal,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  link: {
-    marginTop: 15,
-    paddingVertical: 15,
-  },
-  linkText: {
-    fontSize: 14,
-  },
+  card: { padding: SPACE.xl, gap: SPACE.sm },
+  action: { marginTop: SPACE.sm },
 });

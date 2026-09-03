@@ -7,10 +7,13 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { MOTION } from '@/constants/designSystem';
 
 interface Props extends Omit<PressableProps, 'style'> {
   /** Style applied to the inner Animated.View — use for layout, borders, bg, etc. */
   style?: StyleProp<ViewStyle>;
+  /** Layout style for the outer native Pressable. */
+  containerStyle?: StyleProp<ViewStyle>;
   /** Scale target on press-in. Default 0.985: subtle and tactile. */
   scaleTo?: number;
   children: React.ReactNode;
@@ -23,6 +26,7 @@ interface Props extends Omit<PressableProps, 'style'> {
 export default function AnimatedPressable({
   children,
   style,
+  containerStyle,
   scaleTo = 0.985,
   onPressIn: externalPressIn,
   onPressOut: externalPressOut,
@@ -42,7 +46,7 @@ export default function AnimatedPressable({
       if (reducedMotion) {
         opacity.value = withTiming(0.7, { duration: 60 });
       } else {
-        scale.value = withTiming(scaleTo, { duration: 120 });
+        scale.value = withTiming(scaleTo, { duration: MOTION.pressIn });
       }
       externalPressIn?.(e);
     },
@@ -52,9 +56,9 @@ export default function AnimatedPressable({
   const handlePressOut = useCallback(
     (e: any) => {
       if (reducedMotion) {
-        opacity.value = withTiming(1, { duration: 120 });
+        opacity.value = withTiming(1, { duration: MOTION.quick });
       } else {
-        scale.value = withSpring(1, { damping: 22, stiffness: 260, mass: 0.7 });
+        scale.value = withSpring(1, MOTION.spring);
       }
       externalPressOut?.(e);
     },
@@ -62,7 +66,7 @@ export default function AnimatedPressable({
   );
 
   return (
-    <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut} {...rest}>
+    <Pressable style={containerStyle} onPressIn={handlePressIn} onPressOut={handlePressOut} {...rest}>
       <Animated.View style={[style, animStyle]}>{children}</Animated.View>
     </Pressable>
   );

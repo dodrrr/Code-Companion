@@ -1,20 +1,26 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
+  Alert,
   Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { CHAIN_COLORS, EXTRA_CHAIN_COLORS } from '@/constants/colors';
+import { CONTROL, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
 import { useChains } from '@/context/ChainsContext';
+import { AmbientScreen } from '@/components/AmbientSurface';
+import { AppButton, IconButton, Surface } from '@/components/ui/AppUI';
+import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
+import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import { playFeedback } from '@/lib/feedback';
 
 const PRIMARY_SUGGESTIONS = [
   'Write daily',
@@ -51,6 +57,18 @@ const MORE_SUGGESTIONS = [
   'Get outside',
 ];
 
+const COLOR_NAMES: Record<string, string> = {
+  '#FF6B35': 'Orange', '#00C896': 'Emerald', '#A855F7': 'Violet', '#F43F5E': 'Rose',
+  '#F59E0B': 'Amber', '#3B82F6': 'Blue', '#FBBF24': 'Gold', '#84CC16': 'Lime',
+  '#22D3EE': 'Cyan', '#EF4444': 'Red', '#4F46E5': 'Indigo',
+};
+
+const WEEKLY_TARGET_OPTIONS = [1, 2, 3, 4, 5, 6, 7].map((target) => ({
+  label: String(target),
+  value: target,
+  accessibilityLabel: `${target} ${target === 1 ? 'day' : 'days'} each week`,
+}));
+
 export default function NewChainScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
@@ -62,56 +80,54 @@ export default function NewChainScreen() {
   const [cadence, setCadence] = useState<'daily' | 'weekly'>('daily');
   const [weeklyTarget, setWeeklyTarget] = useState(3);
   const [showMoreSuggestions, setShowMoreSuggestions] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const inputRef = useRef<TextInput>(null);
-
-  useFocusEffect(
-    useCallback(() => {
-      // InteractionManager does not reliably include the native-stack transition.
-      // Keep the keyboard out of the modal's trajectory, then introduce it as a
-      // separate, native movement once the screen has settled.
-      const focusTimer = setTimeout(() => inputRef.current?.focus(), 620);
-
-      return () => {
-        clearTimeout(focusTimer);
-      };
-    }, []),
-  );
+  const submittingRef = useRef(false);
 
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
 
-  function handleCreate() {
+  async function handleCreate() {
+    if (submittingRef.current) return;
     if (!name.trim()) {
       inputRef.current?.focus();
       return;
     }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    addChain(name, selectedColor, { cadence, weeklyTarget });
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    const result = await addChain(name, selectedColor, { cadence, weeklyTarget });
+    if (result.status !== 'persisted') {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+      playFeedback('error');
+      Alert.alert('Chain not created', 'Chain couldn’t save this commitment. Your draft is still here — try again.');
+      return;
+    }
+    playFeedback('success');
     router.back();
   }
 
   return (
-    <View style={[styles.root, { backgroundColor: colors.background }]}>
+    <AmbientScreen tone="today" style={styles.root}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: topPad + 16 }]}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Ionicons name="close" size={24} color={colors.mutedForeground} />
-        </Pressable>
+        <IconButton icon="close" label="Close new Chain" onPress={() => router.back()} />
         <Text style={[styles.headerTitle, { color: colors.foreground }]}>New Chain</Text>
-        <View style={{ width: 24 }} />
+        <View style={{ width: CONTROL.minimumTarget }} />
       </View>
 
-      <ScrollView
-        style={styles.scrollRoot}
+      <KeyboardAwareScrollViewCompat
+        bottomOffset={SPACE.xl}
         contentContainerStyle={styles.body}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         {/* Live preview card */}
-        <View
+        <Surface
+          accentColor={selectedColor}
           style={[
             styles.previewCard,
-            { backgroundColor: colors.card, borderColor: selectedColor + '88' },
+            { borderColor: selectedColor + '88' },
           ]}
         >
           <View style={[styles.previewStripe, { backgroundColor: selectedColor }]} />
@@ -125,29 +141,30 @@ export default function NewChainScreen() {
               {name || 'Your chain name'}
             </Text>
             <Text style={[styles.previewMeta, { color: colors.mutedForeground }]}>
-              {cadence === 'weekly' ? `${weeklyTarget} days a week · starts this week` : '0 day streak · starts today'}
+              {cadence === 'weekly' ? `${weeklyTarget} days a week · starts this week` : '0-day streak · starts today'}
             </Text>
           </View>
           <View style={[styles.previewCheck, { borderColor: selectedColor }]}>
             <View style={[styles.previewCheckInner, { backgroundColor: selectedColor + '22' }]} />
           </View>
-        </View>
+        </Surface>
 
         {/* Name input */}
-        <Text style={[styles.label, { color: colors.mutedForeground }]}>HABIT NAME</Text>
-        <View style={[styles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.label, { color: colors.mutedForeground }]}>CHAIN NAME</Text>
+        <Surface style={styles.inputWrap}>
           <TextInput
             ref={inputRef}
             value={name}
             onChangeText={setName}
             placeholder="e.g. Write daily, Morning run..."
             placeholderTextColor={colors.mutedForeground}
+            accessibilityLabel="Chain name"
             style={[styles.input, { color: colors.foreground }]}
             maxLength={40}
             returnKeyType="done"
             onSubmitEditing={handleCreate}
           />
-        </View>
+        </Surface>
 
         {/* Suggestions */}
         <Text style={[styles.quickStart, { color: colors.mutedForeground }]}>Start with something you can actually keep.</Text>
@@ -155,6 +172,9 @@ export default function NewChainScreen() {
           {[...PRIMARY_SUGGESTIONS, ...(showMoreSuggestions ? MORE_SUGGESTIONS : [])].map((s) => (
             <Pressable
               key={s}
+              accessibilityRole="button"
+              accessibilityLabel={s}
+              accessibilityState={{ selected: name === s }}
               onPress={() => setName(s)}
               style={({ pressed }) => [
                 styles.chip,
@@ -165,13 +185,15 @@ export default function NewChainScreen() {
                 },
               ]}
             >
-              <Text style={[styles.chipText, { color: name === s ? selectedColor : colors.mutedForeground }]}>
+              <Text style={[styles.chipText, { color: name === s ? readableAccentColor(selectedColor, colors.cardSolid) : colors.mutedForeground }]}>
                 {s}
               </Text>
             </Pressable>
           ))}
           <Pressable
+            accessibilityRole="button"
             accessibilityLabel={showMoreSuggestions ? 'Show fewer chain suggestions' : 'Show more chain suggestions'}
+            accessibilityState={{ expanded: showMoreSuggestions }}
             onPress={() => setShowMoreSuggestions((visible) => !visible)}
             style={({ pressed }) => [
               styles.suggestionExpand,
@@ -185,10 +207,10 @@ export default function NewChainScreen() {
         {/* Color picker */}
         <Text style={[styles.label, { color: colors.mutedForeground }]}>RHYTHM</Text>
         <View style={styles.cadenceRow}>
-          <Pressable onPress={() => setCadence('daily')} style={[styles.cadenceCard, { backgroundColor: cadence === 'daily' ? selectedColor + '18' : colors.card, borderColor: cadence === 'daily' ? selectedColor : colors.border }]}><Ionicons name="today-outline" size={17} color={cadence === 'daily' ? selectedColor : colors.mutedForeground} /><View style={styles.cadenceCopy}><Text style={[styles.cadenceTitle, { color: colors.foreground }]}>Daily</Text><Text style={[styles.cadenceBody, { color: colors.mutedForeground }]}>Keep a day streak.</Text></View></Pressable>
-          <Pressable onPress={() => setCadence('weekly')} style={[styles.cadenceCard, { backgroundColor: cadence === 'weekly' ? selectedColor + '18' : colors.card, borderColor: cadence === 'weekly' ? selectedColor : colors.border }]}><Ionicons name="calendar-outline" size={17} color={cadence === 'weekly' ? selectedColor : colors.mutedForeground} /><View style={styles.cadenceCopy}><Text style={[styles.cadenceTitle, { color: colors.foreground }]}>Weekly goal</Text><Text style={[styles.cadenceBody, { color: colors.mutedForeground }]}>Complete a target each week.</Text></View></Pressable>
+          <Pressable accessibilityRole="radio" accessibilityLabel="Daily Chain" accessibilityState={{ checked: cadence === 'daily' }} onPress={() => setCadence('daily')} style={[styles.cadenceCard, { backgroundColor: cadence === 'daily' ? selectedColor + '18' : colors.card, borderColor: cadence === 'daily' ? selectedColor : colors.border }]}><Ionicons name="today-outline" size={18} color={cadence === 'daily' ? readableAccentColor(selectedColor, colors.cardSolid) : colors.mutedForeground} /><View style={styles.cadenceCopy}><Text style={[styles.cadenceTitle, { color: colors.foreground }]}>Daily</Text><Text style={[styles.cadenceBody, { color: colors.mutedForeground }]}>Build a daily streak.</Text></View></Pressable>
+          <Pressable accessibilityRole="radio" accessibilityLabel="Weekly goal Chain" accessibilityState={{ checked: cadence === 'weekly' }} onPress={() => setCadence('weekly')} style={[styles.cadenceCard, { backgroundColor: cadence === 'weekly' ? selectedColor + '18' : colors.card, borderColor: cadence === 'weekly' ? selectedColor : colors.border }]}><Ionicons name="calendar-outline" size={18} color={cadence === 'weekly' ? readableAccentColor(selectedColor, colors.cardSolid) : colors.mutedForeground} /><View style={styles.cadenceCopy}><Text style={[styles.cadenceTitle, { color: colors.foreground }]}>Weekly goal</Text><Text style={[styles.cadenceBody, { color: colors.mutedForeground }]}>Complete a target each week.</Text></View></Pressable>
         </View>
-        {cadence === 'weekly' && <View style={[styles.targetCard, { backgroundColor: colors.card, borderColor: colors.border }]}><View><Text style={[styles.targetTitle, { color: colors.foreground }]}>How many days?</Text><Text style={[styles.targetBody, { color: colors.mutedForeground }]}>Your streak grows when you reach this each week.</Text></View><View style={styles.targetChoices}>{[1, 2, 3, 4, 5, 6, 7].map((target) => <Pressable key={target} onPress={() => { setWeeklyTarget(target); Haptics.selectionAsync(); }} style={[styles.targetPill, { backgroundColor: target === weeklyTarget ? selectedColor : colors.background, borderColor: target === weeklyTarget ? selectedColor : colors.border }]}><Text style={[styles.targetText, { color: target === weeklyTarget ? '#fff' : colors.mutedForeground }]}>{target}</Text></Pressable>)}</View></View>}
+        {cadence === 'weekly' && <Surface style={styles.targetCard}><View><Text style={[styles.targetTitle, { color: colors.foreground }]}>How many days?</Text><Text style={[styles.targetBody, { color: colors.mutedForeground }]}>Your streak grows when you reach this each week.</Text></View><SevenChoiceSelector options={WEEKLY_TARGET_OPTIONS} selectionMode="single" selectedValues={[weeklyTarget]} onSelectionChange={([target]) => { if (target) { setWeeklyTarget(target); playFeedback('selection'); } }} accentColor={selectedColor} selectedTextColor={readableTextColor(selectedColor)} textColor={colors.mutedForeground} borderColor={colors.border} backgroundColor={colors.background} accessibilityLabel="Weekly target" /></Surface>}
 
         <Text style={[styles.label, { color: colors.mutedForeground }]}>CHAIN COLOR</Text>
         <View style={styles.colorRow}>
@@ -206,9 +228,12 @@ export default function NewChainScreen() {
                 ]}
               >
                 <Pressable
+                  accessibilityRole="radio"
+                  accessibilityLabel={`${COLOR_NAMES[c] || 'Custom'} Chain color`}
+                  accessibilityState={{ checked: isSelected }}
                   onPress={() => {
                     setSelectedColor(c);
-                    Haptics.selectionAsync();
+                    playFeedback('selection');
                   }}
                   style={[
                     styles.colorSwatch,
@@ -216,154 +241,124 @@ export default function NewChainScreen() {
                     isSelected && styles.colorSwatchSelected,
                   ]}
                 >
-                  {isSelected && <Ionicons name="checkmark" size={16} color="#fff" />}
+                  {isSelected && <Ionicons name="checkmark" size={17} color={readableTextColor(c)} />}
                 </Pressable>
               </View>
             );
           })}
-          <View style={[styles.swatchRing, { borderColor: colors.border, borderWidth: 2.5 }]}><Pressable onPress={() => setShowMoreColors((open) => !open)} style={[styles.colorSwatch, { backgroundColor: colors.card }]}><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} /></Pressable></View>
+          <View style={[styles.swatchRing, { borderColor: colors.border, borderWidth: 2.5 }]}><Pressable accessibilityRole="button" accessibilityLabel={showMoreColors ? 'Show fewer Chain colors' : 'Show more Chain colors'} accessibilityState={{ expanded: showMoreColors }} onPress={() => setShowMoreColors((open) => !open)} style={[styles.colorSwatch, { backgroundColor: colors.card }]}><Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} /></Pressable></View>
         </View>
-      </ScrollView>
-
-      {/* Create button */}
-      <View style={[styles.footer, { paddingBottom: botPad + 24 }]}>
-        <Pressable
-          onPress={handleCreate}
-          style={({ pressed }) => [
-            styles.createBtn,
-            {
-              backgroundColor: name.trim() ? selectedColor : colors.border,
-              transform: [{ scale: pressed ? 0.97 : 1 }],
-            },
-          ]}
-        >
-          <Ionicons name="link" size={20} color="#fff" />
-          <Text style={styles.createBtnText}>Start this chain</Text>
-        </Pressable>
-      </View>
-    </View>
+        <View style={[styles.footer, { paddingBottom: botPad + SPACE.xl }]}>
+          <AppButton
+            label={isSubmitting ? 'Starting Chain…' : 'Start this Chain'}
+            icon="link"
+            accentColor={selectedColor}
+            disabled={!name.trim()}
+            busy={isSubmitting}
+            onPress={handleCreate}
+          />
+        </View>
+      </KeyboardAwareScrollViewCompat>
+    </AmbientScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  root:       { flex: 1 },
-  scrollRoot: { flex: 1 },
+  root: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingHorizontal: CONTROL.screenHorizontal,
+    paddingBottom: SPACE.md,
   },
-  headerTitle: {
-    fontSize: 17,
-    fontFamily: 'Inter_600SemiBold',
-  },
+  headerTitle: TYPE.sectionTitle,
   body: {
-    paddingHorizontal: 20,
-    gap: 12,
-    paddingBottom: 16,
+    paddingHorizontal: CONTROL.screenHorizontal,
+    gap: SPACE.sm,
+    paddingBottom: SPACE.md,
   },
   previewCard: {
     flexDirection: 'row',
-    borderRadius: 18,
-    borderWidth: 2,
+    borderRadius: RADIUS.card,
+    borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
-    marginBottom: 8,
+    marginBottom: SPACE.xs,
   },
-  previewStripe: {
-    width: 5,
-  },
+  previewStripe: { width: 3 },
   previewContent: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 18,
-    gap: 4,
+    paddingHorizontal: 18,
+    paddingVertical: 17,
+    gap: SPACE.xxs,
   },
-  previewName: {
-    fontSize: 17,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  previewMeta: {
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
-  },
+  previewName: TYPE.sectionTitle,
+  previewMeta: TYPE.caption,
   previewCheck: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     borderWidth: 2,
     alignSelf: 'center',
-    marginRight: 16,
+    marginRight: SPACE.md,
     overflow: 'hidden',
   },
-  previewCheckInner: {
-    flex: 1,
-  },
-  label: {
-    fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 1.2,
-    marginTop: 4,
-  },
+  previewCheckInner: { flex: 1 },
+  label: { ...TYPE.eyebrow, marginTop: SPACE.xxs },
   inputWrap: {
-    borderRadius: 14,
-    borderWidth: 1,
+    borderRadius: RADIUS.control,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   input: {
     fontSize: 16,
     fontFamily: 'Inter_400Regular',
-    padding: 16,
+    padding: SPACE.md,
   },
   suggestions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: SPACE.xs,
   },
-  quickStart: { fontSize: 12, fontFamily: 'Inter_400Regular', marginTop: -8, marginBottom: -1 },
+  quickStart: { ...TYPE.caption, marginTop: -SPACE.xs },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
+    minHeight: CONTROL.minimumTarget,
+    paddingHorizontal: SPACE.sm,
+    paddingVertical: SPACE.xs,
+    borderRadius: RADIUS.capsule,
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: 'center',
   },
   suggestionExpand: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1,
+    width: CONTROL.minimumTarget,
+    height: CONTROL.minimumTarget,
+    borderRadius: RADIUS.capsule,
+    borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  chipText: {
-    fontSize: 13,
-    fontFamily: 'Inter_500Medium',
-  },
+  chipText: { fontSize: 13, lineHeight: 18, fontFamily: 'Inter_500Medium' },
   colorRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: SPACE.xs,
     flexWrap: 'wrap',
     alignItems: 'center',
   },
-  cadenceRow: { flexDirection: 'row', gap: 8 },
-  cadenceCard: { flex: 1, borderRadius: 16, borderWidth: 1, padding: 12, gap: 8 },
-  cadenceCopy: { gap: 2 },
-  cadenceTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  cadenceBody: { fontSize: 10, fontFamily: 'Inter_400Regular', lineHeight: 14 },
-  targetCard: { borderRadius: 16, borderWidth: 1, padding: 12, gap: 10 },
-  targetTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold' },
-  targetBody: { fontSize: 11, fontFamily: 'Inter_400Regular', marginTop: 2 },
-  targetChoices: { flexDirection: 'row', gap: 6, justifyContent: 'space-between' },
-  targetPill: { width: 31, height: 31, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  targetText: { fontSize: 12, fontFamily: 'Inter_700Bold' },
+  cadenceRow: { flexDirection: 'row', gap: SPACE.xs },
+  cadenceCard: { minHeight: 88, flex: 1, borderRadius: RADIUS.control, borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm, gap: SPACE.xs },
+  cadenceCopy: { gap: SPACE.hairline },
+  cadenceTitle: { fontSize: 14, lineHeight: 19, fontFamily: 'Inter_600SemiBold' },
+  cadenceBody: TYPE.caption,
+  targetCard: { borderRadius: RADIUS.control, borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm, gap: SPACE.sm },
+  targetTitle: TYPE.bodyStrong,
+  targetBody: { ...TYPE.caption, marginTop: SPACE.hairline },
   swatchRing: {
-    borderRadius: 26,
+    borderRadius: RADIUS.capsule,
     padding: 3,
   },
   colorSwatch: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: CONTROL.minimumTarget,
+    height: CONTROL.minimumTarget,
+    borderRadius: RADIUS.capsule,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -374,20 +369,5 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 5,
   },
-  footer: {
-    paddingHorizontal: 20,
-  },
-  createBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 18,
-    borderRadius: 32,
-    gap: 10,
-  },
-  createBtnText: {
-    color: '#fff',
-    fontSize: 17,
-    fontFamily: 'Inter_600SemiBold',
-  },
+  footer: { paddingTop: SPACE.md },
 });

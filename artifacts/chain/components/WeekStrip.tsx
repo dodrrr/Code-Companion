@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { Chain, isRestDay, toLocalDateString } from '@/context/ChainsContext';
+import { SPACE, TYPE } from '@/constants/designSystem';
 
 interface Props {
   chain: Chain;
@@ -81,21 +82,22 @@ export default function WeekStrip({ chain }: Props) {
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    gap: 8,
+    gap: SPACE.xs,
   },
   dayCol: {
     alignItems: 'center',
-    gap: 5,
+    gap: SPACE.xxs,
   },
   dayLabel: {
-    fontSize: 10,
+    ...TYPE.eyebrow,
+    lineHeight: 15,
     textTransform: 'uppercase',
     letterSpacing: 0.3,
   },
   dot: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },

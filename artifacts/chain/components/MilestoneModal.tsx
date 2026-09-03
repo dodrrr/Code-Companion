@@ -1,83 +1,99 @@
 import React, { useEffect } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
+  useReducedMotion,
   useSharedValue,
-  withDelay,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
+import { AppButton, Surface } from '@/components/ui/AppUI';
+import { MOTION, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+import { readableAccentColor } from '@/constants/sectionTheme';
+
+const GLASS_SURFACE_COLOR = '#121214';
 
 interface Props {
   streak: number;
+  cadence: 'daily' | 'weekly';
   chainName: string;
   color: string;
   onDismiss: () => void;
 }
 
-interface Config {
-  emoji: string;
-  headline: string;
-  sub: string;
-}
-
-const CONFIGS: Record<number, Config> = {
-  7:   { emoji: '🔥', headline: '7-day streak!',    sub: "One full week in. You're building something real." },
-  30:  { emoji: '⚡', headline: '30 days strong!',   sub: 'A whole month of showing up. This is a habit now.' },
-  100: { emoji: '👑', headline: '100-day legend!',   sub: "Triple digits. This chain is part of who you are." },
+const NUMBER_WORDS: Record<number, string> = {
+  7: 'Seven',
+  30: 'Thirty',
+  100: 'One hundred',
 };
 
-export default function MilestoneModal({ streak, chainName, color, onDismiss }: Props) {
-  const colors = useColors();
-  const config: Config = CONFIGS[streak] ?? {
-    emoji: '🔥',
-    headline: `${streak}-day streak!`,
-    sub: 'Keep the chain alive.',
-  };
+const SUPPORTING_COPY: Record<number, string> = {
+  7: 'You returned often enough for a pattern to begin.',
+  30: 'This promise is finding a steady place in your life.',
+  100: 'Consistency has become part of the rhythm.',
+};
 
-  const scale   = useSharedValue(0.5);
+export default function MilestoneModal({
+  streak,
+  cadence,
+  chainName,
+  color,
+  onDismiss,
+}: Props) {
+  const colors = useColors();
+  const reducedMotion = useReducedMotion();
   const opacity = useSharedValue(0);
+  const scale = useSharedValue(reducedMotion ? 1 : 0.98);
+  const unit = cadence === 'weekly' ? 'week' : 'day';
+  const quantity = NUMBER_WORDS[streak] ?? String(streak);
+  const headline = `${quantity} ${unit}${streak === 1 ? '' : 's'} kept.`;
+  const supportingCopy = SUPPORTING_COPY[streak] ?? 'You showed up again.';
+  const readableAccent = readableAccentColor(color, GLASS_SURFACE_COLOR, 4.8);
 
   useEffect(() => {
-    opacity.value = withTiming(1, { duration: 180 });
-    scale.value   = withDelay(80, withSpring(1, { damping: 11, stiffness: 220 }));
-  }, []);
+    opacity.value = withTiming(1, { duration: reducedMotion ? 80 : MOTION.standard });
+    scale.value = withTiming(1, { duration: reducedMotion ? 0 : MOTION.standard });
+  }, [opacity, reducedMotion, scale]);
 
-  const cardAnim = useAnimatedStyle(() => ({
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
     transform: [{ scale: scale.value }],
-    opacity:   opacity.value,
   }));
 
   return (
     <Modal transparent animationType="none" statusBarTranslucent onRequestClose={onDismiss}>
-      <Pressable style={styles.backdrop} onPress={onDismiss}>
-        <Animated.View
-          style={[styles.card, { backgroundColor: colors.card, borderColor: color + '55' }, cardAnim]}
-        >
-          {/* Top accent bar */}
-          <View style={[styles.topBar, { backgroundColor: color }]} />
-
-          <View style={styles.body}>
-            <Text style={styles.emoji}>{config.emoji}</Text>
-            <Text style={[styles.headline, { color }]}>{config.headline}</Text>
-            <Text style={[styles.chainLabel, { color: colors.mutedForeground }]}>
-              {chainName}
-            </Text>
-            <Text style={[styles.sub, { color: colors.mutedForeground }]}>{config.sub}</Text>
-
-            <Pressable
-              onPress={onDismiss}
-              style={({ pressed }) => [
-                styles.btn,
-                { backgroundColor: color, opacity: pressed ? 0.85 : 1 },
-              ]}
+      <View style={styles.backdrop}>
+        <Pressable
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          onPress={onDismiss}
+          style={StyleSheet.absoluteFill}
+        />
+        <Animated.View accessibilityViewIsModal style={[styles.frame, cardStyle]}>
+          <Surface elevated accentColor={color} style={styles.card}>
+            <ScrollView
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.content}
             >
-              <Text style={styles.btnText}>Keep it up</Text>
-            </Pressable>
-          </View>
+              <View style={[styles.icon, { backgroundColor: color + '1C' }]}>
+                <Ionicons name="link-outline" size={25} color={readableAccent} />
+              </View>
+              <Text style={[TYPE.eyebrow, { color: readableAccent }]}>MILESTONE</Text>
+              <Text style={[styles.headline, { color: colors.foreground }]}>{headline}</Text>
+              <Text style={[styles.chainName, { color: colors.mutedForeground }]}>{chainName}</Text>
+              <Text style={[styles.supportingCopy, { color: colors.mutedForeground }]}>
+                {supportingCopy}
+              </Text>
+              <View style={styles.action}>
+                <AppButton label="Continue" onPress={onDismiss} accentColor={color} />
+              </View>
+            </ScrollView>
+          </Surface>
         </Animated.View>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
@@ -87,56 +103,22 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
-    backgroundColor: 'rgba(0,0,0,0.78)',
+    padding: SPACE.xl,
+    backgroundColor: SCRIM,
   },
-  card: {
-    width: '100%',
-    borderRadius: 28,
-    borderWidth: 1,
-    overflow: 'hidden',
-  },
-  topBar: {
-    height: 5,
-  },
-  body: {
+  frame: { width: '100%', maxWidth: 340, maxHeight: '82%' },
+  card: { borderRadius: RADIUS.modal, maxHeight: '100%' },
+  content: { alignItems: 'center', paddingHorizontal: SPACE.xl, paddingVertical: SPACE.xxl },
+  icon: {
+    width: 56,
+    height: 56,
+    borderRadius: RADIUS.button,
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 32,
-    paddingBottom: 28,
-    gap: 8,
+    justifyContent: 'center',
+    marginBottom: SPACE.md,
   },
-  emoji: {
-    fontSize: 56,
-    marginBottom: 4,
-  },
-  headline: {
-    fontSize: 30,
-    fontFamily: 'Inter_700Bold',
-    textAlign: 'center',
-  },
-  chainLabel: {
-    fontSize: 13,
-    fontFamily: 'Inter_500Medium',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  sub: {
-    fontSize: 15,
-    fontFamily: 'Inter_400Regular',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 8,
-  },
-  btn: {
-    marginTop: 10,
-    paddingHorizontal: 40,
-    paddingVertical: 16,
-    borderRadius: 32,
-  },
-  btnText: {
-    color: '#fff',
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-  },
+  headline: { ...TYPE.modalTitle, textAlign: 'center', marginTop: SPACE.xxs },
+  chainName: { ...TYPE.bodyStrong, textAlign: 'center', marginTop: SPACE.xxs },
+  supportingCopy: { ...TYPE.body, textAlign: 'center', marginTop: SPACE.sm },
+  action: { alignSelf: 'stretch', marginTop: SPACE.xl },
 });

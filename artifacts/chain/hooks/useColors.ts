@@ -1,15 +1,9 @@
 import { useColorScheme } from 'react-native';
 import { usePathname } from 'expo-router';
 import colors from '@/constants/colors';
+import { readableTextColor, SECTION_ACCENTS, SectionTone } from '@/constants/sectionTheme';
 
-export type SectionTone = 'today' | 'gate' | 'plan' | 'neutral';
-
-export const SECTION_ACCENTS: Record<SectionTone, string> = {
-  today: '#FF6B35',
-  gate: '#FF6B35',
-  plan: '#FF6B35',
-  neutral: '#FF6B35',
-};
+export { SECTION_ACCENTS, SectionTone } from '@/constants/sectionTheme';
 
 function toneForPath(pathname: string): SectionTone {
   if (pathname.includes('gate') || pathname.includes('pause-gate')) return 'gate';
@@ -38,11 +32,14 @@ export function useColors(explicitTone?: SectionTone) {
       : colors.light;
   const sectionTone = explicitTone ?? toneForPath(pathname);
   const sectionAccent = SECTION_ACCENTS[sectionTone];
+  const sectionAccentForeground = readableTextColor(sectionAccent);
   return {
     ...palette,
     primary: sectionAccent,
+    primaryForeground: sectionAccentForeground,
     tint: sectionAccent,
     accent: sectionAccent,
+    accentForeground: sectionAccentForeground,
     sectionTone,
     sectionAccent,
     radius: colors.radius,

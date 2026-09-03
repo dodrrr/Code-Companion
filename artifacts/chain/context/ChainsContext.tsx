@@ -16,18 +16,23 @@ import { reportDiagnostic } from '@/lib/diagnostics';
 export type { Chain, DayStatus } from '@/domain/chains';
 export { getStreak, getTodayStr, getWeeklyProgress, isRestDay, toLocalDateString } from '@/domain/chains';
 
+export type ChainMutationResult =
+  | { status: 'persisted' }
+  | { status: 'rejected' }
+  | { status: 'failed'; error: unknown };
+
 interface ChainsContextValue {
   chains: Chain[];
   isReady: boolean;
-  addChain: (name: string, color: string, options?: { cadence?: Chain['cadence']; weeklyTarget?: number }) => void;
-  deleteChain: (id: string) => void;
-  updateChainColor: (id: string, color: string) => void;
-  updateChainRestDays: (id: string, restDays: number[]) => void;
-  updateChainCadence: (id: string, cadence: Chain['cadence'], weeklyTarget?: number) => void;
-  updateChainMinimumLabel: (id: string, label: string) => void;
-  setDayStatus: (id: string, date: string, status: DayStatus) => boolean;
-  toggleToday: (id: string) => void;
-  useFreeze: (id: string) => void;
+  addChain: (name: string, color: string, options?: { cadence?: Chain['cadence']; weeklyTarget?: number }) => Promise<ChainMutationResult>;
+  deleteChain: (id: string) => Promise<ChainMutationResult>;
+  updateChainColor: (id: string, color: string) => Promise<ChainMutationResult>;
+  updateChainRestDays: (id: string, restDays: number[]) => Promise<ChainMutationResult>;
+  updateChainCadence: (id: string, cadence: Chain['cadence'], weeklyTarget?: number) => Promise<ChainMutationResult>;
+  updateChainMinimumLabel: (id: string, label: string) => Promise<ChainMutationResult>;
+  setDayStatus: (id: string, date: string, status: DayStatus) => Promise<ChainMutationResult>;
+  toggleToday: (id: string) => Promise<ChainMutationResult>;
+  useFreeze: (id: string) => Promise<ChainMutationResult>;
   isCompletedToday: (chain: Chain) => boolean;
   isProtectedToday: (chain: Chain) => boolean;
   isFrozenToday: (chain: Chain) => boolean;
@@ -36,6 +41,7 @@ interface ChainsContextValue {
 
 const STORAGE_KEY = '@chain_v2';
 const LEGACY_STORAGE_KEY = '@chain_v1';
+const LEGACY_MIGRATION_MARKER_KEY = '@chain_v1:migrated-to-chain-v2';
 const chainsRepository = createVersionedRepository<Chain[]>({
   storage: AsyncStorage,
   key: STORAGE_KEY,
@@ -50,19 +56,53 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
   const [chains, setChains] = useState<Chain[]>([]);
   const [isReady, setIsReady] = useState(false);
   const chainsRef = useRef<Chain[]>([]);
-  const storageWriteQueue = useRef<Promise<void>>(Promise.resolve());
+  const mutationRevisionRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
 
     async function hydrate() {
       try {
-        const current = await chainsRepository.read();
-        const legacy = current.length > 0 ? [] : parseChains(await AsyncStorage.getItem(LEGACY_STORAGE_KEY));
-        const next = current.length > 0 ? current : legacy;
+        const current = await chainsRepository.readWithMetadata();
+        let next = current.value;
+        const hasCompletedLegacyMigration =
+          (await AsyncStorage.getItem(LEGACY_MIGRATION_MARKER_KEY)) !== null;
 
-        if (legacy.length > 0) {
-          await chainsRepository.write(legacy);
+        if (current.source === 'invalid' || current.source === 'unsupported') {
+          reportDiagnostic({
+            area: 'storage',
+            operation: 'chains.readInvalidRepository',
+            severity: 'error',
+            error: new Error(
+              current.source === 'unsupported'
+                ? 'Chains storage was written by a newer app version'
+                : 'Chains storage and backup could not be decoded',
+            ),
+          });
+        }
+
+        // A valid empty v2 envelope is authoritative: it can mean the user
+        // deliberately deleted every Chain. Only import v1 when no valid v2
+        // primary or backup exists and the migration has never run.
+        if (!hasCompletedLegacyMigration && current.source === 'empty') {
+          const legacy = parseChains(await AsyncStorage.getItem(LEGACY_STORAGE_KEY));
+          if (legacy.length > 0) {
+            await chainsRepository.write(legacy);
+            next = legacy;
+          }
+        }
+
+        if (!hasCompletedLegacyMigration) {
+          try {
+            await AsyncStorage.setItem(LEGACY_MIGRATION_MARKER_KEY, '1');
+          } catch (error) {
+            reportDiagnostic({
+              area: 'storage',
+              operation: 'chains.markLegacyMigration',
+              severity: 'warning',
+              error,
+            });
+          }
         }
 
         if (!cancelled) {
@@ -82,15 +122,28 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  function persist(next: Chain[]) {
+  async function persist(next: Chain[], operation: string): Promise<ChainMutationResult> {
+    const revision = ++mutationRevisionRef.current;
     chainsRef.current = next;
     setChains(next);
-    storageWriteQueue.current = storageWriteQueue.current
-      .catch(() => undefined)
-      .then(() => chainsRepository.write(next))
-      .catch((error) => {
-        reportDiagnostic({ area: 'storage', operation: 'chains.persist', severity: 'error', error });
-      });
+    try {
+      await chainsRepository.write(next);
+      return { status: 'persisted' };
+    } catch (error) {
+      reportDiagnostic({ area: 'storage', operation, severity: 'error', error });
+      if (mutationRevisionRef.current === revision) {
+        try {
+          const persisted = await chainsRepository.read();
+          if (mutationRevisionRef.current === revision) {
+            chainsRef.current = persisted;
+            setChains(persisted);
+          }
+        } catch (reconciliationError) {
+          reportDiagnostic({ area: 'storage', operation: `${operation}.reconcile`, severity: 'warning', error: reconciliationError });
+        }
+      }
+      return { status: 'failed', error };
+    }
   }
 
   function addChain(name: string, color: string, options?: { cadence?: Chain['cadence']; weeklyTarget?: number }) {
@@ -111,63 +164,69 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
       weeklyTarget: normalizeWeeklyTarget(options?.weeklyTarget),
       completionTimes: {},
     };
-    persist([...chainsRef.current, chain]);
+    return persist([...chainsRef.current, chain], 'chains.add');
   }
 
   function deleteChain(id: string) {
-    persist(chainsRef.current.filter((c) => c.id !== id));
+    if (!chainsRef.current.some((chain) => chain.id === id)) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
+    return persist(chainsRef.current.filter((c) => c.id !== id), 'chains.delete');
   }
 
   function updateChainColor(id: string, color: string) {
-    persist(chainsRef.current.map((chain) => (chain.id === id ? { ...chain, color } : chain)));
+    if (!chainsRef.current.some((chain) => chain.id === id)) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
+    return persist(chainsRef.current.map((chain) => (chain.id === id ? { ...chain, color } : chain)), 'chains.updateColor');
   }
 
   function updateChainRestDays(id: string, restDays: number[]) {
-    persist(
+    if (!chainsRef.current.some((chain) => chain.id === id)) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
+    return persist(
       chainsRef.current.map((chain) => (chain.id === id ? { ...chain, restDays: normalizeRestDays(restDays) } : chain)),
+      'chains.updateRestDays',
     );
   }
 
   function updateChainCadence(id: string, cadence: Chain['cadence'], weeklyTarget?: number) {
-    persist(chainsRef.current.map((chain) => chain.id === id ? {
+    if (!chainsRef.current.some((chain) => chain.id === id)) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
+    return persist(chainsRef.current.map((chain) => chain.id === id ? {
       ...chain,
       cadence,
       weeklyTarget: normalizeWeeklyTarget(weeklyTarget ?? chain.weeklyTarget),
       restDays: cadence === 'weekly' ? [] : chain.restDays,
-    } : chain));
+    } : chain), 'chains.updateCadence');
   }
 
   function updateChainMinimumLabel(id: string, label: string) {
+    if (!chainsRef.current.some((chain) => chain.id === id)) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
     const nextLabel = label.trim().slice(0, 48) || 'A small version';
-    persist(chainsRef.current.map((chain) => chain.id === id ? { ...chain, minimumLabel: nextLabel } : chain));
+    return persist(chainsRef.current.map((chain) => chain.id === id ? { ...chain, minimumLabel: nextLabel } : chain), 'chains.updateMinimumLabel');
   }
 
-  function setDayStatus(id: string, date: string, status: DayStatus): boolean {
+  async function setDayStatus(id: string, date: string, status: DayStatus): Promise<ChainMutationResult> {
     const current = chainsRef.current;
     const target = current.find((chain) => chain.id === id);
-    if (!target) return false;
+    if (!target) return { status: 'rejected' };
     const result = applyDayStatus(target, date, status);
-    if (!result.accepted) return false;
-    if (result.changed) persist(current.map((chain) => (chain.id === id ? result.chain : chain)));
-    return result.accepted;
+    if (!result.accepted) return { status: 'rejected' };
+    if (!result.changed) return { status: 'persisted' };
+    return persist(current.map((chain) => (chain.id === id ? result.chain : chain)), 'chains.setDayStatus');
   }
 
   function toggleToday(id: string) {
     const today = getTodayStr();
     const chain = chainsRef.current.find((item) => item.id === id);
-    if (!chain) return;
-    setDayStatus(id, today, (chain.completedDates.includes(today) || chain.minimumDates.includes(today)) ? 'missed' : 'done');
+    if (!chain) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
+    return setDayStatus(id, today, (chain.completedDates.includes(today) || chain.minimumDates.includes(today)) ? 'missed' : 'done');
   }
 
   function useFreeze(id: string) {
     const today = getTodayStr();
-    setDayStatus(id, today, 'frozen');
+    return setDayStatus(id, today, 'frozen');
   }
 
   const isCompletedToday = (c: Chain) =>
     c.completedDates.includes(getTodayStr());
   const isProtectedToday = (c: Chain) =>
-    c.completedDates.includes(getTodayStr()) || c.minimumDates.includes(getTodayStr());
+    c.completedDates.includes(getTodayStr()) || c.minimumDates.includes(getTodayStr()) || c.frozenDates.includes(getTodayStr());
   const isFrozenToday = (c: Chain) => c.frozenDates.includes(getTodayStr());
   const getRemainingFreezeTokens = (c: Chain) => c.freezeCredits;
 

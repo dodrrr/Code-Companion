@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { PlanItem } from '@/context/PlanContext';
+import { isMorningBriefingNotificationData, type PlanItem } from '@/domain/plan';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -113,16 +113,72 @@ export async function schedulePlanSnooze(item: PlanItem, minutes = 15): Promise<
 
 export async function cancelPlanReminder(notificationId?: string) {
   if (notificationId && Platform.OS !== 'web') {
-    await Notifications.cancelScheduledNotificationAsync(notificationId);
+    try {
+      await Notifications.cancelScheduledNotificationAsync(notificationId);
+    } catch (error) {
+      // Cancellation is semantically complete when native state confirms the
+      // request is already absent (for example after a retry or delivery).
+      try {
+        const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+        if (!scheduled.some((request) => request.identifier === notificationId)) return;
+      } catch {
+        // Preserve the original cancellation error; it best describes why the
+        // caller must not commit an action that depends on cancellation.
+      }
+      throw error;
+    }
   }
 }
 
-export async function scheduleMorningBriefing(hour: number): Promise<ReminderResult> {
+let morningBriefingQueue: Promise<void> = Promise.resolve();
+
+async function replaceMorningBriefing(hour: number): Promise<ReminderResult> {
   if (Platform.OS === 'web') return { status: 'unavailable' };
   if (await getPlanNotificationPermission() !== 'granted') return { status: 'denied' };
+
+  // Enumerate first: if native notification state cannot be inspected, no new
+  // request is created and therefore no untracked briefing can be orphaned.
+  const scheduledBefore = await Notifications.getAllScheduledNotificationsAsync();
+  const supersededBriefingIds = scheduledBefore
+    .filter((request) => isMorningBriefingNotificationData(request.content.data))
+    .map((request) => request.identifier);
+
   const notificationId = await Notifications.scheduleNotificationAsync({
-    content: { title: 'Good morning — your day is ready', body: 'Open Chain, protect your one thing, then start gently.', sound: 'default', data: { openPlan: true } },
+    content: {
+      title: 'Good morning — your day is ready',
+      body: 'Open Chain, protect your one thing, then start gently.',
+      sound: 'default',
+      data: { openPlan: true, morningBriefing: true },
+    },
     trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute: 0 },
   });
+
+  try {
+    // The queue keeps rapid hour changes serialized. If replacing any old
+    // briefing fails, remove the newly created one before surfacing failure.
+    await Promise.all(
+      supersededBriefingIds.map((identifier) => cancelPlanReminder(identifier)),
+    );
+  } catch (error) {
+    try {
+      await cancelPlanReminder(notificationId);
+    } catch (compensationError) {
+      // Both failures are relevant: the caller must know the operation failed,
+      // while diagnostics retain the exceptional orphan risk for support/QA.
+      throw new Error('Morning briefing replacement and compensation failed', {
+        cause: { replacementError: error, compensationError },
+      });
+    }
+    throw error;
+  }
+
   return { status: 'scheduled', notificationId };
+}
+
+export function scheduleMorningBriefing(hour: number): Promise<ReminderResult> {
+  const operation = morningBriefingQueue
+    .catch(() => undefined)
+    .then(() => replaceMorningBriefing(hour));
+  morningBriefingQueue = operation.then(() => undefined, () => undefined);
+  return operation;
 }

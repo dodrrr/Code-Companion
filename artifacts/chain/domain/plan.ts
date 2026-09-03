@@ -39,6 +39,12 @@ export interface FocusLogEntry {
 
 export type PlanNotificationIntent = 'complete' | 'snooze' | 'open' | 'ignore';
 
+export function isMorningBriefingNotificationData(data: unknown): boolean {
+  if (!data || typeof data !== 'object') return false;
+  const value = data as { morningBriefing?: unknown; openPlan?: unknown; planItemId?: unknown };
+  return value.morningBriefing === true || (value.openPlan === true && typeof value.planItemId !== 'string');
+}
+
 export function getPlanNotificationIntent(action: string, data: unknown): PlanNotificationIntent {
   if (!data || typeof data !== 'object') return 'ignore';
   const value = data as { planItemId?: unknown; planDate?: unknown; openPlan?: unknown };
@@ -68,6 +74,7 @@ export function resolvePlanForDate(
       completed: false,
       completedAt: undefined,
       planDate: targetDate,
+      reminderMinutes: undefined,
       notificationId: undefined,
       isPriority: false,
       repeatSourceId: item.repeatSourceId || item.id,
@@ -102,7 +109,7 @@ function normalizeRepeatDays(value: unknown): number[] | undefined {
 
 export function decodePlanItems(parsed: unknown, fallbackDate: string): PlanItem[] | null {
   if (!Array.isArray(parsed)) return null;
-  return parsed.flatMap((value): PlanItem[] => {
+  const normalized = parsed.flatMap((value): PlanItem[] => {
       if (!value || typeof value !== 'object') return [];
       const item = value as Partial<PlanItem>;
       if (typeof item.id !== 'string' || typeof item.text !== 'string' || !item.text.trim()) return [];
@@ -132,6 +139,7 @@ export function decodePlanItems(parsed: unknown, fallbackDate: string): PlanItem
         },
       ];
   });
+  return parsed.length > 0 && normalized.length === 0 ? null : normalized;
 }
 
 export function normalizePlanItems(raw: string | null, fallbackDate: string): PlanItem[] {

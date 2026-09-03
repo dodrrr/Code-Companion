@@ -1,269 +1,351 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSequence,
-  withSpring,
-  withTiming,
-} from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
+import Svg, { Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
-import { Chain, getStreak, getTodayStr, getWeeklyProgress, isRestDay, useChains } from '@/context/ChainsContext';
+import {
+  Chain,
+  getStreak,
+  getTodayStr,
+  getWeeklyProgress,
+  isRestDay,
+  useChains,
+} from '@/context/ChainsContext';
 import { getProgressionStage } from '@/constants/progression';
+import { CONTROL, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+import { playFeedback } from '@/lib/feedback';
+import AnimatedPressable from './AnimatedPressable';
 import WeekStrip from './WeekStrip';
 import MilestoneModal from './MilestoneModal';
-import { GlassSurface } from './AmbientSurface';
+import { AppButton, Surface } from './ui/AppUI';
 
 interface Props {
   chain: Chain;
 }
 
 const MILESTONES = new Set([7, 30, 100]);
+const FROZEN_COLOR = '#5B8CFF';
+const GLASS_SURFACE_COLOR = '#121214';
 
-// Extracted component so useAnimatedStyle is never called inside a .map()
 export default function ChainCard({ chain }: Props) {
   const colors = useColors();
+  const reducedMotion = useReducedMotion();
   const { toggleToday, isCompletedToday, isProtectedToday, isFrozenToday } = useChains();
-  const done   = isCompletedToday(chain);
+  const done = isCompletedToday(chain);
   const protectedToday = isProtectedToday(chain);
   const frozen = isFrozenToday(chain);
+  const keptToday = done || chain.minimumDates.includes(getTodayStr());
   const streak = getStreak(chain);
   const stage = getProgressionStage(streak);
   const restingToday = isRestDay(chain, getTodayStr());
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
   const compactStreak = streak >= 100;
+  const readableAccent = readableAccentColor(chain.color, GLASS_SURFACE_COLOR, 4.8);
+  const statusColor = frozen ? FROZEN_COLOR : keptToday ? chain.color : undefined;
+  const statusForeground = statusColor ? readableTextColor(statusColor) : colors.mutedForeground;
 
-  const checkScale = useSharedValue(1);
-
-  // Milestone celebration
   const [celebratingMilestone, setCelebratingMilestone] = useState<number | null>(null);
   const [celebratingExtra, setCelebratingExtra] = useState<number | null>(null);
-  const prevDoneRef = useRef(protectedToday);
+  const [mutationBusy, setMutationBusy] = useState(false);
+  const mutationBusyRef = useRef(false);
+  const prevDoneRef = useRef(keptToday);
   const prevWeeklyProgressRef = useRef(weeklyProgress);
+  const previousCompletedRef = useRef(done);
+  const checkArrival = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (!prevDoneRef.current && protectedToday && MILESTONES.has(streak)) {
+    if (!prevDoneRef.current && keptToday && MILESTONES.has(streak)) {
       setCelebratingMilestone(streak);
     }
-    prevDoneRef.current = protectedToday;
-  }, [protectedToday, streak]);
+    prevDoneRef.current = keptToday;
+  }, [keptToday, streak]);
 
   useEffect(() => {
-    if (chain.cadence === 'weekly' && weeklyProgress > chain.weeklyTarget && weeklyProgress > prevWeeklyProgressRef.current) {
+    if (
+      chain.cadence === 'weekly'
+      && weeklyProgress > chain.weeklyTarget
+      && weeklyProgress > prevWeeklyProgressRef.current
+    ) {
       setCelebratingExtra(weeklyProgress - chain.weeklyTarget);
     }
     prevWeeklyProgressRef.current = weeklyProgress;
   }, [chain.cadence, chain.weeklyTarget, weeklyProgress]);
 
-  const checkStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: checkScale.value }],
-  }));
+  useEffect(() => {
+    const becameComplete = done && !previousCompletedRef.current;
+    previousCompletedRef.current = done;
+    if (!becameComplete) return;
 
-  const handleCheck = useCallback(() => {
-    if (restingToday) return;
-    if (!done) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      checkScale.value = withSequence(
-        withTiming(1.07, { duration: 120 }),
-        withSpring(1, { damping: 22, stiffness: 260 }),
-      );
-    } else {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (reducedMotion) {
+      checkArrival.setValue(1);
+      return;
     }
-    toggleToday(chain.id);
-  }, [done, chain.id, restingToday, toggleToday, checkScale]);
+
+    checkArrival.setValue(0);
+    const animation = Animated.timing(checkArrival, {
+      toValue: 1,
+      duration: 220,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [checkArrival, done, reducedMotion]);
+
+  const handleCheck = useCallback(async () => {
+    if (restingToday || mutationBusyRef.current) return;
+    mutationBusyRef.current = true;
+    setMutationBusy(true);
+    const result = await toggleToday(chain.id);
+    mutationBusyRef.current = false;
+    setMutationBusy(false);
+    if (result.status !== 'persisted') {
+      playFeedback('error');
+      Alert.alert('Chain not updated', 'Chain couldn’t save that change. Your previous status has been restored.');
+      return;
+    }
+    playFeedback(done ? 'selection' : 'light');
+  }, [done, chain.id, restingToday, toggleToday]);
 
   const handleCardPress = useCallback(() => {
     router.push({ pathname: '/chain/[id]', params: { id: chain.id } });
   }, [chain.id]);
 
+  const statusLabel = restingToday
+    ? 'rest day'
+    : frozen
+      ? 'frozen today'
+      : done
+        ? 'completed today'
+        : protectedToday
+          ? 'minimum version logged today'
+          : 'not yet logged today';
+
   return (
     <>
-      <Pressable
-        onPress={handleCardPress}
-        accessibilityRole="button"
-        accessibilityLabel={`${chain.name}, ${streak} ${chain.cadence === 'weekly' ? 'week' : 'day'} streak`}
-        accessibilityHint="Opens chain details"
-        style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
-      >
-        <Animated.View
-          style={[
-            styles.card,
-            { backgroundColor: 'transparent', borderColor: colors.border },
-          ]}
+      <Surface accentColor={chain.color} style={styles.card}>
+        <View style={[styles.stripe, { backgroundColor: chain.color }]} />
+        <AnimatedPressable
+          accessibilityRole="button"
+          accessibilityLabel={`${chain.name}, ${streak} ${chain.cadence === 'weekly' ? 'week' : 'day'} streak, ${statusLabel}`}
+          accessibilityHint="Opens Chain details"
+          onPress={handleCardPress}
+          containerStyle={styles.detailsTarget}
+          style={styles.body}
         >
-          <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
-          {/* Color accent stripe */}
-          <View style={[styles.stripe, { backgroundColor: chain.color }]} />
-
-          <View style={styles.body}>
-            {/* Top row: name + streak + check */}
-            <View style={styles.topRow}>
-              <View style={styles.nameBlock}>
-                <Text
-                  style={[styles.name, { color: colors.foreground }]}
-                  numberOfLines={1}
-                >
-                  {chain.name}
-                </Text>
-                <Text style={[styles.stageLabel, { color: chain.color }]} numberOfLines={1}>{stage.label.toUpperCase()}</Text>
-              </View>
-              <View style={styles.rightSide}>
-                <View style={styles.streakBlock}>
-                  <Text style={[styles.streakNum, compactStreak && styles.streakNumCompact, { color: chain.color }]}>
-                    {streak}
-                  </Text>
-                  <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}>
-                    {chain.cadence === 'weekly' ? (streak === 1 ? 'week' : 'weeks') : streak === 1 ? 'day' : 'days'}
-                  </Text>
-                </View>
-                <View style={chain.cadence === 'weekly' ? styles.weeklyCheckBlock : undefined}>
-                  <Pressable
-                    onPress={handleCheck}
-                    disabled={restingToday}
-                    hitSlop={14}
-                    accessibilityRole="checkbox"
-                    accessibilityLabel={`${protectedToday ? 'Unmark' : 'Mark'} ${chain.name} for today`}
-                    accessibilityState={{ checked: protectedToday, disabled: restingToday }}
-                  >
-                    <Animated.View style={checkStyle}>
-                      <View
-                        style={[
-                          styles.checkBtn,
-                          {
-                            backgroundColor: protectedToday ? chain.color : frozen ? '#5B8CFF' : restingToday ? colors.secondary : 'transparent',
-                            borderColor:     protectedToday ? chain.color : frozen ? '#5B8CFF' : restingToday ? colors.mutedForeground + '55' : colors.border,
-                          },
-                        ]}
-                      >
-                        {protectedToday ? <Ionicons name={done ? 'checkmark' : 'leaf-outline'} size={18} color="#fff" /> : frozen ? <Ionicons name="snow" size={17} color="#fff" /> : restingToday ? <Ionicons name="moon-outline" size={17} color={colors.mutedForeground} /> : null}
-                      </View>
-                    </Animated.View>
-                  </Pressable>
-                  {chain.cadence === 'weekly' && (
-                    <Text numberOfLines={1} style={[styles.weeklyProgress, { color: chain.color }]}>
-                      {weeklyProgress > chain.weeklyTarget
-                        ? `+${weeklyProgress - chain.weeklyTarget} extra`
-                        : `${weeklyProgress}/${chain.weeklyTarget}`}
-                    </Text>
-                  )}
-                </View>
-              </View>
+          <View style={[styles.topRow, chain.cadence === 'weekly' && styles.topRowWeekly]}>
+            <View style={styles.nameBlock}>
+              <Text style={[styles.name, { color: colors.foreground }]} numberOfLines={2}>
+                {chain.name}
+              </Text>
+              <Text style={[styles.stageLabel, { color: readableAccent }]} numberOfLines={1}>
+                {stage.label.toUpperCase()}
+              </Text>
             </View>
+            <View style={styles.streakBlock}>
+              <Text
+                style={[
+                  styles.streakNum,
+                  compactStreak && styles.streakNumCompact,
+                  { color: readableAccent },
+                ]}
+              >
+                {streak}
+              </Text>
+              <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}>
+                {chain.cadence === 'weekly'
+                  ? streak === 1 ? 'week' : 'weeks'
+                  : streak === 1 ? 'day' : 'days'}
+              </Text>
+            </View>
+          </View>
 
-            {/* 7-day dot strip */}
+          <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
             <WeekStrip chain={chain} />
           </View>
-        </Animated.View>
-      </Pressable>
+        </AnimatedPressable>
+        <View pointerEvents="box-none" style={styles.checkColumn}>
+          <AnimatedPressable
+            accessibilityRole="checkbox"
+            accessibilityLabel={restingToday
+              ? `${chain.name} is resting today`
+              : frozen
+                ? `Replace today's freeze with a completion for ${chain.name}`
+                : `${keptToday ? 'Unmark' : 'Mark'} ${chain.name} for today`}
+            accessibilityState={{ checked: protectedToday, disabled: restingToday || mutationBusy, busy: mutationBusy }}
+            disabled={restingToday || mutationBusy}
+            onPress={handleCheck}
+            scaleTo={0.94}
+            style={[
+              styles.checkButton,
+              {
+                backgroundColor: statusColor ?? (restingToday ? colors.secondary : 'transparent'),
+                borderColor: statusColor ?? (restingToday ? colors.mutedForeground + '55' : colors.border),
+              },
+            ]}
+          >
+            {frozen ? (
+              <Ionicons name="snow" size={18} color={statusForeground} />
+            ) : keptToday ? (
+              done ? (
+                <Animated.View
+                  style={{
+                    opacity: checkArrival,
+                    transform: [{
+                      scale: checkArrival.interpolate({ inputRange: [0, 1], outputRange: [0.86, 1] }),
+                    }],
+                  }}
+                >
+                  <Svg width={23} height={23} viewBox="0 0 24 24" aria-hidden>
+                    <Path
+                      d="M7.1 12.4 10.3 15.6 17.2 8.7"
+                      fill="none"
+                      stroke={statusForeground}
+                      strokeWidth={3.1}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </Svg>
+                </Animated.View>
+              ) : (
+                <Ionicons name="leaf-outline" size={19} color={statusForeground} />
+              )
+            ) : restingToday ? (
+              <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+            ) : null}
+          </AnimatedPressable>
+          {chain.cadence === 'weekly' ? (
+            <Text numberOfLines={1} style={[styles.weeklyProgress, { color: readableAccent }]}>
+              {weeklyProgress > chain.weeklyTarget
+                ? `+${weeklyProgress - chain.weeklyTarget}`
+                : `${weeklyProgress}/${chain.weeklyTarget}`}
+            </Text>
+          ) : null}
+        </View>
+      </Surface>
 
-      {celebratingMilestone !== null && (
+      {celebratingMilestone !== null ? (
         <MilestoneModal
           streak={celebratingMilestone}
+          cadence={chain.cadence}
           chainName={chain.name}
           color={chain.color}
           onDismiss={() => setCelebratingMilestone(null)}
         />
-      )}
-      <ExtraWorkMoment extra={celebratingExtra} chain={chain} onClose={() => setCelebratingExtra(null)} />
+      ) : null}
+      <ExtraWorkMoment
+        extra={celebratingExtra}
+        chain={chain}
+        onClose={() => setCelebratingExtra(null)}
+      />
     </>
+  );
+}
+
+function ExtraWorkMoment({
+  extra,
+  chain,
+  onClose,
+}: {
+  extra: number | null;
+  chain: Chain;
+  onClose: () => void;
+}) {
+  const colors = useColors();
+  const reducedMotion = useReducedMotion();
+  const readableAccent = readableAccentColor(chain.color, GLASS_SURFACE_COLOR, 4.8);
+  if (extra === null) return null;
+  return (
+    <Modal
+      transparent
+      visible
+      statusBarTranslucent
+      animationType={reducedMotion ? 'none' : 'fade'}
+      onRequestClose={onClose}
+    >
+      <View style={styles.extraShade}>
+        <Pressable
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+        <View accessibilityViewIsModal style={styles.extraFrame}>
+          <Surface elevated accentColor={chain.color} style={styles.extraCard}>
+            <ScrollView
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.extraContent}
+            >
+              <View style={[styles.extraIcon, { backgroundColor: chain.color + '1C' }]}>
+                <Ionicons name="add-circle-outline" size={24} color={readableAccent} />
+              </View>
+              <Text style={[TYPE.eyebrow, { color: readableAccent }]}>BEYOND THE TARGET</Text>
+              <Text style={[styles.extraTitle, { color: colors.foreground }]}>Another day kept.</Text>
+              <Text style={[styles.extraBody, { color: colors.mutedForeground }]}>
+                {extra} {extra === 1 ? 'day' : 'days'} beyond this week’s target for {chain.name}.
+              </Text>
+              <View style={styles.extraAction}>
+                <AppButton label="Continue" onPress={onClose} accentColor={chain.color} />
+              </View>
+            </ScrollView>
+          </Surface>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    flexDirection: 'row',
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 14,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 9 },
-    elevation: 2,
+    marginBottom: SPACE.sm,
+    borderRadius: RADIUS.card,
   },
-  stripe: {
-    width: 3,
-  },
-  body: {
-    flex: 1,
-    paddingHorizontal: 18,
-    paddingVertical: 17,
-    gap: 14,
-  },
-  topRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  name: {
-    fontSize: 17,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  nameBlock: { flex: 1, marginRight: 12, gap: 3 },
-  stageLabel: { fontSize: 9, fontFamily: 'Inter_700Bold', letterSpacing: 0.9 },
-  rightSide: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    flexShrink: 0,
-  },
-  streakBlock: {
-    width: 62,
-    alignItems: 'center',
-    gap: 0,
-  },
-  streakNum: {
-    fontSize: 26,
-    fontFamily: 'Inter_700Bold',
-    lineHeight: 28,
-  },
-  streakNumCompact: {
-    fontSize: 23,
-    lineHeight: 26,
-  },
-  streakLabel: {
-    fontSize: 10,
-    fontFamily: 'Inter_500Medium',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  checkBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+  stripe: { position: 'absolute', top: 0, bottom: 0, left: 0, width: 3 },
+  body: { padding: SPACE.md, paddingLeft: SPACE.md + 3, gap: SPACE.sm },
+  topRow: { minHeight: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, paddingRight: 64 },
+  topRowWeekly: { minHeight: 68 },
+  detailsTarget: { alignSelf: 'stretch' },
+  nameBlock: { flex: 1, minWidth: 0, gap: SPACE.hairline },
+  name: { ...TYPE.sectionTitle },
+  stageLabel: { ...TYPE.eyebrow },
+  streakBlock: { minWidth: 48, alignItems: 'center' },
+  streakNum: { fontSize: 25, lineHeight: 28, fontFamily: 'Inter_700Bold', fontVariant: ['tabular-nums'] },
+  streakNumCompact: { fontSize: 22, lineHeight: 26 },
+  streakLabel: { ...TYPE.metadata, textTransform: 'uppercase', letterSpacing: 0.7 },
+  checkColumn: { position: 'absolute', top: SPACE.md, right: SPACE.md, zIndex: 2, elevation: 2, width: 52, alignItems: 'center', gap: SPACE.xxs },
+  checkButton: {
+    width: CONTROL.minimumTarget,
+    height: CONTROL.minimumTarget,
+    borderRadius: RADIUS.capsule,
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  weeklyCheckBlock: {
+  weeklyProgress: { ...TYPE.metadata, minHeight: 15, textAlign: 'center' },
+  extraShade: {
+    flex: 1,
     alignItems: 'center',
-    gap: 4,
-    width: 54,
+    justifyContent: 'center',
+    backgroundColor: SCRIM,
+    padding: SPACE.xl,
   },
-  weeklyProgress: {
-    fontSize: 10,
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: 0,
-    minHeight: 14,
-    textAlign: 'center',
+  extraFrame: { width: '100%', maxWidth: 340, maxHeight: '82%' },
+  extraCard: { borderRadius: RADIUS.modal, maxHeight: '100%' },
+  extraContent: { alignItems: 'center', padding: SPACE.xl },
+  extraIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: RADIUS.control,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACE.md,
   },
-  extraShade: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000088', padding: 28 },
-  extraCard: { width: '100%', maxWidth: 330, alignItems: 'center', borderRadius: 25, borderWidth: 1, padding: 28 },
-  extraIcon: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
-  extraEyebrow: { fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 1.4 },
-  extraTitle: { fontSize: 22, fontFamily: 'Inter_700Bold', letterSpacing: -0.4, marginTop: 6, textAlign: 'center' },
-  extraBody: { fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20, marginTop: 7, textAlign: 'center' },
-  extraButton: { alignSelf: 'stretch', alignItems: 'center', borderRadius: 17, paddingVertical: 13, marginTop: 22 },
-  extraButtonText: { color: '#fff', fontSize: 15, fontFamily: 'Inter_700Bold' },
+  extraTitle: { ...TYPE.modalTitle, textAlign: 'center', marginTop: SPACE.xxs },
+  extraBody: { ...TYPE.body, textAlign: 'center', marginTop: SPACE.xs },
+  extraAction: { alignSelf: 'stretch', marginTop: SPACE.xl },
 });
-
-function ExtraWorkMoment({ extra, chain, onClose }: { extra: number | null; chain: Chain; onClose: () => void }) {
-  const colors = useColors();
-  if (extra === null) return null;
-  return <Modal transparent visible animationType="fade" onRequestClose={onClose}><View style={styles.extraShade}><View style={[styles.extraCard, { backgroundColor: colors.card, borderColor: chain.color + '66' }]}><View style={[styles.extraIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="sparkles" size={24} color={chain.color} /></View><Text style={[styles.extraEyebrow, { color: chain.color }]}>EXTRA WORK</Text><Text style={[styles.extraTitle, { color: colors.foreground }]}>You went beyond the goal.</Text><Text style={[styles.extraBody, { color: colors.mutedForeground }]}>+{extra} {extra === 1 ? 'extra day' : 'extra days'} for {chain.name} this week.</Text><Pressable onPress={onClose} style={[styles.extraButton, { backgroundColor: chain.color }]}><Text style={styles.extraButtonText}>Keep going</Text></Pressable></View></View></Modal>;
-}

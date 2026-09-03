@@ -1,6 +1,7 @@
 import React from 'react';
 import { Platform, StyleSheet, useColorScheme, View } from 'react-native';
 import { useColors } from '@/hooks/useColors';
+import { SECTION_ACCENTS } from '@/constants/sectionTheme';
 import { Feather } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,16 +20,16 @@ function NativeTabLayout() {
       disableTransparentOnScrollEdge
     >
       <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: 'link', selected: 'link' }} selectedColor="#FF6B35" />
-        <Label selectedStyle={{ color: '#FF6B35', fontWeight: '600' }}>Chains</Label>
+        <Icon sf={{ default: 'link', selected: 'link' }} selectedColor={SECTION_ACCENTS.today} />
+        <Label selectedStyle={{ color: SECTION_ACCENTS.today, fontWeight: '600' }}>Chains</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="gate">
-        <Icon sf={{ default: 'shield', selected: 'shield.fill' }} selectedColor="#FF6B35" />
-        <Label selectedStyle={{ color: '#FF6B35', fontWeight: '600' }}>Gate</Label>
+        <Icon sf={{ default: 'shield', selected: 'shield.fill' }} selectedColor={SECTION_ACCENTS.gate} />
+        <Label selectedStyle={{ color: SECTION_ACCENTS.gate, fontWeight: '600' }}>Gate</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="plan">
-        <Icon sf={{ default: 'moon', selected: 'moon.fill' }} selectedColor="#FF6B35" />
-        <Label selectedStyle={{ color: '#FF6B35', fontWeight: '600' }}>Plan</Label>
+        <Icon sf={{ default: 'moon', selected: 'moon.fill' }} selectedColor={SECTION_ACCENTS.plan} />
+        <Label selectedStyle={{ color: SECTION_ACCENTS.plan, fontWeight: '600' }}>Plan</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -76,7 +77,7 @@ function ClassicTabLayout() {
         name="index"
         options={{
           title: 'Chains',
-          tabBarActiveTintColor: '#FF6B35',
+          tabBarActiveTintColor: SECTION_ACCENTS.today,
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="link" tintColor={color} size={22} />
@@ -89,7 +90,7 @@ function ClassicTabLayout() {
         name="gate"
         options={{
           title: 'Gate',
-          tabBarActiveTintColor: '#FF6B35',
+          tabBarActiveTintColor: SECTION_ACCENTS.gate,
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="shield.fill" tintColor={color} size={22} />
@@ -102,7 +103,7 @@ function ClassicTabLayout() {
         name="plan"
         options={{
           title: 'Plan',
-          tabBarActiveTintColor: '#FF6B35',
+          tabBarActiveTintColor: SECTION_ACCENTS.plan,
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="moon.fill" tintColor={color} size={22} />
@@ -121,7 +122,7 @@ const styles = StyleSheet.create({
 
 export default function TabLayout() {
   // NativeTabs is iOS-only; always fall back to ClassicTabLayout on web/Android
-  if (Platform.OS !== 'web' && isLiquidGlassAvailable()) {
+  if (Platform.OS === 'ios' && isLiquidGlassAvailable()) {
     return <NativeTabLayout />;
   }
   return <ClassicTabLayout />;
