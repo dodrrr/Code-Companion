@@ -622,7 +622,7 @@ const styles = StyleSheet.create({
   pauseText: { ...TYPE.bodyStrong },
   finish: { minHeight: CONTROL.buttonHeight, flex: 1.22, borderRadius: RADIUS.button, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.sm, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
   holdFill: { position: 'absolute', left: 0, top: 0, bottom: 0, overflow: 'hidden' },
-  holdScrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.38)' },
+  holdScrim: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.38)' },
   finishContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xs },
   finishText: { ...TYPE.bodyStrong },
   unavailable: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SPACE.lg, paddingBottom: 64 },

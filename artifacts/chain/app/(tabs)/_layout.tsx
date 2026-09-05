@@ -7,7 +7,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Tabs } from 'expo-router';
-import { Icon, Label, NativeTabs } from 'expo-router/unstable-native-tabs';
+import { NativeTabs } from 'expo-router/unstable-native-tabs';
 import { SymbolView } from 'expo-symbols';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -20,16 +20,16 @@ function NativeTabLayout() {
       disableTransparentOnScrollEdge
     >
       <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: 'link', selected: 'link' }} selectedColor={SECTION_ACCENTS.today} />
-        <Label selectedStyle={{ color: SECTION_ACCENTS.today, fontWeight: '600' }}>Chains</Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'link', selected: 'link' }} selectedColor={SECTION_ACCENTS.today} />
+        <NativeTabs.Trigger.Label selectedStyle={{ color: SECTION_ACCENTS.today, fontWeight: '600' }}>Chains</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="gate">
-        <Icon sf={{ default: 'shield', selected: 'shield.fill' }} selectedColor={SECTION_ACCENTS.gate} />
-        <Label selectedStyle={{ color: SECTION_ACCENTS.gate, fontWeight: '600' }}>Gate</Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'shield', selected: 'shield.fill' }} selectedColor={SECTION_ACCENTS.gate} />
+        <NativeTabs.Trigger.Label selectedStyle={{ color: SECTION_ACCENTS.gate, fontWeight: '600' }}>Gate</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="plan">
-        <Icon sf={{ default: 'moon', selected: 'moon.fill' }} selectedColor={SECTION_ACCENTS.plan} />
-        <Label selectedStyle={{ color: SECTION_ACCENTS.plan, fontWeight: '600' }}>Plan</Label>
+        <NativeTabs.Trigger.Icon sf={{ default: 'moon', selected: 'moon.fill' }} selectedColor={SECTION_ACCENTS.plan} />
+        <NativeTabs.Trigger.Label selectedStyle={{ color: SECTION_ACCENTS.plan, fontWeight: '600' }}>Plan</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
