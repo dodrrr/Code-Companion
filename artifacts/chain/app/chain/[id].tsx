@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
 import { AmbientScreen } from '@/components/AmbientSurface';
 import AnimatedPressable from '@/components/AnimatedPressable';
 import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
+import { ChainSymbol } from '@/components/ui/ChainSymbol';
 import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
 import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
 import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
             style={styles.minimumCard}
           >
             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
-              <Ionicons name="leaf-outline" size={18} color={accentText} />
+              <ChainSymbol name="minimum" size={20} color={accentText} />
             </View>
             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>

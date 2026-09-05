@@ -37,6 +37,38 @@ export interface FocusLogEntry {
   completedAt: string;
 }
 
+export interface MorningBriefingTime {
+  hour: number;
+  minute: number;
+}
+
+export function decodeMorningBriefingTime(value: unknown): MorningBriefingTime | null {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as { hour?: unknown; minute?: unknown };
+  const minute = candidate.minute === undefined ? 0 : candidate.minute;
+  if (
+    !Number.isInteger(candidate.hour)
+    || !Number.isInteger(minute)
+    || (candidate.hour as number) < 0
+    || (candidate.hour as number) > 23
+    || (minute as number) < 0
+    || (minute as number) > 59
+  ) return null;
+  return { hour: candidate.hour as number, minute: minute as number };
+}
+
+export function parsePlanTimeSlot(value: unknown): { hour: number; minute: number } | null {
+  if (typeof value !== 'string') return null;
+  const match = /^(\d{1,2})(?::(\d{2}))?\s(AM|PM)$/.exec(value);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] || 0);
+  if (!Number.isInteger(hour) || hour < 1 || hour > 12 || !Number.isInteger(minute) || minute < 0 || minute > 59) return null;
+  if (match[3] === 'PM' && hour !== 12) hour += 12;
+  if (match[3] === 'AM' && hour === 12) hour = 0;
+  return { hour, minute };
+}
+
 export type PlanNotificationIntent = 'complete' | 'snooze' | 'open' | 'ignore';
 
 export function isMorningBriefingNotificationData(data: unknown): boolean {

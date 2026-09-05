@@ -1,0 +1,1828 @@
+diff --git a/artifacts/chain/app/(tabs)/gate.tsx b/artifacts/chain/app/(tabs)/gate.tsx
+index fe7f95e..3d974d0 100644
+--- a/artifacts/chain/app/(tabs)/gate.tsx
++++ b/artifacts/chain/app/(tabs)/gate.tsx
+@@ -1,6 +1,7 @@
+ import React, { useCallback, useEffect, useRef, useState } from 'react';
+ import {
+   Animated,
++  AppState,
+   Alert,
+   Modal,
+   Platform,
+@@ -18,11 +19,23 @@ import { Ionicons } from '@expo/vector-icons';
+ import { useReducedMotion } from 'react-native-reanimated';
+ import { AmbientScreen, GlassSurface } from '@/components/AmbientSurface';
+ import { useColors } from '@/hooks/useColors';
+-import { getStreak, useChains } from '@/context/ChainsContext';
++import { useChains } from '@/context/ChainsContext';
+ import { getGateWindows } from '@/lib/gateWindows';
+ import { GateWindowsContent } from '@/app/gate-windows';
+ import { reportDiagnostic } from '@/lib/diagnostics';
+-import type { Chain } from '@/domain/chains';
++import {
++  DEFAULT_GATE_RULE,
++  GATE_DAILY_USAGE_OPTIONS,
++  gateReleaseLabel,
++  gateRuleSummary,
++  gateTriggerLabel,
++  getGateTodayProgress,
++  makeDefaultGateRule,
++  type GateRule,
++  type GateRules,
++} from '@/domain/gateRules';
++import { getGateRules, removeGateRule, saveGateRules, setGateRule } from '@/lib/gateRules';
++import { getTodayStr } from '@/domain/chains';
+ import { readableAccentColor } from '@/constants/sectionTheme';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { playFeedback } from '@/lib/feedback';
+@@ -48,13 +61,8 @@ const APPS: AppEntry[] = [
+ 
+ const PREVIEW_APPS_KEY = '@chain_gate_preview_apps';
+ const LEGACY_GATE_APPS_KEY = '@chain_gate_apps';
+-const GATE_CHAIN_KEY = '@chain_gate_preview_chain';
+-const PENDING_PREVIEW_APP_KEY = '@chain_gate_pending_preview_app';
+-const PENDING_CHAIN_PICKER_KEY = '@chain_gate_pending_chain_picker';
+ const TUTORIAL_KEY = '@chain_gate_tutorial_seen';
+ 
+-type AppPickerIntent = 'add' | 'try';
+-
+ function decodePreviewApps(raw: string | null): Record<string, boolean> {
+   if (!raw) return {};
+   try {
+@@ -92,7 +100,7 @@ function TutorialModal({ onDone, reducedMotion }: { onDone: () => void; reducedM
+           </View>
+           <Text style={[tStyles.eyebrow, { color: accentText }]}>PAUSE GATE</Text>
+           <Text style={[tStyles.title, { color: colors.foreground }]}>Create space for a choice.</Text>
+-          <Text style={[tStyles.body, { color: colors.mutedForeground }]}>Choose an app and the Chain worth protecting. Gate will bring that intention back before you decide. Native app controls connect later.</Text>
++          <Text style={[tStyles.body, { color: colors.mutedForeground }]}>Choose an app, decide when Gate should step in, and whether it can rest once today is kept. Native app controls connect later.</Text>
+           <Pressable
+             accessibilityRole="button"
+             accessibilityLabel="Close Gate introduction"
+@@ -107,94 +115,208 @@ function TutorialModal({ onDone, reducedMotion }: { onDone: () => void; reducedM
+   );
+ }
+ 
+-function ChainPickerModal({
+-  chains,
+-  selectedId,
+-  onPick,
+-  onCreate,
++function GateRuleModal({
++  app,
++  initialRule,
++  chainsReady,
++  hasChains,
++  saving,
++  onSave,
+   onClose,
+   reducedMotion,
+ }: {
+-  chains: Chain[];
+-  selectedId: string | null;
+-  onPick: (chain: Chain) => void;
+-  onCreate: () => void;
++  app: AppEntry;
++  initialRule: GateRule;
++  chainsReady: boolean;
++  hasChains: boolean;
++  saving: boolean;
++  onSave: (rule: GateRule) => void;
+   onClose: () => void;
+   reducedMotion: boolean;
+ }) {
+   const colors = useColors();
++  const insets = useSafeAreaInsets();
++  const accentText = readableAccentColor(colors.primary, colors.cardSolid);
++  const [rule, setRule] = useState<GateRule>(initialRule);
++
++  const chooseTrigger = (kind: GateRule['trigger']['kind']) => {
++    setRule((current) => ({
++      ...current,
++      trigger: kind === 'onOpen'
++        ? { kind: 'onOpen' }
++        : current.trigger.kind === 'dailyUsage'
++          ? current.trigger
++          : { kind: 'dailyUsage', minutes: 10 },
++    }));
++    playFeedback('selection');
++  };
++
+   return (
+-    <Modal transparent animationType={reducedMotion ? 'none' : 'fade'} statusBarTranslucent onRequestClose={onClose}>
+-      <View style={ruleStyles.backdrop} accessibilityViewIsModal>
+-        <View style={[ruleStyles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch' }]}>
+-          <Text style={[ruleStyles.title, { color: colors.foreground, textAlign: 'left', marginBottom: 6 }]}>What are you protecting?</Text>
+-          <Text style={[ruleStyles.note, { color: colors.mutedForeground, textAlign: 'left', marginTop: 0, marginBottom: 14 }]}>Pause Gate will bring this commitment back into view before you decide.</Text>
+-          {chains.length ? (
+-            <ScrollView style={ruleStyles.pickerScroll} contentContainerStyle={ruleStyles.pickerContent} showsVerticalScrollIndicator={false}>
+-              {chains.map((chain) => {
+-                const selected = chain.id === selectedId;
+-                const displayColor = readableAccentColor(chain.color, colors.background, 5);
+-                return (
+-                  <Pressable
+-                    key={chain.id}
+-                    accessibilityRole="button"
+-                    accessibilityLabel={`Protect ${chain.name} with Pause Gate`}
+-                    accessibilityState={{ selected }}
+-                    onPress={() => onPick(chain)}
+-                    style={[styles.chainPickerRow, { backgroundColor: selected ? chain.color + '16' : colors.background, borderColor: selected ? chain.color : colors.border }]}
+-                  >
+-                    <View style={[styles.chainPickerDot, { backgroundColor: chain.color }]} />
+-                    <Text style={[styles.appName, { color: colors.foreground, flex: 1 }]}>{chain.name}</Text>
+-                    <Ionicons name={selected ? 'checkmark-circle' : 'chevron-forward'} size={20} color={selected ? displayColor : colors.mutedForeground} />
+-                  </Pressable>
+-                );
+-              })}
+-            </ScrollView>
+-          ) : (
+-            <View style={[styles.chainPickerEmpty, { backgroundColor: colors.background, borderColor: colors.border }]}>
+-              <Text style={[styles.chainPickerEmptyTitle, { color: colors.foreground }]}>Create one commitment first.</Text>
+-              <Text style={[styles.chainPickerEmptyBody, { color: colors.mutedForeground }]}>Gate works best when it can remind you what deserves your attention.</Text>
+-              <Pressable accessibilityRole="button" accessibilityLabel="Create a Chain" onPress={onCreate} style={[styles.chainPickerCreate, { backgroundColor: colors.primary }]}>
+-                <Text style={[styles.chainPickerCreateText, { color: colors.primaryForeground }]}>Create Chain</Text>
+-              </Pressable>
++    <Modal transparent animationType={reducedMotion ? 'none' : 'slide'} statusBarTranslucent onRequestClose={() => { if (!saving) onClose(); }}>
++      <View style={ruleStyles.sheetBackdrop} accessibilityViewIsModal>
++        <Pressable accessibilityRole="button" accessibilityLabel="Close Gate settings" disabled={saving} style={StyleSheet.absoluteFill} onPress={onClose} />
++        <View style={[ruleStyles.sheet, { backgroundColor: colors.card, borderColor: colors.border, paddingBottom: Math.max(SPACE.lg, insets.bottom + SPACE.sm) }]}>
++          <View style={[ruleStyles.sheetHandle, { backgroundColor: colors.border }]} />
++          <View style={ruleStyles.sheetHeader}>
++            <View style={[styles.appIcon, { backgroundColor: app.iconColor + '20' }]}>
++              {app.iconText ? <Text style={[styles.appIconText, { color: app.iconColor }]}>{app.iconText}</Text> : <Ionicons name={app.icon} size={21} color={app.iconColor} />}
+             </View>
+-          )}
+-          <Pressable accessibilityRole="button" accessibilityLabel="Close Chain picker" onPress={onClose} style={ruleStyles.cancel}>
+-            <Text style={[ruleStyles.cancelText, { color: colors.mutedForeground }]}>Cancel</Text>
+-          </Pressable>
++            <View style={ruleStyles.sheetHeadingCopy}>
++              <Text numberOfLines={1} style={[ruleStyles.sheetTitle, { color: colors.foreground }]}>{app.name} Gate</Text>
++              <Text style={[ruleStyles.sheetSubtitle, { color: colors.mutedForeground }]}>Choose when the pause should step in.</Text>
++            </View>
++            <Pressable accessibilityRole="button" accessibilityLabel="Close Gate settings" disabled={saving} onPress={onClose} style={ruleStyles.closeButton}>
++              <Ionicons name="close" size={21} color={colors.mutedForeground} />
++            </Pressable>
++          </View>
++
++          <ScrollView style={ruleStyles.editorScroll} contentContainerStyle={ruleStyles.editorContent} showsVerticalScrollIndicator={false}>
++            <Text style={[ruleStyles.sectionLabel, { color: colors.mutedForeground }]}>WHEN TO PAUSE</Text>
++            <View style={ruleStyles.choiceStack}>
++              <RuleChoice
++                title="On app open"
++                description="Pause before every opening."
++                icon="enter-outline"
++                selected={rule.trigger.kind === 'onOpen'}
++                onPress={() => chooseTrigger('onOpen')}
++              />
++              <RuleChoice
++                title="After daily use"
++                description="Pause after today’s accumulated app use."
++                icon="time-outline"
++                selected={rule.trigger.kind === 'dailyUsage'}
++                onPress={() => chooseTrigger('dailyUsage')}
++              />
++            </View>
++
++            {rule.trigger.kind === 'dailyUsage' && (
++              <View style={ruleStyles.minutesBlock}>
++                <Text style={[ruleStyles.supportingLabel, { color: colors.mutedForeground }]}>DAILY LIMIT</Text>
++                <View style={ruleStyles.minuteGrid}>
++                  {GATE_DAILY_USAGE_OPTIONS.map((minutes) => {
++                    const selected = rule.trigger.kind === 'dailyUsage' && rule.trigger.minutes === minutes;
++                    const label = minutes < 60 ? `${minutes}m` : minutes % 60 === 0 ? `${minutes / 60}h` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
++                    return (
++                      <Pressable
++                        key={minutes}
++                        accessibilityRole="button"
++                        accessibilityLabel={`${minutes} minutes of use today`}
++                        accessibilityState={{ selected }}
++                        onPress={() => { setRule((current) => ({ ...current, trigger: { kind: 'dailyUsage', minutes } })); playFeedback('selection'); }}
++                        style={({ pressed }) => [ruleStyles.minuteChip, { backgroundColor: selected ? colors.primary + '28' : colors.background, borderColor: selected ? colors.primary + '70' : colors.border, opacity: pressed ? OPACITY.pressed : 1 }]}
++                      >
++                        <Text style={[ruleStyles.minuteChipText, { color: selected ? accentText : colors.foreground }]}>{label}</Text>
++                      </Pressable>
++                    );
++                  })}
++                </View>
++              </View>
++            )}
++
++            <Text style={[ruleStyles.sectionLabel, { color: colors.mutedForeground }]}>ACTIVE UNTIL</Text>
++            <View style={ruleStyles.choiceStack}>
++              <RuleChoice
++                title="Always"
++                description="Keep this Gate ready every day."
++                icon="infinite-outline"
++                selected={rule.release === 'always'}
++                onPress={() => { setRule((current) => ({ ...current, release: 'always' })); playFeedback('selection'); }}
++              />
++              <RuleChoice
++                title="Today is kept"
++                description={!chainsReady ? 'Loading today’s Chains…' : hasChains ? 'Rest after every Chain due today is done, minimum, or safely frozen.' : 'Create a Chain first to use this condition.'}
++                icon="checkmark-circle-outline"
++                selected={rule.release === 'whenTodayKept'}
++                disabled={!chainsReady || !hasChains}
++                onPress={() => { setRule((current) => ({ ...current, release: 'whenTodayKept' })); playFeedback('selection'); }}
++              />
++            </View>
++          </ScrollView>
++
++          <View style={ruleStyles.sheetActions}>
++            <Pressable
++              accessibilityRole="button"
++              accessibilityLabel="Save Gate settings"
++              accessibilityState={{ busy: saving }}
++              disabled={saving}
++              onPress={() => onSave(rule)}
++              style={({ pressed }) => [ruleStyles.saveButton, { backgroundColor: colors.primary, opacity: saving ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
++            >
++              <Text style={[ruleStyles.saveButtonText, { color: colors.primaryForeground }]}>{saving ? 'Saving…' : 'Save Gate'}</Text>
++            </Pressable>
++          </View>
+         </View>
+       </View>
+     </Modal>
+   );
+ }
+ 
++function RuleChoice({
++  title,
++  description,
++  icon,
++  selected,
++  disabled = false,
++  onPress,
++}: {
++  title: string;
++  description: string;
++  icon: keyof typeof Ionicons.glyphMap;
++  selected: boolean;
++  disabled?: boolean;
++  onPress: () => void;
++}) {
++  const colors = useColors();
++  const accentText = readableAccentColor(colors.primary, colors.cardSolid);
++  return (
++    <Pressable
++      accessibilityRole="radio"
++      accessibilityLabel={`${title}. ${description}`}
++      accessibilityState={{ selected, disabled }}
++      disabled={disabled}
++      onPress={onPress}
++      style={({ pressed }) => [ruleStyles.choice, { backgroundColor: selected ? colors.primary + '18' : colors.background, borderColor: selected ? colors.primary + '62' : colors.border, opacity: disabled ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
++    >
++      <View style={[ruleStyles.choiceIcon, { backgroundColor: selected ? colors.primary + '22' : colors.card }]}>
++        <Ionicons name={icon} size={19} color={selected ? accentText : colors.mutedForeground} />
++      </View>
++      <View style={ruleStyles.choiceCopy}>
++        <Text style={[ruleStyles.choiceTitle, { color: colors.foreground }]}>{title}</Text>
++        <Text style={[ruleStyles.choiceDescription, { color: colors.mutedForeground }]}>{description}</Text>
++      </View>
++      <Ionicons name={selected ? 'checkmark-circle' : 'ellipse-outline'} size={21} color={selected ? accentText : colors.mutedForeground} />
++    </Pressable>
++  );
++}
++
+ function AppPickerModal({
++  visible,
+   apps,
+-  intent,
+   onPick,
+   onClose,
++  onDismiss,
+   reducedMotion,
+ }: {
++  visible: boolean;
+   apps: AppEntry[];
+-  intent: AppPickerIntent;
+   onPick: (app: AppEntry) => void;
+   onClose: () => void;
++  onDismiss: () => void;
+   reducedMotion: boolean;
+ }) {
+   const colors = useColors();
+-  const isTrying = intent === 'try';
+   return (
+-    <Modal transparent animationType={reducedMotion ? 'none' : 'slide'} statusBarTranslucent onRequestClose={onClose}>
++    <Modal visible={visible} transparent animationType={reducedMotion ? 'none' : 'slide'} statusBarTranslucent onDismiss={onDismiss} onRequestClose={onClose}>
+       <View style={ruleStyles.backdrop} accessibilityViewIsModal>
+         <View style={[ruleStyles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch' }]}>
+-          <Text style={[ruleStyles.title, { color: colors.foreground, textAlign: 'left', marginBottom: 6 }]}>{isTrying ? 'Choose an app' : 'Add an app'}</Text>
+-          <Text style={[ruleStyles.note, { color: colors.mutedForeground, textAlign: 'left', marginTop: 0, marginBottom: 14 }]}>{isTrying ? 'Choose an app, then connect it to the Chain you want to protect.' : 'Choose a visual sample. Native app selection and blocking connect later.'}</Text>
++          <Text style={[ruleStyles.title, { color: colors.foreground, textAlign: 'left', marginBottom: 6 }]}>Add an app</Text>
++          <Text style={[ruleStyles.note, { color: colors.mutedForeground, textAlign: 'left', marginTop: 0, marginBottom: 14 }]}>Choose a visual sample. Native app selection and blocking connect later.</Text>
+           <ScrollView style={ruleStyles.pickerScroll} contentContainerStyle={ruleStyles.pickerContent} showsVerticalScrollIndicator={false}>
+             {apps.map((app) => (
+               <Pressable
+                 key={app.id}
+                 accessibilityRole="button"
+-                accessibilityLabel={isTrying ? `Try Pause Gate with ${app.name}` : `Add ${app.name} to Gate`}
++                accessibilityLabel={`Add ${app.name} to Gate`}
+                 onPress={() => onPick(app)}
+                 style={[styles.pickerRow, { backgroundColor: colors.background, borderColor: colors.border }]}
+               >
+@@ -202,7 +324,7 @@ function AppPickerModal({
+                   {app.iconText ? <Text style={[styles.appIconText, { color: app.iconColor }]}>{app.iconText}</Text> : <Ionicons name={app.icon} size={20} color={app.iconColor} />}
+                 </View>
+                 <Text style={[styles.appName, { color: colors.foreground, flex: 1 }]}>{app.name}</Text>
+-                <Ionicons name={isTrying ? 'arrow-forward-circle-outline' : 'add-circle-outline'} size={21} color={colors.primary} />
++                <Ionicons name="add-circle-outline" size={21} color={colors.primary} />
+               </Pressable>
+             ))}
+           </ScrollView>
+@@ -221,15 +343,16 @@ export default function GateScreen() {
+   const colors = useColors();
+   const insets = useSafeAreaInsets();
+   const { width: pageWidth, fontScale } = useWindowDimensions();
+-  const { chains } = useChains();
++  const { chains, isReady: chainsReady } = useChains();
+   const reducedMotion = useReducedMotion();
+   const [enabled,         setEnabled]         = useState<Record<string, boolean>>({});
++  const [rules,           setRules]           = useState<GateRules>({});
+   const [showAppPicker,   setShowAppPicker]   = useState(false);
+-  const [appPickerIntent, setAppPickerIntent] = useState<AppPickerIntent>('add');
+-  const [showChainPicker, setShowChainPicker] = useState(false);
+-  const [selectedChainId, setSelectedChainId] = useState<string | null>(null);
+-  const [pendingPreviewApp, setPendingPreviewApp] = useState<AppEntry | null>(null);
+-  const [resumeChainPicker, setResumeChainPicker] = useState(false);
++  const [pendingRuleApp,  setPendingRuleApp]  = useState<AppEntry | null>(null);
++  const [editingRuleApp,  setEditingRuleApp]  = useState<AppEntry | null>(null);
++  const [editingNewRule,  setEditingNewRule]  = useState(false);
++  const [savingRule,      setSavingRule]      = useState(false);
++  const [gateDate,        setGateDate]        = useState(getTodayStr());
+   const [showTutorial,    setShowTutorial]     = useState(false);
+   const [tutorialChecked, setTutorialChecked]  = useState(false);
+   const [windowCount, setWindowCount] = useState(0);
+@@ -240,10 +363,8 @@ export default function GateScreen() {
+   const pagerRef = useRef<ScrollView>(null);
+   const pageProgress = useRef(new Animated.Value(0)).current;
+   const pagerWidthRef = useRef(pageWidth);
+-  const chainSelectionInFlight = useRef(false);
+-  const navigatingToChainCreationRef = useRef(false);
+   const enabledRef = useRef<Record<string, boolean>>({});
+-  const pendingPreviewAppRef = useRef<AppEntry | null>(null);
++  const rulesRef = useRef<GateRules>({});
+   const previewStorageQueueRef = useRef<Promise<void>>(Promise.resolve());
+ 
+   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+@@ -268,25 +389,36 @@ export default function GateScreen() {
+     let cancelled = false;
+     async function hydratePreview() {
+       try {
+-        const [previewRaw, legacyRaw, previewChainId, pendingAppId, pendingChainPicker, tutorialSeen] = await Promise.all([
++        const rulesPromise = getGateRules()
++          .then((storedRules) => ({ storedRules, readSucceeded: true as const }))
++          .catch((error) => {
++            reportDiagnostic({ area: 'gate', operation: 'rules.read', severity: 'error', error });
++            return { storedRules: {} as GateRules, readSucceeded: false as const };
++          });
++        const [previewRaw, legacyRaw, tutorialSeen, rulesResult] = await Promise.all([
+           AsyncStorage.getItem(PREVIEW_APPS_KEY),
+           AsyncStorage.getItem(LEGACY_GATE_APPS_KEY),
+-          AsyncStorage.getItem(GATE_CHAIN_KEY),
+-          AsyncStorage.getItem(PENDING_PREVIEW_APP_KEY),
+-          AsyncStorage.getItem(PENDING_CHAIN_PICKER_KEY),
+           AsyncStorage.getItem(TUTORIAL_KEY),
++          rulesPromise,
+         ]);
+         if (cancelled) return;
++        const { storedRules } = rulesResult;
+         const decodedApps = decodePreviewApps(previewRaw ?? legacyRaw);
++        const missingRuleAppIds = Object.keys(decodedApps).filter((appId) => !storedRules[appId]);
++        const hydratedRules: GateRules = { ...storedRules };
++        for (const appId of missingRuleAppIds) hydratedRules[appId] = makeDefaultGateRule();
+         enabledRef.current = decodedApps;
+         setEnabled(decodedApps);
+-        setSelectedChainId(previewChainId?.trim() || null);
+-        const pendingApp = APPS.find((app) => app.id === pendingAppId?.trim()) ?? null;
+-        pendingPreviewAppRef.current = pendingApp;
+-        setPendingPreviewApp(pendingApp);
+-        setResumeChainPicker(pendingChainPicker === '1');
++        rulesRef.current = hydratedRules;
++        setRules(hydratedRules);
+         if (!tutorialSeen) setShowTutorial(true);
+ 
++        if (rulesResult.readSucceeded && missingRuleAppIds.length > 0) {
++          void saveGateRules(hydratedRules).catch((error) => {
++            reportDiagnostic({ area: 'gate', operation: 'rules.migrateEnabledApps', severity: 'warning', error });
++          });
++        }
++
+         // Migrate only after the new key has been written successfully. If
+         // removal fails, retaining the legacy value is harmless and recoverable.
+         if (previewRaw === null && legacyRaw !== null) {
+@@ -295,12 +427,6 @@ export default function GateScreen() {
+             await AsyncStorage.removeItem(LEGACY_GATE_APPS_KEY);
+           });
+         }
+-        if (pendingAppId && !pendingApp) {
+-          await queuePreviewStorage(
+-            'pendingPreview.removeInvalid',
+-            () => AsyncStorage.removeItem(PENDING_PREVIEW_APP_KEY),
+-          );
+-        }
+       } catch (error) {
+         reportDiagnostic({ area: 'gate', operation: 'preview.hydrate', severity: 'error', error });
+       } finally {
+@@ -313,25 +439,55 @@ export default function GateScreen() {
+ 
+   const refreshWindows = useCallback(() => { void getGateWindows().then((windows) => setWindowCount(windows.length)); }, []);
+   useFocusEffect(useCallback(() => {
+-    navigatingToChainCreationRef.current = false;
+     setScreenFocused(true);
+     refreshWindows();
+     return () => setScreenFocused(false);
+   }, [refreshWindows]));
+ 
+-  // A Try flow can briefly leave Gate to create its first Chain. Keeping the
+-  // selected sample app lets the user resume at the Chain picker on return.
+-  useEffect(() => {
+-    if (navigatingToChainCreationRef.current || !screenFocused || !tutorialChecked || showTutorial || (!pendingPreviewApp && !resumeChainPicker)) return;
+-    setShowChainPicker(true);
+-  }, [pendingPreviewApp, resumeChainPicker, screenFocused, showTutorial, tutorialChecked]);
+-
+   useEffect(() => {
+     if (pagerWidthRef.current === pageWidth) return;
+     pagerWidthRef.current = pageWidth;
+     pagerRef.current?.scrollTo({ x: activePage * pageWidth, animated: false });
+   }, [activePage, pageWidth]);
+ 
++  useEffect(() => {
++    let midnightTimer: ReturnType<typeof setTimeout> | undefined;
++    const refreshDate = () => setGateDate((current) => {
++      const next = getTodayStr();
++      return current === next ? current : next;
++    });
++    const scheduleMidnightRefresh = () => {
++      if (midnightTimer) clearTimeout(midnightTimer);
++      const now = new Date();
++      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
++      midnightTimer = setTimeout(() => {
++        refreshDate();
++        scheduleMidnightRefresh();
++      }, Math.max(1, nextMidnight.getTime() - now.getTime() + 250));
++    };
++    scheduleMidnightRefresh();
++    const subscription = AppState.addEventListener('change', (state) => {
++      if (state === 'active') {
++        refreshDate();
++        scheduleMidnightRefresh();
++      }
++    });
++    return () => {
++      if (midnightTimer) clearTimeout(midnightTimer);
++      subscription.remove();
++    };
++  }, []);
++
++  useEffect(() => {
++    if (Platform.OS === 'ios' || showAppPicker || !pendingRuleApp) return;
++    const timer = setTimeout(() => {
++      const app = pendingRuleApp;
++      setPendingRuleApp(null);
++      openRuleEditor(app, true);
++    }, reducedMotion ? 0 : 320);
++    return () => clearTimeout(timer);
++  }, [pendingRuleApp, reducedMotion, showAppPicker]);
++
+   function dismissTutorial() {
+     void AsyncStorage.setItem(TUTORIAL_KEY, '1').catch((error) => {
+       reportDiagnostic({ area: 'gate', operation: 'tutorial.persist', severity: 'warning', error });
+@@ -341,137 +497,136 @@ export default function GateScreen() {
+ 
+   function persistPreviewApps(next: Record<string, boolean>) {
+     const snapshot = JSON.stringify(next);
+-    void queuePreviewStorage(
++    return queuePreviewStorage(
+       'previewApps.persist',
+       () => AsyncStorage.setItem(PREVIEW_APPS_KEY, snapshot),
+     );
+   }
+ 
+-  function updatePreviewApps(update: (current: Record<string, boolean>) => Record<string, boolean>) {
+-    const next = update(enabledRef.current);
+-    enabledRef.current = next;
+-    setEnabled(next);
+-    persistPreviewApps(next);
+-  }
+-
+-  function addPreviewApp(app: AppEntry) {
+-    updatePreviewApps((current) => ({ ...current, [app.id]: true }));
++  function openRuleEditor(app: AppEntry, isNew: boolean) {
+     setShowAppPicker(false);
++    setEditingNewRule(isNew);
++    setEditingRuleApp(app);
+     playFeedback('selection');
+   }
+ 
+-  function rememberPendingPreviewApp(app: AppEntry | null) {
+-    pendingPreviewAppRef.current = app;
+-    setPendingPreviewApp(app);
+-    return queuePreviewStorage(
+-      app ? 'pendingPreview.persist' : 'pendingPreview.clear',
+-      () => app
+-        ? AsyncStorage.setItem(PENDING_PREVIEW_APP_KEY, app.id)
+-        : AsyncStorage.removeItem(PENDING_PREVIEW_APP_KEY),
+-    );
+-  }
+-
+-  function rememberChainPickerResume(shouldResume: boolean) {
+-    setResumeChainPicker(shouldResume);
+-    return queuePreviewStorage(
+-      shouldResume ? 'pendingChainPicker.persist' : 'pendingChainPicker.clear',
+-      () => shouldResume
+-        ? AsyncStorage.setItem(PENDING_CHAIN_PICKER_KEY, '1')
+-        : AsyncStorage.removeItem(PENDING_CHAIN_PICKER_KEY),
+-    );
++  async function saveRuleForApp(rule: GateRule) {
++    const app = editingRuleApp;
++    if (!app || savingRule) return;
++    setSavingRule(true);
++    const previousRules = rulesRef.current;
++    try {
++      const nextRules = await setGateRule(app.id, rule);
++      if (editingNewRule) {
++        const nextEnabled = { ...enabledRef.current, [app.id]: true };
++        try {
++          await persistPreviewApps(nextEnabled);
++          enabledRef.current = nextEnabled;
++          setEnabled(nextEnabled);
++        } catch (error) {
++          try {
++            await saveGateRules(previousRules);
++          } catch (rollbackError) {
++            reportDiagnostic({ area: 'gate', operation: 'rules.rollbackAdd', severity: 'error', error: rollbackError });
++          }
++          throw error;
++        }
++      }
++      rulesRef.current = nextRules;
++      setRules(nextRules);
++      setEditingRuleApp(null);
++      setEditingNewRule(false);
++      playFeedback('selection');
++    } catch (error) {
++      reportDiagnostic({ area: 'gate', operation: 'rules.write', severity: 'error', error });
++      Alert.alert('Gate couldn’t save', 'Your previous settings are still safe. Try again.');
++    } finally {
++      setSavingRule(false);
++    }
+   }
+ 
+-  function launchDemo(previewApp: AppEntry, chain: Chain) {
++  function launchDemo(previewApp: AppEntry) {
++    const rule = rulesRef.current[previewApp.id] ?? DEFAULT_GATE_RULE;
++    if (rule.release === 'whenTodayKept' && !chainsReady) {
++      Alert.alert('One moment', 'Chain is still loading today’s progress.');
++      return;
++    }
++    const today = getGateTodayProgress(chains, gateDate);
+     router.push({
+       pathname: '/pause-gate-demo',
+       params: {
+-        appName:    previewApp.name,
+-        appIcon:    previewApp.icon,
+-        appColor:   previewApp.iconColor,
+-        chainName:  chain.name,
+-        streak:     String(getStreak(chain)),
+-        chainColor: chain.color,
+-        cadence:    chain.cadence,
+-        weeklyTarget: String(chain.weeklyTarget),
++        appName: previewApp.name,
++        appIcon: previewApp.icon,
++        appColor: previewApp.iconColor,
++        triggerKind: rule.trigger.kind,
++        ...(rule.trigger.kind === 'dailyUsage' ? { triggerMinutes: String(rule.trigger.minutes) } : {}),
++        releaseMode: rule.release,
++        todayKept: String(today.kept),
++        todayTotal: String(today.total),
+       },
+     });
+   }
+ 
+-  function continueDemoFlow(previewApp: AppEntry) {
+-    const selectedChain = chains.find((chain) => chain.id === selectedChainId);
+-    if (!selectedChain) {
+-      void rememberPendingPreviewApp(previewApp);
+-      setShowChainPicker(true);
+-      return;
+-    }
+-    launchDemo(previewApp, selectedChain);
+-  }
+-
+-  function openDemo(app?: AppEntry) {
+-    const previewApp = app ?? APPS.find((entry) => enabled[entry.id]);
+-    if (!previewApp) {
+-      setAppPickerIntent('try');
+-      setShowAppPicker(true);
+-      return;
+-    }
+-    continueDemoFlow(previewApp);
+-  }
+-
+   function handleAppPickerPick(app: AppEntry) {
+-    const intent = appPickerIntent;
+-    addPreviewApp(app);
+-    if (intent === 'try') continueDemoFlow(app);
++    setPendingRuleApp(app);
++    setShowAppPicker(false);
+   }
+ 
+-  async function choosePreviewChain(chain: Chain) {
+-    if (chainSelectionInFlight.current) return;
+-    chainSelectionInFlight.current = true;
+-    try {
+-      await AsyncStorage.setItem(GATE_CHAIN_KEY, chain.id);
+-      setSelectedChainId(chain.id);
+-      setShowChainPicker(false);
+-      const previewApp = pendingPreviewAppRef.current;
+-      void rememberChainPickerResume(false);
+-      if (previewApp) {
+-        void rememberPendingPreviewApp(null);
+-        launchDemo(previewApp, chain);
+-      }
+-      playFeedback('selection');
+-    } catch (error) {
+-      reportDiagnostic({ area: 'gate', operation: 'previewChain.persist', severity: 'error', error });
+-      Alert.alert('Chain couldn’t save', 'Try choosing your commitment again.');
+-    } finally {
+-      chainSelectionInFlight.current = false;
+-    }
++  function finishAppPickerDismissal() {
++    if (!pendingRuleApp) return;
++    const app = pendingRuleApp;
++    setPendingRuleApp(null);
++    openRuleEditor(app, true);
+   }
+ 
+   const previewApps = APPS.filter((app) => enabled[app.id]);
+   const availableApps = APPS.filter((app) => !enabled[app.id]);
+-  const selectedChain = chains.find((chain) => chain.id === selectedChainId);
+-  const selectedChainAccent = selectedChain
+-    ? readableAccentColor(selectedChain.color, colors.cardSolid, 5)
+-    : readableAccentColor(colors.primary, colors.cardSolid);
++  const todayProgress = chainsReady
++    ? getGateTodayProgress(chains, gateDate)
++    : { total: 0, kept: 0, pending: 0, isKept: false };
++  const conditionalGateCount = previewApps.filter(
++    (app) => (rules[app.id] ?? DEFAULT_GATE_RULE).release === 'whenTodayKept',
++  ).length;
+   const gateTextAccent = readableAccentColor(colors.primary, colors.cardSolid);
+   const showPage = (page: 0 | 1) => {
+     setActivePage(page);
+     pagerRef.current?.scrollTo({ x: page * pageWidth, animated: !reducedMotion });
+   };
+ 
++  async function commitPreviewRemoval(app: AppEntry) {
++    const previousRules = rulesRef.current;
++    const nextEnabled = { ...enabledRef.current };
++    delete nextEnabled[app.id];
++    try {
++      const nextRules = await removeGateRule(app.id);
++      try {
++        await persistPreviewApps(nextEnabled);
++      } catch (error) {
++        try {
++          await saveGateRules(previousRules);
++        } catch (rollbackError) {
++          reportDiagnostic({ area: 'gate', operation: 'rules.rollbackRemove', severity: 'error', error: rollbackError });
++        }
++        throw error;
++      }
++      enabledRef.current = nextEnabled;
++      setEnabled(nextEnabled);
++      rulesRef.current = nextRules;
++      setRules(nextRules);
++      playFeedback('light');
++    } catch (error) {
++      reportDiagnostic({ area: 'gate', operation: 'apps.remove', severity: 'error', error });
++      Alert.alert('App couldn’t be removed', 'Your previous settings are still safe. Try again.');
++    }
++  }
++
+   function removeFromPreview(app: AppEntry) {
+     Alert.alert('Remove app?', `${app.name} will no longer appear in Pause Gate.`, [
+       { text: 'Cancel', style: 'cancel' },
+       {
+         text: 'Remove',
+         style: 'destructive',
+-        onPress: () => {
+-          updatePreviewApps((current) => {
+-            const next = { ...current };
+-            delete next[app.id];
+-            return next;
+-          });
+-          if (pendingPreviewAppRef.current?.id === app.id) void rememberPendingPreviewApp(null);
+-          playFeedback('light');
+-        },
++        onPress: () => { void commitPreviewRemoval(app); },
+       },
+     ]);
+   }
+@@ -479,11 +634,8 @@ export default function GateScreen() {
+   function openAppActions(app: AppEntry) {
+     Alert.alert(app.name, 'Manage this app in Pause Gate.', [
+       {
+-        text: 'Change intention',
+-        onPress: () => {
+-          if (pendingPreviewAppRef.current) void rememberPendingPreviewApp(null);
+-          setShowChainPicker(true);
+-        },
++        text: 'Edit Gate',
++        onPress: () => openRuleEditor(app, false),
+       },
+       {
+         text: 'Remove',
+@@ -494,34 +646,24 @@ export default function GateScreen() {
+     ]);
+   }
+ 
+-  async function createChainForPendingPreview() {
+-    navigatingToChainCreationRef.current = true;
+-    setShowChainPicker(false);
+-    const pendingApp = pendingPreviewAppRef.current;
+-    try {
+-      if (pendingApp) {
+-        await rememberPendingPreviewApp(pendingApp);
+-      }
+-      await rememberChainPickerResume(true);
+-    } catch {
+-      // The queued write is already diagnosed. State remains in memory, so
+-      // returning normally from New Chain can still resume this flow.
+-    }
+-    router.push('/chain/new');
+-  }
+-
+-  function cancelChainPicker() {
+-    setShowChainPicker(false);
+-    if (pendingPreviewAppRef.current) void rememberPendingPreviewApp(null);
+-    void rememberChainPickerResume(false);
+-  }
+-
+   return (
+     <AmbientScreen tone="gate" style={styles.root}>
+       {/* Tutorial modal */}
+       {tutorialChecked && showTutorial && <TutorialModal onDone={dismissTutorial} reducedMotion={reducedMotion} />}
+-      {showAppPicker && <AppPickerModal apps={availableApps} intent={appPickerIntent} onPick={handleAppPickerPick} onClose={() => setShowAppPicker(false)} reducedMotion={reducedMotion} />}
+-      {showChainPicker && <ChainPickerModal chains={chains} selectedId={selectedChain?.id ?? null} onPick={(chain) => { void choosePreviewChain(chain); }} onCreate={() => { void createChainForPendingPreview(); }} onClose={cancelChainPicker} reducedMotion={reducedMotion} />}
++      <AppPickerModal visible={showAppPicker} apps={availableApps} onPick={handleAppPickerPick} onClose={() => setShowAppPicker(false)} onDismiss={finishAppPickerDismissal} reducedMotion={reducedMotion} />
++      {editingRuleApp && (
++        <GateRuleModal
++          key={`${editingRuleApp.id}-${editingNewRule ? 'new' : 'edit'}`}
++          app={editingRuleApp}
++          initialRule={rules[editingRuleApp.id] ?? DEFAULT_GATE_RULE}
++          chainsReady={chainsReady}
++          hasChains={chains.length > 0}
++          saving={savingRule}
++          onSave={(rule) => { void saveRuleForApp(rule); }}
++          onClose={() => { if (!savingRule) { setEditingRuleApp(null); setEditingNewRule(false); } }}
++          reducedMotion={reducedMotion}
++        />
++      )}
+ 
+       {/* Header */}
+       <View style={[styles.header, { paddingTop: topPad + 12 }]}>
+@@ -553,12 +695,27 @@ export default function GateScreen() {
+         }}
+       >
+       <View accessibilityElementsHidden={activePage !== 0} importantForAccessibility={activePage === 0 ? 'auto' : 'no-hide-descendants'} style={{ width: pageWidth, height: '100%' }}><ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: botPad + CONTROL.tabContentInset }]} showsVerticalScrollIndicator={false}>
+-        <Pressable accessibilityRole="button" accessibilityLabel={selectedChain ? `Pause Gate is protecting ${selectedChain.name}. Change commitment` : 'Choose the Chain Pause Gate should protect'} onPress={() => { if (pendingPreviewAppRef.current) void rememberPendingPreviewApp(null); setShowChainPicker(true); }} style={({ pressed }) => [styles.intentionCard, { backgroundColor: 'transparent', borderColor: selectedChain ? selectedChain.color + '66' : colors.border, opacity: pressed ? OPACITY.pressed : 1 }]}>
+-          <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
+-          <View style={[styles.intentionIcon, { backgroundColor: (selectedChain?.color ?? colors.primary) + '1A' }]}><Ionicons name="link-outline" size={18} color={selectedChainAccent} /></View>
+-          <View style={{ flex: 1 }}><Text style={[styles.intentionEyebrow, { color: selectedChainAccent }]}>PROTECTED INTENTION</Text><Text numberOfLines={1} ellipsizeMode="tail" style={[styles.intentionTitle, { color: colors.foreground }]}>{selectedChain?.name ?? 'Choose a Chain'}</Text></View>
+-          <Ionicons name="chevron-forward" size={17} color={colors.mutedForeground} />
+-        </Pressable>
++        {conditionalGateCount > 0 && (
++          <View
++            accessible
++            accessibilityLabel={chainsReady ? `${todayProgress.kept} of ${todayProgress.total} Chains kept today. ${conditionalGateCount} conditional ${conditionalGateCount === 1 ? 'Gate' : 'Gates'} ${todayProgress.isKept ? 'resting' : 'active'}.` : 'Loading today’s Chain progress.'}
++            style={[styles.todayStatus, { backgroundColor: 'transparent', borderColor: colors.primary + '40' }]}
++          >
++            <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
++            <View style={[styles.todayStatusIcon, { backgroundColor: colors.primary + '1A' }]}>
++              <Ionicons name={!chainsReady ? 'time-outline' : todayProgress.isKept ? 'checkmark' : 'link-outline'} size={17} color={gateTextAccent} />
++            </View>
++            <View style={styles.todayStatusCopy}>
++              <Text style={[styles.todayStatusEyebrow, { color: gateTextAccent }]}>TODAY</Text>
++              <Text numberOfLines={1} style={[styles.todayStatusTitle, { color: colors.foreground }]}>
++                {!chainsReady ? 'Loading today…' : todayProgress.total === 0 ? 'No Chains due' : `${todayProgress.kept} of ${todayProgress.total} kept`}
++              </Text>
++            </View>
++            <Text numberOfLines={2} style={[styles.todayStatusMeta, { color: colors.mutedForeground }]}>
++              {chainsReady && todayProgress.isKept ? 'Conditional Gates rest' : `${conditionalGateCount} conditional ${conditionalGateCount === 1 ? 'Gate' : 'Gates'}`}
++            </Text>
++          </View>
++        )}
+         <Pressable accessibilityRole="button" accessibilityLabel="About Gate preview mode" onPress={() => setShowTutorial(true)} style={({ pressed }) => [styles.previewNote, { opacity: pressed ? OPACITY.secondaryPressed : 1 }]}>
+           <Ionicons name="information-circle-outline" size={16} color={gateTextAccent} />
+           <Text numberOfLines={useSingleColumn ? 2 : 1} style={[styles.previewNoteText, { color: colors.mutedForeground }]}>Preview mode · No apps are blocked or monitored.</Text>
+@@ -570,55 +727,63 @@ export default function GateScreen() {
+         </View>
+ 
+         <View style={styles.appsGrid}>
+-          {previewApps.map((app) => (
+-            <View key={app.id} style={{ width: appTileWidth }}>
+-              <Pressable
+-                accessibilityRole="button"
+-                accessibilityLabel={`Pause before opening ${app.name}`}
+-                accessibilityHint={selectedChain ? `Reconnect with ${selectedChain.name}` : 'Choose an intention, then experience Pause Gate'}
+-                onPress={() => openDemo(app)}
+-                style={({ pressed }) => [
+-                  styles.appTile,
+-                  useSingleColumn && styles.appTileWide,
+-                  {
+-                    backgroundColor: colors.cardSolid,
+-                    borderColor: app.iconColor + '38',
+-                    opacity: pressed ? OPACITY.pressed : 1,
+-                    transform: [{ scale: pressed && !reducedMotion ? 0.98 : 1 }],
+-                  },
+-                ]}
+-              >
+-                <View pointerEvents="none" style={[styles.tileTint, { backgroundColor: app.iconColor + '0D' }]} />
+-                <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[styles.appTileIcon, { backgroundColor: app.iconColor + '20' }]}>
+-                  {app.iconText ? (
+-                    <Text style={[styles.appIconText, { color: app.iconColor }]}>{app.iconText}</Text>
+-                  ) : (
+-                    <Ionicons name={app.icon} size={23} color={app.iconColor} />
+-                  )}
+-                </View>
+-                <View style={styles.appTileCopy}>
+-                  <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.appTileName, { color: colors.foreground }]}>{app.name}</Text>
+-                  <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.appTileRule, { color: colors.mutedForeground }]}>{selectedChain ? `Pause · ${selectedChain.name}` : 'Choose an intention'}</Text>
+-                </View>
+-              </Pressable>
+-              <Pressable
+-                accessibilityRole="button"
+-                accessibilityLabel={`More options for ${app.name}`}
+-                accessibilityHint="Change the protected intention or remove this app"
+-                hitSlop={4}
+-                onPress={() => openAppActions(app)}
+-                style={({ pressed }) => [styles.tileMenuButton, { backgroundColor: colors.foreground + (pressed ? '18' : '0B') }]}
+-              >
+-                <Ionicons name="ellipsis-horizontal" size={20} color={colors.mutedForeground} />
+-              </Pressable>
+-            </View>
+-          ))}
++          {previewApps.map((app) => {
++            const rule = rules[app.id] ?? DEFAULT_GATE_RULE;
++            const resting = chainsReady && rule.release === 'whenTodayKept' && todayProgress.isKept;
++            return (
++              <View key={app.id} style={{ width: appTileWidth }}>
++                <Pressable
++                  accessibilityRole="button"
++                  accessibilityLabel={`${app.name}. ${gateRuleSummary(rule)}${resting ? '. Resting because today is kept' : ''}`}
++                  accessibilityHint="Opens the Pause Gate preview. App use is not monitored yet"
++                  accessibilityState={{ busy: rule.release === 'whenTodayKept' && !chainsReady }}
++                  onPress={() => launchDemo(app)}
++                  style={({ pressed }) => [
++                    styles.appTile,
++                    useSingleColumn && styles.appTileWide,
++                    {
++                      backgroundColor: colors.cardSolid,
++                      borderColor: colors.primary + '38',
++                      opacity: pressed ? OPACITY.pressed : 1,
++                      transform: [{ scale: pressed && !reducedMotion ? 0.98 : 1 }],
++                    },
++                  ]}
++                >
++                  <View pointerEvents="none" style={[styles.tileTint, { backgroundColor: colors.primary + '12' }]} />
++                  <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[styles.appTileIcon, { backgroundColor: app.iconColor + '20' }]}>
++                    {app.iconText ? (
++                      <Text style={[styles.appIconText, { color: app.iconColor }]}>{app.iconText}</Text>
++                    ) : (
++                      <Ionicons name={app.icon} size={23} color={app.iconColor} />
++                    )}
++                  </View>
++                  <View style={styles.appTileCopy}>
++                    <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.appTileName, { color: colors.foreground }]}>{app.name}</Text>
++                    <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.appTileRule, { color: resting ? gateTextAccent : colors.mutedForeground }]}>{resting ? 'Resting today' : gateTriggerLabel(rule)}</Text>
++                    <Text numberOfLines={1} ellipsizeMode="tail" style={[styles.appTileCondition, { color: colors.mutedForeground }]}>{resting ? 'Today is kept' : gateReleaseLabel(rule)}</Text>
++                  </View>
++                </Pressable>
++                <Pressable
++                  accessibilityRole="button"
++                  accessibilityLabel={`More options for ${app.name}`}
++                  accessibilityHint="Edit when this Gate appears or remove the app"
++                  hitSlop={4}
++                  onPress={() => openAppActions(app)}
++                  style={({ pressed }) => [styles.tileMenuButton, { backgroundColor: colors.primary + (pressed ? '28' : '16') }]}
++                >
++                  <Ionicons name="ellipsis-horizontal" size={20} color={colors.mutedForeground} />
++                </Pressable>
++              </View>
++            );
++          })}
+ 
+           {availableApps.length > 0 && (
+             <Pressable
+               accessibilityRole="button"
+               accessibilityLabel="Add an app to Pause Gate"
+-              onPress={() => { setAppPickerIntent('add'); setShowAppPicker(true); }}
++              accessibilityState={{ disabled: !tutorialChecked }}
++              disabled={!tutorialChecked}
++              onPress={() => setShowAppPicker(true)}
+               style={({ pressed }) => [
+                 styles.addAppTile,
+                 useSingleColumn && styles.appTileWide,
+@@ -626,7 +791,7 @@ export default function GateScreen() {
+                   width: appTileWidth,
+                   backgroundColor: colors.cardSolid,
+                   borderColor: colors.primary + '35',
+-                  opacity: pressed ? OPACITY.pressed : 1,
++                  opacity: !tutorialChecked ? OPACITY.disabled : pressed ? OPACITY.pressed : 1,
+                   transform: [{ scale: pressed && !reducedMotion ? 0.98 : 1 }],
+                 },
+               ]}
+@@ -714,10 +879,12 @@ const styles = StyleSheet.create({
+     ...TYPE.caption,
+     marginTop: SPACE.hairline,
+   },
+-  intentionCard: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.card, borderCurve: 'continuous', paddingHorizontal: SPACE.md, paddingVertical: SPACE.sm, overflow: 'hidden' },
+-  intentionIcon: { width: 40, height: 40, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
+-  intentionEyebrow: TYPE.eyebrow,
+-  intentionTitle: { ...TYPE.cardTitle, marginTop: SPACE.hairline },
++  todayStatus: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.card, borderCurve: 'continuous', paddingHorizontal: SPACE.md, paddingVertical: SPACE.sm, overflow: 'hidden' },
++  todayStatusIcon: { width: 38, height: 38, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
++  todayStatusCopy: { flex: 1, minWidth: 0 },
++  todayStatusEyebrow: TYPE.eyebrow,
++  todayStatusTitle: { ...TYPE.bodyStrong, marginTop: SPACE.hairline },
++  todayStatusMeta: { ...TYPE.caption, maxWidth: 116, textAlign: 'right' },
+   previewNote: { minHeight: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', gap: SPACE.xs, paddingHorizontal: SPACE.xs },
+   previewNoteText: { ...TYPE.caption, flex: 1 },
+   scroll: {
+@@ -735,16 +902,10 @@ const styles = StyleSheet.create({
+   appTileCopy: { justifyContent: 'flex-end', paddingRight: SPACE.xxs },
+   appTileName: TYPE.cardTitle,
+   appTileRule: { ...TYPE.caption, marginTop: SPACE.hairline },
++  appTileCondition: { ...TYPE.metadata, marginTop: 2 },
+   tileMenuButton: { position: 'absolute', top: SPACE.xs, right: SPACE.xs, width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.capsule, alignItems: 'center', justifyContent: 'center', zIndex: 2 },
+   addAppTile: { minHeight: 152, justifyContent: 'space-between', borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.card, borderCurve: 'continuous', padding: SPACE.md, overflow: 'hidden' },
+   pickerRow: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, borderCurve: 'continuous', padding: SPACE.sm, marginBottom: SPACE.xs },
+-  chainPickerRow: { minHeight: CONTROL.buttonHeight, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, borderCurve: 'continuous', paddingHorizontal: SPACE.sm, paddingVertical: SPACE.xs, marginBottom: SPACE.xs },
+-  chainPickerDot: { width: 12, height: 12, borderRadius: RADIUS.capsule },
+-  chainPickerEmpty: { alignItems: 'center', borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.button, borderCurve: 'continuous', padding: SPACE.lg },
+-  chainPickerEmptyTitle: { ...TYPE.cardTitle, textAlign: 'center' },
+-  chainPickerEmptyBody: { ...TYPE.caption, textAlign: 'center', marginTop: SPACE.xxs },
+-  chainPickerCreate: { minHeight: CONTROL.minimumTarget, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.control, borderCurve: 'continuous', paddingHorizontal: SPACE.lg, marginTop: SPACE.sm },
+-  chainPickerCreateText: TYPE.bodyStrong,
+   appIcon: {
+     width: 40,
+     height: 40,
+@@ -766,4 +927,29 @@ const ruleStyles = StyleSheet.create({
+   pickerContent: { paddingBottom: 2 },
+   cancel: { minHeight: CONTROL.minimumTarget, paddingTop: SPACE.sm, alignItems: 'center', justifyContent: 'center' },
+   cancelText: { ...TYPE.body, fontFamily: 'Inter_500Medium' },
++  sheetBackdrop: { flex: 1, backgroundColor: SCRIM, justifyContent: 'flex-end' },
++  sheet: { width: '100%', maxHeight: '92%', borderTopLeftRadius: RADIUS.modal, borderTopRightRadius: RADIUS.modal, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingTop: SPACE.xs, overflow: 'hidden' },
++  sheetHandle: { alignSelf: 'center', width: 36, height: 5, borderRadius: RADIUS.capsule, marginBottom: SPACE.sm },
++  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, paddingHorizontal: SPACE.lg, paddingBottom: SPACE.md },
++  sheetHeadingCopy: { flex: 1, minWidth: 0 },
++  sheetTitle: TYPE.modalTitle,
++  sheetSubtitle: { ...TYPE.caption, marginTop: SPACE.hairline },
++  closeButton: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.capsule },
++  editorScroll: { flexShrink: 1 },
++  editorContent: { paddingHorizontal: SPACE.lg, paddingBottom: SPACE.md },
++  sectionLabel: { ...TYPE.eyebrow, marginTop: SPACE.sm, marginBottom: SPACE.xs },
++  choiceStack: { gap: SPACE.xs },
++  choice: { minHeight: 66, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.sm, paddingVertical: SPACE.xs },
++  choiceIcon: { width: 38, height: 38, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
++  choiceCopy: { flex: 1, minWidth: 0 },
++  choiceTitle: TYPE.bodyStrong,
++  choiceDescription: { ...TYPE.caption, marginTop: SPACE.hairline },
++  minutesBlock: { marginTop: SPACE.sm },
++  supportingLabel: { ...TYPE.metadata, marginBottom: SPACE.xs },
++  minuteGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.xs },
++  minuteChip: { minWidth: 62, minHeight: CONTROL.minimumTarget, flexGrow: 1, flexBasis: '21%', alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.xs },
++  minuteChipText: TYPE.bodyStrong,
++  sheetActions: { paddingHorizontal: SPACE.lg, paddingTop: SPACE.xs },
++  saveButton: { minHeight: CONTROL.buttonHeight, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.button, borderCurve: 'continuous', paddingHorizontal: SPACE.md },
++  saveButtonText: TYPE.bodyStrong,
+ });
+diff --git a/artifacts/chain/app/gate-windows.tsx b/artifacts/chain/app/gate-windows.tsx
+index 07a5255..06051d7 100644
+--- a/artifacts/chain/app/gate-windows.tsx
++++ b/artifacts/chain/app/gate-windows.tsx
+@@ -420,17 +420,19 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
+     const appCount = window.appIds.length
+       ? `${window.appIds.length} app${window.appIds.length === 1 ? '' : 's'}`
+       : 'No apps yet';
+-    const stateLabel = status.active
+-      ? 'ACTIVE NOW'
++    const stateLabel = status.active ? 'ACTIVE NOW' : featuredCard ? 'UP NEXT' : status.skippedToday ? 'SKIPPED' : '';
++    const accessibilityStateLabel = status.active
++      ? 'active now'
+       : featuredCard
+-        ? 'UP NEXT'
++        ? 'up next'
+         : status.skippedToday
+-          ? 'SKIPPED'
++          ? 'skipped today'
+           : status.completedToday
+-            ? 'COMPLETED'
++            ? onDemand ? 'finished today' : 'schedule ended today'
+             : onDemand
+-              ? 'ON DEMAND'
+-              : 'SCHEDULED';
++              ? 'on demand'
++              : 'scheduled';
++    const showStateLabel = stateLabel.length > 0;
+     const icon = status.active ? 'timer' : onDemand ? 'play-outline' : status.skippedToday ? 'pause-outline' : 'calendar-outline';
+     const stateColor = status.skippedToday || status.completedToday ? colors.mutedForeground : accentText;
+     return <Animated.View
+@@ -457,7 +459,9 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
+           <View style={[styles.windowTileIcon, { backgroundColor: status.active ? colors.primary + '2B' : colors.primary + '18' }]}>
+             <Ionicons name={icon} size={20} color={accentText} />
+           </View>
+-          <Text numberOfLines={1} style={[styles.windowState, { color: stateColor }]}>{stateLabel}</Text>
++          {showStateLabel
++            ? <Text numberOfLines={1} style={[styles.windowState, { color: stateColor }]}>{stateLabel}</Text>
++            : <View accessible={false} style={styles.windowStateSpacer} />}
+           <Pressable
+             accessibilityRole="button"
+             accessibilityLabel={`More actions for ${displayName}`}
+@@ -470,7 +474,7 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
+         </View>
+         <Pressable
+           accessibilityRole="button"
+-          accessibilityLabel={`${displayName}. ${description}. ${appCount}`}
++          accessibilityLabel={`${displayName}. ${accessibilityStateLabel}. ${description}. ${appCount}`}
+           accessibilityHint="Opens the window editor"
+           accessibilityState={{ disabled: mutationsBlocked, busy: saving }}
+           disabled={mutationsBlocked}
+@@ -549,6 +553,7 @@ const styles = StyleSheet.create({
+   windowCardTop: { minHeight: CONTROL.minimumTarget + SPACE.xs, flexDirection: 'row', alignItems: 'center', paddingLeft: SPACE.md, paddingTop: SPACE.sm, paddingRight: SPACE.xs },
+   windowTileIcon: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.control, alignItems: 'center', justifyContent: 'center' },
+   windowState: { ...TYPE.eyebrow, flex: 1, minWidth: 0, marginLeft: SPACE.xs },
++  windowStateSpacer: { flex: 1, minWidth: 0 },
+   windowMenuButton: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.capsule, alignItems: 'center', justifyContent: 'center' },
+   windowCardDetails: { flex: 1, minHeight: 108, justifyContent: 'flex-end', paddingHorizontal: SPACE.md, paddingTop: SPACE.xs, paddingBottom: SPACE.md },
+   windowTileName: { ...TYPE.cardTitle, minHeight: 21 },
+diff --git a/artifacts/chain/app/pause-gate-demo.tsx b/artifacts/chain/app/pause-gate-demo.tsx
+index 6b61246..bf254ae 100644
+--- a/artifacts/chain/app/pause-gate-demo.tsx
++++ b/artifacts/chain/app/pause-gate-demo.tsx
+@@ -42,6 +42,8 @@ const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
+ 
+ type BreathPhase = "in" | "out" | "complete";
+ type RouteParam = string | string[] | undefined;
++type TriggerKind = "onOpen" | "dailyUsage";
++type ReleaseMode = "always" | "whenTodayKept";
+ 
+ function firstRouteValue(value: RouteParam): string | undefined {
+   return Array.isArray(value) ? value[0] : value;
+@@ -61,6 +63,25 @@ function safeRouteColor(value: RouteParam, fallback: string): string {
+   return candidate && HEX_COLOR_PATTERN.test(candidate) ? candidate : fallback;
+ }
+ 
++function safeRouteInteger(
++  value: RouteParam,
++  fallback: number,
++  maximum: number,
++): number {
++  const candidate = Number(firstRouteValue(value));
++  return Number.isInteger(candidate) && candidate >= 0 && candidate <= maximum
++    ? candidate
++    : fallback;
++}
++
++function formatTriggerLabel(
++  triggerKind: TriggerKind,
++  triggerMinutes: number,
++): string {
++  if (triggerKind === "onOpen") return "ON APP OPEN";
++  return `AFTER ${Math.max(1, triggerMinutes)} MIN TODAY`;
++}
++
+ function exitToGate() {
+   router.canGoBack() ? router.back() : router.replace("/(tabs)/gate");
+ }
+@@ -73,6 +94,13 @@ export default function PauseGateDemoScreen() {
+     appName?: string | string[];
+     appIcon?: string | string[];
+     appColor?: string | string[];
++    triggerKind?: string | string[];
++    triggerMinutes?: string | string[];
++    releaseMode?: string | string[];
++    todayKept?: string | string[];
++    todayTotal?: string | string[];
++    // Kept in the route shape so older preview links remain harmless. New
++    // previews describe a Gate rule instead of depending on one Chain.
+     chainName?: string | string[];
+   }>();
+ 
+@@ -84,7 +112,25 @@ export default function PauseGateDemoScreen() {
+       ? (iconCandidate as keyof typeof Ionicons.glyphMap)
+       : "apps-outline";
+   const appColor = safeRouteColor(params.appColor, colors.primary);
+-  const chainName = safeRouteText(params.chainName, "what matters", 64);
++  const triggerKind: TriggerKind =
++    firstRouteValue(params.triggerKind) === "dailyUsage"
++      ? "dailyUsage"
++      : "onOpen";
++  const triggerMinutes = safeRouteInteger(params.triggerMinutes, 10, 1_440);
++  const releaseMode: ReleaseMode =
++    firstRouteValue(params.releaseMode) === "whenTodayKept"
++      ? "whenTodayKept"
++      : "always";
++  const todayTotal = safeRouteInteger(params.todayTotal, 0, 10_000);
++  const todayKept = Math.min(
++    todayTotal,
++    safeRouteInteger(params.todayKept, 0, 10_000),
++  );
++  const todayIsKept = todayTotal === 0 || todayKept >= todayTotal;
++  const triggerLabel = formatTriggerLabel(triggerKind, triggerMinutes);
++  const releaseLabel = todayIsKept
++    ? "TODAY IS KEPT"
++    : `UNTIL TODAY IS KEPT · ${todayKept}/${todayTotal}`;
+ 
+   const deadlineRef = useRef(Date.now() + PAUSE_DURATION_MS);
+   const phaseRef = useRef<BreathPhase>("in");
+@@ -375,30 +421,89 @@ export default function PauseGateDemoScreen() {
+               </View>
+             </View>
+ 
+-            <View
+-              accessible
+-              accessibilityLabel={"Chain: " + chainName}
+-              style={[
+-                styles.chainChip,
+-                {
+-                  backgroundColor: colors.primary + "18",
+-                  borderColor: colors.primary + "52",
+-                },
+-              ]}
+-            >
+-              <Ionicons
+-                accessibilityElementsHidden
+-                importantForAccessibility="no"
+-                name="link-outline"
+-                size={13}
+-                color={colors.primary}
+-              />
+-              <Text
+-                numberOfLines={1}
+-                style={[styles.chainChipText, { color: colors.primary }]}
++            <View style={styles.policyRow}>
++              <View
++                accessible
++                accessibilityLabel={
++                  triggerKind === "onOpen"
++                    ? "Gate pauses when the app opens"
++                    : `Gate pauses after ${Math.max(1, triggerMinutes)} minutes of use today`
++                }
++                style={[
++                  styles.policyChip,
++                  {
++                    backgroundColor: colors.primary + "18",
++                    borderColor: colors.primary + "52",
++                  },
++                ]}
+               >
+-                {"CHAIN · " + chainName}
+-              </Text>
++                <Ionicons
++                  accessibilityElementsHidden
++                  importantForAccessibility="no"
++                  name={
++                    triggerKind === "onOpen"
++                      ? "enter-outline"
++                      : "timer-outline"
++                  }
++                  size={13}
++                  color={colors.primary}
++                />
++                <Text
++                  numberOfLines={1}
++                  style={[styles.policyChipText, { color: colors.primary }]}
++                >
++                  {triggerLabel}
++                </Text>
++              </View>
++
++              {releaseMode === "whenTodayKept" ? (
++                <View
++                  accessible
++                  accessibilityLabel={
++                    todayIsKept
++                      ? "Today is kept"
++                      : `${todayKept} of ${todayTotal} Chains kept. Gate stays active until today is kept.`
++                  }
++                  style={[
++                    styles.policyChip,
++                    {
++                      backgroundColor: todayIsKept
++                        ? colors.primary + "16"
++                        : colors.card,
++                      borderColor: todayIsKept
++                        ? colors.primary + "52"
++                        : colors.border,
++                    },
++                  ]}
++                >
++                  <Ionicons
++                    accessibilityElementsHidden
++                    importantForAccessibility="no"
++                    name={
++                      todayIsKept
++                        ? "checkmark-circle-outline"
++                        : "link-outline"
++                    }
++                    size={13}
++                    color={
++                      todayIsKept ? colors.primary : colors.mutedForeground
++                    }
++                  />
++                  <Text
++                    numberOfLines={1}
++                    style={[
++                      styles.policyChipText,
++                      {
++                        color: todayIsKept
++                          ? colors.primary
++                          : colors.mutedForeground,
++                      },
++                    ]}
++                  >
++                    {releaseLabel}
++                  </Text>
++                </View>
++              ) : null}
+             </View>
+           </View>
+ 
+@@ -647,18 +752,14 @@ const styles = StyleSheet.create({
+   pauseContext: {
+     width: "100%",
+     minHeight: 76,
+-    flexDirection: "row",
+-    flexWrap: "wrap",
+-    alignItems: "center",
+-    justifyContent: "space-between",
++    alignItems: "stretch",
+     gap: SPACE.sm,
+     padding: SPACE.sm,
+     borderRadius: RADIUS.card,
+     borderWidth: StyleSheet.hairlineWidth,
+   },
+   appRow: {
+-    flex: 1,
+-    minWidth: 174,
++    width: "100%",
+     flexDirection: "row",
+     alignItems: "center",
+     gap: SPACE.sm,
+@@ -685,24 +786,27 @@ const styles = StyleSheet.create({
+   appName: {
+     ...TYPE.sectionTitle,
+   },
+-  chainChip: {
+-    maxWidth: 190,
++  policyRow: {
++    width: "100%",
++    flexDirection: "row",
++    flexWrap: "wrap",
++    gap: SPACE.xs,
++  },
++  policyChip: {
+     minHeight: 28,
+     flexDirection: "row",
+     alignItems: "center",
+-    justifyContent: "center",
+     gap: SPACE.xxs,
+     paddingHorizontal: SPACE.sm,
+     paddingVertical: SPACE.xxs,
+     borderRadius: RADIUS.capsule,
+     borderWidth: StyleSheet.hairlineWidth,
+   },
+-  chainChipText: {
++  policyChipText: {
+     ...TYPE.eyebrow,
+     fontSize: 10,
+     lineHeight: 14,
+     flexShrink: 1,
+-    textAlign: "center",
+   },
+   orbSlot: {
+     height: 236,
+diff --git b/artifacts/chain/domain/gateRules.ts b/artifacts/chain/domain/gateRules.ts
+new file mode 100644
+index 0000000..0a93de8
+--- /dev/null
++++ b/artifacts/chain/domain/gateRules.ts
+@@ -0,0 +1,238 @@
++export const GATE_RULES_SCHEMA_VERSION = 1;
++export const GATE_DAILY_USAGE_OPTIONS = [5, 10, 15, 30, 45, 60, 90, 120] as const;
++
++export type GateTrigger =
++  | { kind: 'onOpen' }
++  | { kind: 'dailyUsage'; minutes: number };
++
++export type GateRelease = 'always' | 'whenTodayKept';
++
++export interface GateRule {
++  trigger: GateTrigger;
++  release: GateRelease;
++}
++
++export type GateRules = Record<string, GateRule>;
++
++export interface GateTodayProgress {
++  total: number;
++  kept: number;
++  pending: number;
++  isKept: boolean;
++}
++
++/** Structural subset of Chain needed to evaluate today's release condition. */
++export interface GateProgressChain {
++  createdAt: string;
++  cadence: 'daily' | 'weekly';
++  weeklyTarget: number;
++  restDays: readonly number[];
++  completedDates: readonly string[];
++  minimumDates: readonly string[];
++  frozenDates: readonly string[];
++}
++
++export const DEFAULT_GATE_RULE: GateRule = {
++  trigger: { kind: 'onOpen' },
++  release: 'always',
++};
++
++const DEFAULT_DAILY_USAGE_MINUTES = 30;
++const MIN_DAILY_USAGE_MINUTES = 5;
++const MAX_DAILY_USAGE_MINUTES = 360;
++const DAILY_USAGE_STEP_MINUTES = 5;
++const FORBIDDEN_RULE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
++
++/**
++ * DeviceActivity thresholds are expressed in whole minutes. Keeping custom
++ * values on a five-minute grid makes a saved rule predictable while still
++ * allowing more than the quick-pick options exposed by the UI.
++ */
++export function normalizeGateUsageMinutes(
++  value: unknown,
++  fallback = DEFAULT_DAILY_USAGE_MINUTES,
++): number {
++  const numericValue =
++    typeof value === 'number'
++      ? value
++      : typeof value === 'string' && value.trim() !== ''
++        ? Number(value)
++        : Number.NaN;
++  const numericFallback = Number.isFinite(fallback) ? fallback : DEFAULT_DAILY_USAGE_MINUTES;
++  const candidate = Number.isFinite(numericValue) ? numericValue : numericFallback;
++  const rounded = Math.round(candidate / DAILY_USAGE_STEP_MINUTES) * DAILY_USAGE_STEP_MINUTES;
++  return Math.max(MIN_DAILY_USAGE_MINUTES, Math.min(MAX_DAILY_USAGE_MINUTES, rounded));
++}
++
++function cloneDefaultGateRule(): GateRule {
++  return { trigger: { kind: 'onOpen' }, release: 'always' };
++}
++
++/**
++ * Accepts both the current policy and the unversioned rule previously stored
++ * by Gate (`every_open` / `daily_limit`). Unknown payloads are rejected rather
++ * than silently turning corrupt data into an enabled protection rule.
++ */
++export function normalizeGateRule(value: unknown): GateRule | null {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
++  const raw = value as Record<string, unknown>;
++
++  let trigger: GateTrigger | null = null;
++  if (raw.trigger && typeof raw.trigger === 'object' && !Array.isArray(raw.trigger)) {
++    const rawTrigger = raw.trigger as Record<string, unknown>;
++    if (rawTrigger.kind === 'onOpen') {
++      trigger = { kind: 'onOpen' };
++    } else if (rawTrigger.kind === 'dailyUsage') {
++      if (typeof rawTrigger.minutes !== 'number' || !Number.isFinite(rawTrigger.minutes)) return null;
++      trigger = {
++        kind: 'dailyUsage',
++        minutes: normalizeGateUsageMinutes(rawTrigger.minutes),
++      };
++    }
++  } else if (raw.mode === 'every_open') {
++    trigger = { kind: 'onOpen' };
++  } else if (raw.mode === 'daily_limit') {
++    if (typeof raw.dailyLimitMinutes !== 'number' || !Number.isFinite(raw.dailyLimitMinutes)) return null;
++    trigger = {
++      kind: 'dailyUsage',
++      minutes: normalizeGateUsageMinutes(raw.dailyLimitMinutes),
++    };
++  }
++
++  if (trigger === null) return null;
++  if ('release' in raw && raw.release !== 'always' && raw.release !== 'whenTodayKept') return null;
++  const release: GateRelease = raw.release === 'whenTodayKept' ? 'whenTodayKept' : 'always';
++  return { trigger, release };
++}
++
++export function decodeGateRules(value: unknown): GateRules | null {
++  const source =
++    value && typeof value === 'object' && !Array.isArray(value) && 'rules' in value
++      ? (value as { rules?: unknown }).rules
++      : value;
++  if (!source || typeof source !== 'object' || Array.isArray(source)) return null;
++
++  const entries = Object.entries(source);
++  const rules: GateRules = {};
++  for (const [rawAppId, candidate] of entries) {
++    const appId = rawAppId.trim();
++    if (!appId || appId.length > 256 || FORBIDDEN_RULE_KEYS.has(appId)) continue;
++    const rule = normalizeGateRule(candidate);
++    if (rule !== null) rules[appId] = rule;
++  }
++
++  return entries.length > 0 && Object.keys(rules).length === 0 ? null : rules;
++}
++
++export function gateTriggerLabel(rule: GateRule): string {
++  return rule.trigger.kind === 'onOpen'
++    ? 'Every opening'
++    : `After ${formatGateUsageMinutes(rule.trigger.minutes)} today`;
++}
++
++export function gateReleaseLabel(rule: GateRule): string {
++  return rule.release === 'whenTodayKept' ? 'Until today is kept' : 'Always active';
++}
++
++export function gateRuleSummary(rule: GateRule): string {
++  return `${gateTriggerLabel(rule)} · ${gateReleaseLabel(rule)}`;
++}
++
++export function formatGateUsageMinutes(value: number): string {
++  const minutes = normalizeGateUsageMinutes(value);
++  if (minutes < 60) return `${minutes} min`;
++  const hours = Math.floor(minutes / 60);
++  const remainder = minutes % 60;
++  if (remainder === 0) return `${hours}h`;
++  return `${hours}h ${remainder}m`;
++}
++
++function toLocalDateString(date: Date): string {
++  const year = date.getFullYear();
++  const month = String(date.getMonth() + 1).padStart(2, '0');
++  const day = String(date.getDate()).padStart(2, '0');
++  return `${year}-${month}-${day}`;
++}
++
++function getTodayStr(): string {
++  return toLocalDateString(new Date());
++}
++
++function isDateKey(value: unknown): value is string {
++  if (typeof value !== 'string') return false;
++  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
++  if (!match) return false;
++  const year = Number(match[1]);
++  const month = Number(match[2]);
++  const day = Number(match[3]);
++  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
++  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
++  const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
++  return day <= daysInMonth[month - 1];
++}
++
++function getLocalDateFromString(value: string): Date {
++  const [year, month, day] = value.split('-').map(Number);
++  return new Date(year, month - 1, day, 12);
++}
++
++function isRestDay(chain: GateProgressChain, date: string): boolean {
++  return chain.cadence === 'daily' && chain.restDays.includes(getLocalDateFromString(date).getDay());
++}
++
++function getWeeklyProgress(chain: GateProgressChain, referenceDate: string): number {
++  const start = getLocalDateFromString(referenceDate);
++  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
++  const end = new Date(start);
++  end.setDate(start.getDate() + 6);
++  const startKey = toLocalDateString(start);
++  const endKey = toLocalDateString(end);
++  return new Set(
++    [...chain.completedDates, ...chain.minimumDates].filter(
++      (date) => date >= startKey && date <= endKey,
++    ),
++  ).size;
++}
++
++function isChainKeptOnDate(chain: GateProgressChain, date: string): boolean {
++  const protectedToday =
++    chain.completedDates.includes(date) ||
++    chain.minimumDates.includes(date) ||
++    chain.frozenDates.includes(date);
++  if (chain.cadence === 'weekly') {
++    return getWeeklyProgress(chain, date) >= chain.weeklyTarget || protectedToday;
++  }
++  return protectedToday;
++}
++
++/**
++ * Counts the Chains that form today's promise. Daily rest days are excluded.
++ * A weekly Chain already at target cannot keep Gate active unnecessarily.
++ * With no eligible Chains the day is considered kept.
++ */
++export function getGateTodayProgress(
++  chains: readonly GateProgressChain[],
++  requestedDate = getTodayStr(),
++): GateTodayProgress {
++  const date = isDateKey(requestedDate) ? requestedDate : getTodayStr();
++  let total = 0;
++  let kept = 0;
++
++  for (const chain of chains) {
++    if (chain.createdAt > date) continue;
++    if (chain.cadence === 'daily' && isRestDay(chain, date)) continue;
++    total += 1;
++    if (isChainKeptOnDate(chain, date)) kept += 1;
++  }
++
++  const pending = Math.max(0, total - kept);
++  return { total, kept, pending, isKept: pending === 0 };
++}
++
++export function isGateRuleActiveToday(rule: GateRule, progress: GateTodayProgress): boolean {
++  return rule.release === 'always' || !progress.isKept;
++}
++
++export function makeDefaultGateRule(): GateRule {
++  return cloneDefaultGateRule();
++}
+diff --git b/artifacts/chain/lib/gateRules.ts b/artifacts/chain/lib/gateRules.ts
+new file mode 100644
+index 0000000..10cc130
+--- /dev/null
++++ b/artifacts/chain/lib/gateRules.ts
+@@ -0,0 +1,52 @@
++import AsyncStorage from '@react-native-async-storage/async-storage';
++import {
++  decodeGateRules,
++  GATE_RULES_SCHEMA_VERSION,
++  normalizeGateRule,
++  type GateRule,
++  type GateRules,
++} from '../domain/gateRules';
++import { createVersionedRepository } from './versionedRepository';
++
++const GATE_RULES_KEY = '@chain_gate_rules';
++
++const repository = createVersionedRepository<GateRules>({
++  storage: AsyncStorage,
++  key: GATE_RULES_KEY,
++  version: GATE_RULES_SCHEMA_VERSION,
++  decode: decodeGateRules,
++  empty: () => ({}),
++});
++
++function normalizeAppId(value: string): string {
++  const appId = value.trim();
++  if (!appId || appId.length > 256 || ['__proto__', 'constructor', 'prototype'].includes(appId)) {
++    throw new Error('A valid Gate app id is required');
++  }
++  return appId;
++}
++
++/** Reads and, when needed, atomically migrates the legacy unversioned record. */
++export function getGateRules(): Promise<GateRules> {
++  return repository.read();
++}
++
++export function saveGateRules(rules: GateRules): Promise<void> {
++  return repository.write(rules);
++}
++
++export function setGateRule(appId: string, rule: GateRule): Promise<GateRules> {
++  const key = normalizeAppId(appId);
++  const normalized = normalizeGateRule(rule);
++  if (normalized === null) return Promise.reject(new Error('A valid Gate rule is required'));
++  return repository.update((current) => ({ ...current, [key]: normalized }));
++}
++
++export function removeGateRule(appId: string): Promise<GateRules> {
++  const key = normalizeAppId(appId);
++  return repository.update((current) => {
++    const next = { ...current };
++    delete next[key];
++    return next;
++  });
++}
+diff --git b/artifacts/chain/tests/gate-rules.test.mjs b/artifacts/chain/tests/gate-rules.test.mjs
+new file mode 100644
+index 0000000..d51c039
+--- /dev/null
++++ b/artifacts/chain/tests/gate-rules.test.mjs
+@@ -0,0 +1,214 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++
++import {
++  decodeGateRules,
++  gateRuleSummary,
++  getGateTodayProgress,
++  isGateRuleActiveToday,
++  normalizeGateRule,
++  normalizeGateUsageMinutes,
++} from '../domain/gateRules.ts';
++import { createVersionedRepository } from '../lib/versionedRepository.ts';
++
++function makeChain(overrides = {}) {
++  return {
++    id: 'chain-1',
++    name: 'Read',
++    color: '#ff6b3d',
++    createdAt: '2026-07-01',
++    completedDates: [],
++    minimumDates: [],
++    minimumLabel: 'One page',
++    frozenDates: [],
++    freezeCredits: 2,
++    freezeRecoveryProgress: 0,
++    freezeSystemVersion: 2,
++    restDays: [],
++    cadence: 'daily',
++    weeklyTarget: 3,
++    completionTimes: {},
++    ...overrides,
++  };
++}
++
++function createMemoryStorage(entries = {}) {
++  const values = new Map(Object.entries(entries));
++  return {
++    async getItem(key) {
++      return values.get(key) ?? null;
++    },
++    async setItem(key, value) {
++      values.set(key, value);
++    },
++    value(key) {
++      return values.get(key) ?? null;
++    },
++  };
++}
++
++test('Gate usage minutes are finite, clamped and kept on a five-minute grid', () => {
++  assert.equal(normalizeGateUsageMinutes(1), 5);
++  assert.equal(normalizeGateUsageMinutes('12'), 10);
++  assert.equal(normalizeGateUsageMinutes(13), 15);
++  assert.equal(normalizeGateUsageMinutes(999), 360);
++  assert.equal(normalizeGateUsageMinutes(Number.NaN), 30);
++});
++
++test('Gate rules normalize current policies and migrate legacy modes', () => {
++  assert.deepEqual(
++    normalizeGateRule({ trigger: { kind: 'dailyUsage', minutes: 17 }, release: 'whenTodayKept' }),
++    { trigger: { kind: 'dailyUsage', minutes: 15 }, release: 'whenTodayKept' },
++  );
++  assert.deepEqual(normalizeGateRule({ mode: 'every_open', dailyLimitMinutes: 90 }), {
++    trigger: { kind: 'onOpen' },
++    release: 'always',
++  });
++  assert.deepEqual(normalizeGateRule({ mode: 'daily_limit', dailyLimitMinutes: 90 }), {
++    trigger: { kind: 'dailyUsage', minutes: 90 },
++    release: 'always',
++  });
++  assert.equal(normalizeGateRule({ trigger: { kind: 'dailyUsage' } }), null);
++  assert.equal(normalizeGateRule({ trigger: { kind: 'dailyUsage', minutes: Number.NaN } }), null);
++  assert.equal(normalizeGateRule({ mode: 'daily_limit' }), null);
++  assert.equal(normalizeGateRule({ trigger: { kind: 'onOpen' }, release: 'later' }), null);
++  assert.equal(normalizeGateRule({ mode: 'unknown' }), null);
++});
++
++test('Gate rule records salvage valid entries but reject wholly corrupt payloads', () => {
++  assert.deepEqual(
++    decodeGateRules({
++      youtube: { mode: 'daily_limit', dailyLimitMinutes: 10 },
++      broken: { mode: 'later' },
++    }),
++    {
++      youtube: { trigger: { kind: 'dailyUsage', minutes: 10 }, release: 'always' },
++    },
++  );
++  assert.deepEqual(decodeGateRules({}), {});
++  assert.equal(decodeGateRules({ broken: { mode: 'later' } }), null);
++  assert.equal(decodeGateRules('{not-an-object'), null);
++});
++
++test('Gate rule summaries stay concise across trigger and release variants', () => {
++  assert.equal(
++    gateRuleSummary({ trigger: { kind: 'onOpen' }, release: 'always' }),
++    'Every opening · Always active',
++  );
++  assert.equal(
++    gateRuleSummary({ trigger: { kind: 'dailyUsage', minutes: 90 }, release: 'whenTodayKept' }),
++    'After 1h 30m today · Until today is kept',
++  );
++});
++
++test('today progress excludes daily rest days and accepts done, minimum and frozen states', () => {
++  const date = '2026-09-06'; // Sunday
++  const progress = getGateTodayProgress([
++    makeChain({ id: 'rest', restDays: [0] }),
++    makeChain({ id: 'done', completedDates: [date] }),
++    makeChain({ id: 'minimum', minimumDates: [date] }),
++    makeChain({ id: 'frozen', frozenDates: [date] }),
++    makeChain({ id: 'pending' }),
++  ], date);
++
++  assert.deepEqual(progress, { total: 4, kept: 3, pending: 1, isKept: false });
++});
++
++test('weekly Chains at target never hold Gate and a weekly action can keep today', () => {
++  const date = '2026-09-03';
++  const progress = getGateTodayProgress([
++    makeChain({
++      id: 'target-met',
++      cadence: 'weekly',
++      weeklyTarget: 3,
++      completedDates: ['2026-08-31', '2026-09-01', '2026-09-02'],
++    }),
++    makeChain({
++      id: 'acted-today',
++      cadence: 'weekly',
++      weeklyTarget: 3,
++      completedDates: [date],
++    }),
++    makeChain({ id: 'weekly-pending', cadence: 'weekly', weeklyTarget: 3 }),
++  ], date);
++
++  assert.deepEqual(progress, { total: 3, kept: 2, pending: 1, isKept: false });
++});
++
++test('Chains created after the evaluated local day cannot hold Gate', () => {
++  const progress = getGateTodayProgress([
++    makeChain({ id: 'future-daily', createdAt: '2026-09-04' }),
++    makeChain({ id: 'future-weekly', createdAt: '2026-09-05', cadence: 'weekly' }),
++    makeChain({ id: 'current', createdAt: '2026-09-03', completedDates: ['2026-09-03'] }),
++  ], '2026-09-03');
++
++  assert.deepEqual(progress, { total: 1, kept: 1, pending: 0, isKept: true });
++});
++
++test('an empty eligible day is kept and releases only conditional Gate rules', () => {
++  const progress = getGateTodayProgress([], '2026-09-03');
++  assert.deepEqual(progress, { total: 0, kept: 0, pending: 0, isKept: true });
++  assert.equal(
++    isGateRuleActiveToday({ trigger: { kind: 'onOpen' }, release: 'whenTodayKept' }, progress),
++    false,
++  );
++  assert.equal(
++    isGateRuleActiveToday({ trigger: { kind: 'onOpen' }, release: 'always' }, progress),
++    true,
++  );
++});
++
++test('the versioned repository upgrades the previous unversioned Gate rule record', async () => {
++  const key = '@chain_gate_rules';
++  const storage = createMemoryStorage({
++    [key]: JSON.stringify({ youtube: { mode: 'daily_limit', dailyLimitMinutes: 45 } }),
++  });
++  const repository = createVersionedRepository({
++    storage,
++    key,
++    version: 1,
++    decode: decodeGateRules,
++    empty: () => ({}),
++  });
++
++  const result = await repository.readWithMetadata();
++  assert.equal(result.source, 'primary');
++  assert.equal(result.migrated, true);
++  assert.deepEqual(result.value.youtube, {
++    trigger: { kind: 'dailyUsage', minutes: 45 },
++    release: 'always',
++  });
++
++  const rewritten = JSON.parse(storage.value(key));
++  assert.equal(rewritten.version, 1);
++  assert.deepEqual(rewritten.data, result.value);
++});
++
++test('a corrupt Gate primary recovers the last valid rule backup', async () => {
++  const key = '@chain_gate_rules';
++  const backup = {
++    version: 1,
++    data: { youtube: { trigger: { kind: 'dailyUsage', minutes: 15 }, release: 'always' } },
++    writtenAt: '2026-09-03T10:00:00.000Z',
++  };
++  const storage = createMemoryStorage({
++    [key]: JSON.stringify({
++      version: 1,
++      data: { youtube: { trigger: { kind: 'dailyUsage' }, release: 'always' } },
++      writtenAt: '2026-09-03T11:00:00.000Z',
++    }),
++    [`${key}:backup`]: JSON.stringify(backup),
++  });
++  const repository = createVersionedRepository({
++    storage,
++    key,
++    version: 1,
++    decode: decodeGateRules,
++    empty: () => ({}),
++  });
++
++  const result = await repository.readWithMetadata();
++  assert.equal(result.source, 'backup');
++  assert.deepEqual(result.value, backup.data);
++  assert.deepEqual(JSON.parse(storage.value(key)).data, backup.data);
++});

@@ -178,6 +178,8 @@ export default function ChainsScreen() {
             onPress={handleAdd}
             accentColor={colors.primary}
             filled
+            iconSize={24}
+            symbol="add"
           />
         </View>
       </View>
@@ -200,7 +202,7 @@ export default function ChainsScreen() {
           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
           <View style={styles.emptyAction}>
-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
+            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
           </View>
         </ScrollView>
       ) : (
@@ -261,6 +263,7 @@ function ChainIntervention({
       <AppButton
         label="Log minimum"
         icon="leaf-outline"
+        symbol="minimum"
         onPress={onMinimum}
         accentColor={chain.color}
         busy={minimumBusy}

@@ -25,21 +25,25 @@ import { EXTRA_CHAIN_COLORS } from '@/constants/colors';
 import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
 import { Chain, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
 import { PlanItem, usePlan } from '@/context/PlanContext';
+import { decodeMorningBriefingTime, parsePlanTimeSlot } from '@/domain/plan';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { cancelPlanReminder, getPlanNotificationPermission, requestPlanNotificationPermission, scheduleMorningBriefing, schedulePlanReminder } from '@/lib/planNotifications';
 import { reportDiagnostic } from '@/lib/diagnostics';
 import { CONTROL, MOTION, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+import { CLOCK_MINUTE_OPTIONS, isClockMinuteOption } from '@/constants/time';
 import { playFeedback } from '@/lib/feedback';
 import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
 
 const QUICK_TIMES = ['7 AM', '9 AM', '12 PM', '3 PM', '6 PM', '8 PM'];
 const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
-const MINUTES = ['00', '05', '10', '15', '20', '30', '40', '45', '50', '55'];
+const MINUTES = CLOCK_MINUTE_OPTIONS.map((minute) => String(minute).padStart(2, '0'));
 const REMINDER_OPTIONS = [0, 5, 15, 30, 60];
 const DURATION_OPTIONS = [30, 60, 90, 120, 180, 240];
 const UNLINKED_TASK_COLOR = '#8FA2B3';
 const TASK_ACCENTS = ['#8FA2B3', ...EXTRA_CHAIN_COLORS];
 const MORNING_BRIEFING_KEY = '@chain_morning_briefing';
+const MORNING_BRIEFING_PRESETS = [7, 8, 9] as const;
+const MORNING_BRIEFING_HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 const WEEKDAY_OPTIONS = [
   { label: 'M', value: 1, accessibilityLabel: 'Monday' },
   { label: 'T', value: 2, accessibilityLabel: 'Tuesday' },
@@ -67,9 +71,9 @@ function formatDurationLabel(minutes: number) {
   return hours ? `${hours}h${minutes % 60 ? ` ${minutes % 60}m` : ''}` : `${minutes}m`;
 }
 
-function formatBriefingTime(hour: number | null) {
+function formatBriefingTime(hour: number | null, minute = 0) {
   if (hour === null) return 'Off';
-  return `${hour % 12 || 12}:00 ${hour >= 12 ? 'PM' : 'AM'}`;
+  return `${hour % 12 || 12}:${String(minute).padStart(2, '0')} ${hour >= 12 ? 'PM' : 'AM'}`;
 }
 
 export default function PlanScreen() {
@@ -91,8 +95,10 @@ export default function PlanScreen() {
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [briefingHour, setBriefingHour] = useState<number | null>(null);
+  const [briefingMinute, setBriefingMinute] = useState(0);
   const [briefingNotificationId, setBriefingNotificationId] = useState<string | undefined>();
   const [briefingBusy, setBriefingBusy] = useState(false);
+  const [briefingReady, setBriefingReady] = useState(false);
   const [showBriefingPicker, setShowBriefingPicker] = useState(false);
   const [editingItem, setEditingItem] = useState<PlanItem | null>(null);
   const [showCompletion, setShowCompletion] = useState(false);
@@ -130,16 +136,21 @@ export default function PlanScreen() {
       .then((raw) => {
         try {
           const value = raw ? JSON.parse(raw) : null;
-          if (typeof value?.hour === 'number') setBriefingHour(value.hour);
-          if (typeof value?.notificationId === 'string') setBriefingNotificationId(value.notificationId);
+          const time = decodeMorningBriefingTime(value);
+          if (time) {
+            setBriefingHour(time.hour);
+            setBriefingMinute(time.minute);
+            if (typeof value?.notificationId === 'string') setBriefingNotificationId(value.notificationId);
+          }
         } catch (error) {
           reportDiagnostic({ area: 'storage', operation: 'morningBriefing.decode', severity: 'warning', error });
         }
       })
-      .catch((error) => reportDiagnostic({ area: 'storage', operation: 'morningBriefing.read', severity: 'warning', error }));
+      .catch((error) => reportDiagnostic({ area: 'storage', operation: 'morningBriefing.read', severity: 'warning', error }))
+      .finally(() => setBriefingReady(true));
   }, []);
 
-  async function setMorningBriefing(hour: number): Promise<boolean> {
+  async function setMorningBriefing(hour: number, minute: number): Promise<boolean> {
     if (briefingBusyRef.current) return false;
     briefingBusyRef.current = true;
     setBriefingBusy(true);
@@ -155,13 +166,13 @@ export default function PlanScreen() {
         );
         return false;
       }
-      const result = await scheduleMorningBriefing(hour);
+      const result = await scheduleMorningBriefing(hour, minute);
       if (result.status !== 'scheduled') {
         Alert.alert('Briefing not added', result.status === 'unavailable' ? 'Morning briefings are unavailable here.' : 'Notifications are off.');
         return false;
       }
       try {
-        await AsyncStorage.setItem(MORNING_BRIEFING_KEY, JSON.stringify({ hour, notificationId: result.notificationId }));
+        await AsyncStorage.setItem(MORNING_BRIEFING_KEY, JSON.stringify({ hour, minute, notificationId: result.notificationId }));
       } catch (error) {
         reportDiagnostic({ area: 'storage', operation: 'morningBriefing.persist', severity: 'error', error });
         const compensated = await cancelPlanReminder(result.notificationId).then(() => true).catch((cancelError) => {
@@ -172,6 +183,7 @@ export default function PlanScreen() {
           reportDiagnostic({ area: 'storage', operation: 'morningBriefing.compensateStorage', severity: 'warning', error: removeError });
         });
         setBriefingHour(null);
+        setBriefingMinute(0);
         setBriefingNotificationId(undefined);
         Alert.alert(
           compensated ? 'Briefing not saved' : 'Check this briefing',
@@ -182,6 +194,7 @@ export default function PlanScreen() {
         return false;
       }
       setBriefingHour(hour);
+      setBriefingMinute(minute);
       setBriefingNotificationId(result.notificationId);
       playFeedback('success');
       return true;
@@ -206,6 +219,7 @@ export default function PlanScreen() {
     try {
       await cancelPlanReminder(briefingNotificationId);
       setBriefingHour(null);
+      setBriefingMinute(0);
       setBriefingNotificationId(undefined);
       try {
         await AsyncStorage.removeItem(MORNING_BRIEFING_KEY);
@@ -614,6 +628,19 @@ export default function PlanScreen() {
     playFeedback('selection');
   }
 
+  function openTaskTimePicker() {
+    const current = parsePlanTimeSlot(selectedTime);
+    if (current) {
+      setPickerHour(current.hour);
+      setPickerMinute(String(current.minute).padStart(2, '0'));
+    } else {
+      setPickerHour(9);
+      setPickerMinute('00');
+    }
+    Keyboard.dismiss();
+    setShowTimePicker(true);
+  }
+
   function continueToTomorrow() {
     if (!isToday || isActiveDayClosed) {
       showTomorrow();
@@ -723,12 +750,12 @@ export default function PlanScreen() {
 
         {isToday && <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Morning briefing, ${formatBriefingTime(briefingHour)}`}
+          accessibilityLabel={briefingReady ? `Morning briefing, ${formatBriefingTime(briefingHour, briefingMinute)}` : 'Morning briefing, loading'}
           accessibilityHint="Opens briefing time options"
-          accessibilityState={{ busy: briefingBusy }}
-          disabled={briefingBusy}
+          accessibilityState={{ busy: briefingBusy || !briefingReady, disabled: briefingBusy || !briefingReady }}
+          disabled={briefingBusy || !briefingReady}
           onPress={() => setShowBriefingPicker(true)}
-          style={({ pressed }) => [styles.briefingRow, { backgroundColor: colors.card, borderColor: colors.border, opacity: briefingBusy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
+          style={({ pressed }) => [styles.briefingRow, { backgroundColor: colors.card, borderColor: colors.border, opacity: briefingBusy || !briefingReady ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
         >
           <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
           <View style={[styles.briefingIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sunny-outline" size={18} color={colors.primary} /></View>
@@ -741,7 +768,7 @@ export default function PlanScreen() {
               Start with clarity.
             </Text>
           </View>
-          <Text style={[styles.briefingValue, { color: briefingHour === null ? colors.mutedForeground : colors.primary }]}>{formatBriefingTime(briefingHour)}</Text>
+          <Text style={[styles.briefingValue, { color: briefingHour === null ? colors.mutedForeground : colors.primary }]}>{briefingReady ? formatBriefingTime(briefingHour, briefingMinute) : '—'}</Text>
           <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
         </Pressable>}
 
@@ -788,7 +815,7 @@ export default function PlanScreen() {
                   setSelectedTaskColor={(color: string | undefined) => { setSelectedTaskColor(color); Keyboard.dismiss(); }}
                   selectedTime={selectedTime}
                   setSelectedTime={(time: string) => { setSelectedTime(time); if (!time) setSelectedReminder(undefined); Keyboard.dismiss(); }}
-                  openTimePicker={() => { Keyboard.dismiss(); setShowTimePicker(true); }}
+                  openTimePicker={openTaskTimePicker}
                   selectedReminder={selectedReminder}
                   setSelectedReminder={(minutes: number | undefined) => { setSelectedReminder(minutes); Keyboard.dismiss(); }}
                   allowPriority
@@ -835,10 +862,11 @@ export default function PlanScreen() {
       <MorningBriefingSheet
         visible={showBriefingPicker}
         hour={briefingHour}
+        minute={briefingMinute}
         busy={briefingBusy}
         onClose={() => setShowBriefingPicker(false)}
-        onSelect={async (hour) => {
-          if (await setMorningBriefing(hour)) setShowBriefingPicker(false);
+        onSelect={async (hour, minute) => {
+          if (await setMorningBriefing(hour, minute)) setShowBriefingPicker(false);
         }}
         onDisable={async () => {
           if (briefingHour === null || await disableMorningBriefing()) setShowBriefingPicker(false);
@@ -1145,27 +1173,190 @@ function timeSortValue(timeSlot: string) {
   return hour * 60 + Number(match[2] || 0);
 }
 
-function MorningBriefingSheet({ visible, hour, busy, onClose, onSelect, onDisable }: { visible: boolean; hour: number | null; busy: boolean; onClose: () => void; onSelect: (hour: number) => Promise<void>; onDisable: () => Promise<void> }) {
+function MorningBriefingSheet({
+  visible,
+  hour,
+  minute,
+  busy,
+  onClose,
+  onSelect,
+  onDisable,
+}: {
+  visible: boolean;
+  hour: number | null;
+  minute: number;
+  busy: boolean;
+  onClose: () => void;
+  onSelect: (hour: number, minute: number) => Promise<void>;
+  onDisable: () => Promise<void>;
+}) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const reduceMotion = useReducedMotion();
-  const { height } = useWindowDimensions();
+  const { height, fontScale } = useWindowDimensions();
+  const [showCustomTime, setShowCustomTime] = useState(false);
+  const [draftHour, setDraftHour] = useState(8);
+  const [draftMinute, setDraftMinute] = useState(0);
+  const contentArrival = useRef(new Animated.Value(1)).current;
+  const hourListRef = useRef<ScrollView>(null);
+  const minuteListRef = useRef<ScrollView>(null);
+  const hourListHeightRef = useRef(0);
+  const minuteListHeightRef = useRef(0);
+  const pickerHeight = Math.max(124, Math.min(210, Math.round((height * 0.28) / Math.max(1, fontScale * 0.82))));
+  const isPreset = hour !== null && minute === 0 && MORNING_BRIEFING_PRESETS.some((preset) => preset === hour);
+  const isCustom = hour !== null && !isPreset;
+  const draftMinuteIsOnGrid = isClockMinuteOption(draftMinute);
+
+  useEffect(() => {
+    if (!visible) return;
+    setShowCustomTime(false);
+    setDraftHour(hour ?? 8);
+    setDraftMinute(hour === null ? 0 : minute);
+    contentArrival.setValue(1);
+  }, [visible, contentArrival]);
+
   const dismiss = () => { if (!busy) onClose(); };
+  const changeView = (custom: boolean) => {
+    if (busy) return;
+    contentArrival.stopAnimation();
+    if (custom) {
+      setDraftHour(hour ?? 8);
+      setDraftMinute(hour === null ? 0 : minute);
+    }
+    setShowCustomTime(custom);
+    if (reduceMotion) {
+      contentArrival.setValue(1);
+      return;
+    }
+    contentArrival.setValue(0);
+    requestAnimationFrame(() => {
+      Animated.timing(contentArrival, {
+        toValue: 1,
+        duration: MOTION.standard,
+        useNativeDriver: true,
+      }).start();
+    });
+  };
+  const contentMotion = {
+    opacity: contentArrival,
+    transform: [{
+      translateX: contentArrival.interpolate({
+        inputRange: [0, 1],
+        outputRange: [showCustomTime ? 22 : -22, 0],
+      }),
+    }],
+  };
+  const revealSelectedValue = (list: ScrollView | null, getViewportHeight: () => number, y: number, itemHeight: number) => {
+    requestAnimationFrame(() => {
+      const viewportHeight = getViewportHeight();
+      list?.scrollTo({ y: Math.max(0, y - viewportHeight / 2 + itemHeight / 2), animated: false });
+    });
+  };
+
   return <Modal transparent visible={visible} animationType={reduceMotion ? 'none' : 'slide'} onRequestClose={dismiss}>
     <View style={styles.modalShade}>
       <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={dismiss} />
       <View accessibilityViewIsModal style={[styles.briefingSheet, { backgroundColor: colors.card, borderColor: colors.border, maxHeight: height - Math.max(insets.top, SPACE.sm), paddingBottom: Math.max(insets.bottom, SPACE.md) }]}>
         <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
         <View style={styles.taskDetailsHeader}>
-          <View style={styles.taskDetailsHeaderCopy}><Text style={[styles.modalTitle, { color: colors.foreground }]}>Morning briefing</Text><Text style={[styles.taskDetailsIntro, { color: colors.mutedForeground }]}>A single quiet prompt to open your plan.</Text></View>
+          {showCustomTime && <Pressable accessibilityRole="button" accessibilityLabel="Back to briefing options" accessibilityState={{ disabled: busy }} disabled={busy} onPress={() => changeView(false)} style={styles.modalClose}><Ionicons name="chevron-back" size={22} color={colors.mutedForeground} /></Pressable>}
+          <View style={styles.taskDetailsHeaderCopy}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>{showCustomTime ? 'Custom time' : 'Morning briefing'}</Text>
+            <Text style={[styles.taskDetailsIntro, { color: colors.mutedForeground }]}>{showCustomTime ? 'Choose when your day should begin.' : 'A single quiet prompt to open your plan.'}</Text>
+          </View>
           <Pressable accessibilityRole="button" accessibilityLabel="Close briefing options" accessibilityState={{ disabled: busy }} disabled={busy} onPress={dismiss} style={styles.modalClose}><Ionicons name="close" size={22} color={colors.mutedForeground} /></Pressable>
         </View>
-        <ScrollView style={styles.briefingOptionsScroll} contentContainerStyle={styles.briefingOptionsContent} showsVerticalScrollIndicator={false}>
-          <View accessibilityRole="radiogroup" accessibilityLabel="Morning briefing time" style={styles.briefingOptionList}>
-            {[7, 8, 9].map((optionHour) => { const selected = hour === optionHour; return <Pressable key={optionHour} accessibilityRole="radio" accessibilityLabel={`${optionHour}:00 AM`} accessibilityState={{ selected, disabled: busy }} disabled={busy} onPress={() => { void onSelect(optionHour); }} style={({ pressed }) => [styles.briefingOption, { backgroundColor: selected ? colors.primary + '16' : colors.background, borderColor: selected ? colors.primary : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}><View style={[styles.briefingOptionIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sunny-outline" size={17} color={colors.primary} /></View><Text style={[styles.briefingOptionText, { color: colors.foreground }]}>{optionHour}:00 AM</Text>{selected && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}</Pressable>; })}
-            <Pressable accessibilityRole="radio" accessibilityLabel="Turn morning briefing off" accessibilityState={{ selected: hour === null, disabled: busy }} disabled={busy} onPress={() => { void onDisable(); }} style={({ pressed }) => [styles.briefingOption, { backgroundColor: hour === null ? colors.muted : colors.background, borderColor: hour === null ? colors.mutedForeground + '55' : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}><View style={[styles.briefingOptionIcon, { backgroundColor: colors.mutedForeground + '16' }]}><Ionicons name="notifications-off-outline" size={17} color={colors.mutedForeground} /></View><Text style={[styles.briefingOptionText, { color: colors.foreground }]}>Off</Text>{hour === null && <Ionicons name="checkmark-circle" size={20} color={colors.mutedForeground} />}</Pressable>
+
+        {!showCustomTime ? <Animated.View style={contentMotion}>
+          <ScrollView style={styles.briefingOptionsScroll} contentContainerStyle={styles.briefingOptionsContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.briefingOptionList}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Custom time${isCustom ? `, currently ${formatBriefingTime(hour, minute)}` : ''}`}
+                accessibilityHint="Opens a custom hour and minute picker"
+                accessibilityState={{ selected: isCustom, disabled: busy }}
+                disabled={busy}
+                onPress={() => changeView(true)}
+                style={({ pressed }) => [styles.briefingOption, { backgroundColor: isCustom ? colors.primary + '16' : colors.background, borderColor: isCustom ? colors.primary : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
+              >
+                <View style={[styles.briefingOptionIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="time-outline" size={18} color={colors.primary} /></View>
+                <Text style={[styles.briefingOptionText, { color: colors.foreground }]}>Custom time</Text>
+                {isCustom && <Text style={[styles.briefingOptionValue, { color: colors.primary }]}>{formatBriefingTime(hour, minute)}</Text>}
+                <Ionicons name="chevron-forward" size={18} color={isCustom ? colors.primary : colors.mutedForeground} />
+              </Pressable>
+
+              <View accessibilityRole="radiogroup" accessibilityLabel="Morning briefing presets" style={styles.briefingPresetList}>
+              {MORNING_BRIEFING_PRESETS.map((optionHour) => {
+                const selected = hour === optionHour && minute === 0;
+                return <Pressable
+                  key={optionHour}
+                  accessibilityRole="radio"
+                  accessibilityLabel={formatBriefingTime(optionHour)}
+                  accessibilityState={{ selected, disabled: busy }}
+                  disabled={busy}
+                  onPress={() => { void onSelect(optionHour, 0); }}
+                  style={({ pressed }) => [styles.briefingOption, { backgroundColor: selected ? colors.primary + '16' : colors.background, borderColor: selected ? colors.primary : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
+                >
+                  <View style={[styles.briefingOptionIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sunny-outline" size={17} color={colors.primary} /></View>
+                  <Text style={[styles.briefingOptionText, { color: colors.foreground }]}>{formatBriefingTime(optionHour)}</Text>
+                  {selected && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
+                </Pressable>;
+              })}
+
+              <Pressable accessibilityRole="radio" accessibilityLabel="Turn morning briefing off" accessibilityState={{ selected: hour === null, disabled: busy }} disabled={busy} onPress={() => { void onDisable(); }} style={({ pressed }) => [styles.briefingOption, { backgroundColor: hour === null ? colors.muted : colors.background, borderColor: hour === null ? colors.mutedForeground + '55' : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}>
+                <View style={[styles.briefingOptionIcon, { backgroundColor: colors.mutedForeground + '16' }]}><Ionicons name="notifications-off-outline" size={17} color={colors.mutedForeground} /></View>
+                <Text style={[styles.briefingOptionText, { color: colors.foreground }]}>Off</Text>
+                {hour === null && <Ionicons name="checkmark-circle" size={20} color={colors.mutedForeground} />}
+              </Pressable>
+              </View>
+            </View>
+          </ScrollView>
+        </Animated.View> : <Animated.View style={[styles.briefingCustomContent, contentMotion]}>
+          <Text accessibilityRole="text" accessibilityLabel={`Selected time, ${formatBriefingTime(draftHour, draftMinute)}`} style={[styles.timePreview, { color: colors.primary }]}>{formatBriefingTime(draftHour, draftMinute)}</Text>
+          <View style={[styles.pickerColumns, { height: pickerHeight }]}>
+            <View accessibilityRole="radiogroup" accessibilityLabel="Hour" style={styles.pickerColumn}>
+              <Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>HOUR</Text>
+              <ScrollView ref={hourListRef} style={styles.pickerList} showsVerticalScrollIndicator={false} onLayout={({ nativeEvent }) => { hourListHeightRef.current = nativeEvent.layout.height; }}>
+                {MORNING_BRIEFING_HOURS.map((item) => <Pressable
+                  key={item}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`${item % 12 || 12} ${item >= 12 ? 'PM' : 'AM'}`}
+                  accessibilityState={{ selected: item === draftHour, disabled: busy }}
+                  disabled={busy}
+                  onLayout={item === draftHour ? ({ nativeEvent }) => revealSelectedValue(hourListRef.current, () => hourListHeightRef.current || pickerHeight, nativeEvent.layout.y, nativeEvent.layout.height) : undefined}
+                  onPress={() => setDraftHour(item)}
+                  style={[styles.pickerValue, { backgroundColor: item === draftHour ? colors.primary + '24' : 'transparent' }]}
+                ><Text style={[styles.pickerValueText, { color: item === draftHour ? colors.primary : colors.foreground }]}>{item % 12 || 12} {item >= 12 ? 'PM' : 'AM'}</Text></Pressable>)}
+              </ScrollView>
+            </View>
+            <View accessibilityRole="radiogroup" accessibilityLabel="Minute" style={styles.pickerColumn}>
+              <Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text>
+              <ScrollView ref={minuteListRef} style={styles.pickerList} showsVerticalScrollIndicator={false} onLayout={({ nativeEvent }) => { minuteListHeightRef.current = nativeEvent.layout.height; }}>
+                {CLOCK_MINUTE_OPTIONS.map((item) => <Pressable
+                  key={item}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`${item} minutes`}
+                  accessibilityState={{ selected: item === draftMinute, disabled: busy }}
+                  disabled={busy}
+                  onLayout={item === draftMinute ? ({ nativeEvent }) => revealSelectedValue(minuteListRef.current, () => minuteListHeightRef.current || pickerHeight, nativeEvent.layout.y, nativeEvent.layout.height) : undefined}
+                  onPress={() => setDraftMinute(item)}
+                  style={[styles.pickerValue, { backgroundColor: item === draftMinute ? colors.primary + '24' : 'transparent' }]}
+                ><Text style={[styles.pickerValueText, { color: item === draftMinute ? colors.primary : colors.foreground }]}>{String(item).padStart(2, '0')}</Text></Pressable>)}
+              </ScrollView>
+            </View>
           </View>
-        </ScrollView>
+          {!draftMinuteIsOnGrid && <Text accessibilityLiveRegion="polite" style={[styles.briefingLegacyTime, { color: colors.mutedForeground }]}>{formatBriefingTime(hour, minute)} remains active. Choose a 5-minute time to change it.</Text>}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={draftMinuteIsOnGrid ? `Set morning briefing for ${formatBriefingTime(draftHour, draftMinute)}` : 'Choose a five-minute value to change this briefing'}
+            accessibilityState={{ disabled: busy || !draftMinuteIsOnGrid, busy }}
+            disabled={busy || !draftMinuteIsOnGrid}
+            onPress={() => { void onSelect(draftHour, draftMinute); }}
+            style={({ pressed }) => [styles.modalConfirm, { backgroundColor: colors.primary, opacity: busy || !draftMinuteIsOnGrid ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
+          >
+            <Text style={[styles.modalConfirmText, { color: colors.primaryForeground }]}>{busy ? 'Saving…' : draftMinuteIsOnGrid ? `Set for ${formatBriefingTime(draftHour, draftMinute)}` : 'Choose a 5-minute time'}</Text>
+          </Pressable>
+        </Animated.View>}
       </View>
     </View>
   </Modal>;
@@ -1176,6 +1367,7 @@ function TimePickerModal({ visible, hour, minute, setHour, setMinute, onClose, o
   const insets = useSafeAreaInsets();
   const reduceMotion = useReducedMotion();
   const { height, fontScale } = useWindowDimensions();
+  const minuteIsOnGrid = isClockMinuteOption(Number(minute));
   const basePickerHeight = height < 650 ? 160 : Math.min(220, Math.round(height * 0.3));
   const pickerHeight = Math.max(120, Math.round(basePickerHeight / Math.max(1, fontScale * 0.8)));
   return <Modal transparent visible={visible} animationType={reduceMotion ? 'none' : 'slide'} onRequestClose={onClose}>
@@ -1183,7 +1375,8 @@ function TimePickerModal({ visible, hour, minute, setHour, setMinute, onClose, o
       <View style={styles.modalHeader}><Text style={[styles.modalTitle, { color: colors.foreground }]}>Choose a time</Text><Pressable accessibilityRole="button" accessibilityLabel="Close time picker" onPress={onClose} style={styles.modalClose}><Ionicons name="close" size={22} color={colors.mutedForeground} /></Pressable></View>
       <Text style={[styles.timePreview, { color: colors.primary }]}>{formatTime(hour, minute)}</Text>
       <View style={[styles.pickerColumns, { height: pickerHeight }]}><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>HOUR</Text><FlatList data={HOURS} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item % 12 || 12} ${item >= 12 ? 'PM' : 'AM'}`} accessibilityState={{ selected: item === hour }} onPress={() => setHour(item)} style={[styles.pickerValue, { backgroundColor: item === hour ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === hour ? colors.primary : colors.foreground }]}>{item % 12 || 12} {item >= 12 ? 'PM' : 'AM'}</Text></Pressable>} /></View><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={MINUTES} keyExtractor={(value) => value} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item} minutes`} accessibilityState={{ selected: item === minute }} onPress={() => setMinute(item)} style={[styles.pickerValue, { backgroundColor: item === minute ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === minute ? colors.primary : colors.foreground }]}>{item}</Text></Pressable>} /></View></View>
-      <Pressable accessibilityRole="button" accessibilityLabel={`Use ${formatTime(hour, minute)}`} onPress={onConfirm} style={[styles.modalConfirm, { backgroundColor: colors.primary }]}><Text style={[styles.modalConfirmText, { color: colors.primaryForeground }]}>Use this time</Text></Pressable>
+      {!minuteIsOnGrid && <Text accessibilityLiveRegion="polite" style={[styles.briefingLegacyTime, { color: colors.mutedForeground }]}>The saved exact time remains unchanged until you choose a 5-minute time.</Text>}
+      <Pressable accessibilityRole="button" accessibilityLabel={minuteIsOnGrid ? `Use ${formatTime(hour, minute)}` : 'Choose a five-minute value to change this time'} accessibilityState={{ disabled: !minuteIsOnGrid }} disabled={!minuteIsOnGrid} onPress={onConfirm} style={[styles.modalConfirm, { backgroundColor: colors.primary, opacity: minuteIsOnGrid ? 1 : OPACITY.disabled }]}><Text style={[styles.modalConfirmText, { color: colors.primaryForeground }]}>{minuteIsOnGrid ? 'Use this time' : 'Choose a 5-minute time'}</Text></Pressable>
     </View></View>
   </Modal>;
 }
@@ -1206,9 +1399,13 @@ const styles = StyleSheet.create({
   briefingOptionsScroll: { flexShrink: 1, minHeight: 0 },
   briefingOptionsContent: { paddingBottom: SPACE.xs },
   briefingOptionList: { gap: SPACE.xs, marginTop: SPACE.md, paddingBottom: SPACE.xs },
+  briefingPresetList: { gap: SPACE.xs },
   briefingOption: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: SPACE.sm },
   briefingOptionIcon: { width: 34, height: 34, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
   briefingOptionText: { ...TYPE.bodyStrong, flex: 1 },
+  briefingOptionValue: { ...TYPE.metadata, flexShrink: 1 },
+  briefingCustomContent: { minHeight: 0, flexShrink: 1, paddingTop: SPACE.xxs, paddingBottom: SPACE.xs },
+  briefingLegacyTime: { ...TYPE.caption, textAlign: 'center', marginTop: SPACE.sm },
   advancedToggle: { alignSelf: 'center', minHeight: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', gap: SPACE.xxs, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, borderCurve: 'continuous', paddingHorizontal: SPACE.sm, marginVertical: SPACE.hairline },
   advancedToggleText: { ...TYPE.metadata },
   detailsToggle: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, borderCurve: 'continuous', paddingHorizontal: SPACE.sm, paddingVertical: SPACE.sm, marginHorizontal: SPACE.md, marginTop: SPACE.xs },

@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "Mkg5xaTSHKxObt_Z9__99"
+uri = "file://downloads/chain-app-current.zip"
+type = "unspecified"
+title = "Chain app — archivos actuales"
+description = "Código fuente, pantallas, componentes, assets, configuración, documentación y tests actuales de la app Chain. Se excluyeron node_modules y archivos temporales generados."
+logical_id = "6d47387e-e4dd-449c-8343-5b2937ba130c"
+content_hash = "sha256:6ca9e9c7ace8832e884edbbcf106b256f0a13e70fe87c9cc73d90237a1ebde3b"
+size = 1891182
+mtime_ms = 1788630890800
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:9a034122-fa4a-474b-841f-26c342877fac/6d47387e-e4dd-449c-8343-5b2937ba130c/50112372-0db4-4761-a3b5-565979ea8cfd"
+storage_version_token = "1788630896086377"
+content_type = "application/octet-stream"

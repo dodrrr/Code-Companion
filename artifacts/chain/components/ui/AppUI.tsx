@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
 import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
 import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
 import { useColors } from '@/hooks/useColors';
+import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
 
 type IconName = ComponentProps<typeof Ionicons>['name'];
 
@@ -40,6 +41,8 @@ export function IconButton({
   onPress,
   accentColor,
   filled = false,
+  iconSize = 20,
+  symbol,
   disabled = false,
 }: {
   icon: IconName;
@@ -47,6 +50,8 @@ export function IconButton({
   onPress: () => void;
   accentColor?: string;
   filled?: boolean;
+  iconSize?: number;
+  symbol?: ChainSymbolName;
   disabled?: boolean;
 }) {
   const colors = useColors();
@@ -68,7 +73,9 @@ export function IconButton({
       },
     ]}
   >
-    <Ionicons name={icon} size={20} color={foreground} />
+    {symbol
+      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
+      : <Ionicons name={icon} size={iconSize} color={foreground} />}
   </AnimatedPressable>;
 }
 
@@ -76,6 +83,7 @@ export function AppButton({
   label,
   onPress,
   icon,
+  symbol,
   variant = 'primary',
   accentColor,
   disabled = false,
@@ -85,6 +93,7 @@ export function AppButton({
   label: string;
   onPress: () => void;
   icon?: IconName;
+  symbol?: ChainSymbolName;
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
   accentColor?: string;
   disabled?: boolean;
@@ -107,7 +116,13 @@ export function AppButton({
     containerStyle={styles.buttonContainer}
     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
   >
-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
+    {busy
+      ? <ActivityIndicator size="small" color={foreground} />
+      : symbol
+        ? <ChainSymbol name={symbol} size={18} color={foreground} />
+        : icon
+          ? <Ionicons name={icon} size={18} color={foreground} />
+          : null}
     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
   </AnimatedPressable>;
 }

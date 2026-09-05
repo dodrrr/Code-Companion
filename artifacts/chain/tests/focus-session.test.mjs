@@ -8,7 +8,7 @@ import {
   pauseFocusSession,
   resumeFocusSession,
 } from '../domain/focus.ts';
-import { isMorningBriefingNotificationData } from '../domain/plan.ts';
+import { decodeMorningBriefingTime, isMorningBriefingNotificationData } from '../domain/plan.ts';
 
 test('focus elapsed time is derived from timestamps and capped at the target', () => {
   const started = createFocusSession('task-1', '2026-08-30', 60, 1_000);
@@ -41,4 +41,21 @@ test('morning briefing cleanup recognizes current and legacy requests without to
   assert.equal(isMorningBriefingNotificationData({ openPlan: true, morningBriefing: true }), true);
   assert.equal(isMorningBriefingNotificationData({ openPlan: true }), true);
   assert.equal(isMorningBriefingNotificationData({ planItemId: 'task-1', planDate: '2026-08-30' }), false);
+});
+
+test('morning briefing times migrate legacy hours and preserve custom minutes', () => {
+  assert.deepEqual(decodeMorningBriefingTime({ hour: 8 }), { hour: 8, minute: 0 });
+  assert.deepEqual(decodeMorningBriefingTime({ hour: 0, minute: 0 }), { hour: 0, minute: 0 });
+  assert.deepEqual(decodeMorningBriefingTime({ hour: 6, minute: 35 }), { hour: 6, minute: 35 });
+  assert.deepEqual(decodeMorningBriefingTime({ hour: 8, minute: 7 }), { hour: 8, minute: 7 });
+  assert.deepEqual(decodeMorningBriefingTime({ hour: 23, minute: 59 }), { hour: 23, minute: 59 });
+});
+
+test('morning briefing times reject corrupt or out-of-range values', () => {
+  assert.equal(decodeMorningBriefingTime({ hour: Number.NaN, minute: 0 }), null);
+  assert.equal(decodeMorningBriefingTime({ hour: -1, minute: 0 }), null);
+  assert.equal(decodeMorningBriefingTime({ hour: 24, minute: 0 }), null);
+  assert.equal(decodeMorningBriefingTime({ hour: 8, minute: -1 }), null);
+  assert.equal(decodeMorningBriefingTime({ hour: 8, minute: 60 }), null);
+  assert.equal(decodeMorningBriefingTime({ hour: 8, minute: 7.5 }), null);
 });

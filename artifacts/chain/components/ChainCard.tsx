@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
-import Svg, { Path } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
@@ -21,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
 import WeekStrip from './WeekStrip';
 import MilestoneModal from './MilestoneModal';
 import { AppButton, Surface } from './ui/AppUI';
+import { ChainSymbol } from './ui/ChainSymbol';
 
 interface Props {
   chain: Chain;
@@ -199,19 +199,10 @@ export default function ChainCard({ chain }: Props) {
                     }],
                   }}
                 >
-                  <Svg width={23} height={23} viewBox="0 0 24 24" aria-hidden>
-                    <Path
-                      d="M7.1 12.4 10.3 15.6 17.2 8.7"
-                      fill="none"
-                      stroke={statusForeground}
-                      strokeWidth={3.1}
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </Svg>
+                  <ChainSymbol name="check" size={22} color={statusForeground} />
                 </Animated.View>
               ) : (
-                <Ionicons name="leaf-outline" size={19} color={statusForeground} />
+                <ChainSymbol name="minimum" size={20} color={statusForeground} />
               )
             ) : restingToday ? (
               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />

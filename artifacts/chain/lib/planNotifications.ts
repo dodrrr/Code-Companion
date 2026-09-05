@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import { isMorningBriefingNotificationData, type PlanItem } from '@/domain/plan';
+import { decodeMorningBriefingTime, isMorningBriefingNotificationData, type PlanItem } from '@/domain/plan';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -132,9 +132,11 @@ export async function cancelPlanReminder(notificationId?: string) {
 
 let morningBriefingQueue: Promise<void> = Promise.resolve();
 
-async function replaceMorningBriefing(hour: number): Promise<ReminderResult> {
+async function replaceMorningBriefing(hour: number, minute: number): Promise<ReminderResult> {
   if (Platform.OS === 'web') return { status: 'unavailable' };
   if (await getPlanNotificationPermission() !== 'granted') return { status: 'denied' };
+  const time = decodeMorningBriefingTime({ hour, minute });
+  if (!time) throw new RangeError('Morning briefing time is invalid');
 
   // Enumerate first: if native notification state cannot be inspected, no new
   // request is created and therefore no untracked briefing can be orphaned.
@@ -150,7 +152,7 @@ async function replaceMorningBriefing(hour: number): Promise<ReminderResult> {
       sound: 'default',
       data: { openPlan: true, morningBriefing: true },
     },
-    trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour, minute: 0 },
+    trigger: { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: time.hour, minute: time.minute },
   });
 
   try {
@@ -175,10 +177,10 @@ async function replaceMorningBriefing(hour: number): Promise<ReminderResult> {
   return { status: 'scheduled', notificationId };
 }
 
-export function scheduleMorningBriefing(hour: number): Promise<ReminderResult> {
+export function scheduleMorningBriefing(hour: number, minute = 0): Promise<ReminderResult> {
   const operation = morningBriefingQueue
     .catch(() => undefined)
-    .then(() => replaceMorningBriefing(hour));
+    .then(() => replaceMorningBriefing(hour, minute));
   morningBriefingQueue = operation.then(() => undefined, () => undefined);
   return operation;
 }

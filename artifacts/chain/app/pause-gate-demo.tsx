@@ -42,6 +42,8 @@ const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
 type BreathPhase = "in" | "out" | "complete";
 type RouteParam = string | string[] | undefined;
+type TriggerKind = "onOpen" | "dailyUsage";
+type ReleaseMode = "always" | "whenTodayKept";
 
 function firstRouteValue(value: RouteParam): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -61,6 +63,25 @@ function safeRouteColor(value: RouteParam, fallback: string): string {
   return candidate && HEX_COLOR_PATTERN.test(candidate) ? candidate : fallback;
 }
 
+function safeRouteInteger(
+  value: RouteParam,
+  fallback: number,
+  maximum: number,
+): number {
+  const candidate = Number(firstRouteValue(value));
+  return Number.isInteger(candidate) && candidate >= 0 && candidate <= maximum
+    ? candidate
+    : fallback;
+}
+
+function formatTriggerLabel(
+  triggerKind: TriggerKind,
+  triggerMinutes: number,
+): string {
+  if (triggerKind === "onOpen") return "ON APP OPEN";
+  return `AFTER ${Math.max(1, triggerMinutes)} MIN TODAY`;
+}
+
 function exitToGate() {
   router.canGoBack() ? router.back() : router.replace("/(tabs)/gate");
 }
@@ -73,6 +94,13 @@ export default function PauseGateDemoScreen() {
     appName?: string | string[];
     appIcon?: string | string[];
     appColor?: string | string[];
+    triggerKind?: string | string[];
+    triggerMinutes?: string | string[];
+    releaseMode?: string | string[];
+    todayKept?: string | string[];
+    todayTotal?: string | string[];
+    // Kept in the route shape so older preview links remain harmless. New
+    // previews describe a Gate rule instead of depending on one Chain.
     chainName?: string | string[];
   }>();
 
@@ -84,7 +112,25 @@ export default function PauseGateDemoScreen() {
       ? (iconCandidate as keyof typeof Ionicons.glyphMap)
       : "apps-outline";
   const appColor = safeRouteColor(params.appColor, colors.primary);
-  const chainName = safeRouteText(params.chainName, "what matters", 64);
+  const triggerKind: TriggerKind =
+    firstRouteValue(params.triggerKind) === "dailyUsage"
+      ? "dailyUsage"
+      : "onOpen";
+  const triggerMinutes = safeRouteInteger(params.triggerMinutes, 10, 1_440);
+  const releaseMode: ReleaseMode =
+    firstRouteValue(params.releaseMode) === "whenTodayKept"
+      ? "whenTodayKept"
+      : "always";
+  const todayTotal = safeRouteInteger(params.todayTotal, 0, 10_000);
+  const todayKept = Math.min(
+    todayTotal,
+    safeRouteInteger(params.todayKept, 0, 10_000),
+  );
+  const todayIsKept = todayTotal === 0 || todayKept >= todayTotal;
+  const triggerLabel = formatTriggerLabel(triggerKind, triggerMinutes);
+  const releaseLabel = todayIsKept
+    ? "TODAY IS KEPT"
+    : `UNTIL TODAY IS KEPT · ${todayKept}/${todayTotal}`;
 
   const deadlineRef = useRef(Date.now() + PAUSE_DURATION_MS);
   const phaseRef = useRef<BreathPhase>("in");
@@ -375,30 +421,89 @@ export default function PauseGateDemoScreen() {
               </View>
             </View>
 
-            <View
-              accessible
-              accessibilityLabel={"Chain: " + chainName}
-              style={[
-                styles.chainChip,
-                {
-                  backgroundColor: colors.primary + "18",
-                  borderColor: colors.primary + "52",
-                },
-              ]}
-            >
-              <Ionicons
-                accessibilityElementsHidden
-                importantForAccessibility="no"
-                name="link-outline"
-                size={13}
-                color={colors.primary}
-              />
-              <Text
-                numberOfLines={1}
-                style={[styles.chainChipText, { color: colors.primary }]}
+            <View style={styles.policyRow}>
+              <View
+                accessible
+                accessibilityLabel={
+                  triggerKind === "onOpen"
+                    ? "Gate pauses when the app opens"
+                    : `Gate pauses after ${Math.max(1, triggerMinutes)} minutes of use today`
+                }
+                style={[
+                  styles.policyChip,
+                  {
+                    backgroundColor: colors.primary + "18",
+                    borderColor: colors.primary + "52",
+                  },
+                ]}
               >
-                {"CHAIN · " + chainName}
-              </Text>
+                <Ionicons
+                  accessibilityElementsHidden
+                  importantForAccessibility="no"
+                  name={
+                    triggerKind === "onOpen"
+                      ? "enter-outline"
+                      : "timer-outline"
+                  }
+                  size={13}
+                  color={colors.primary}
+                />
+                <Text
+                  numberOfLines={1}
+                  style={[styles.policyChipText, { color: colors.primary }]}
+                >
+                  {triggerLabel}
+                </Text>
+              </View>
+
+              {releaseMode === "whenTodayKept" ? (
+                <View
+                  accessible
+                  accessibilityLabel={
+                    todayIsKept
+                      ? "Today is kept"
+                      : `${todayKept} of ${todayTotal} Chains kept. Gate stays active until today is kept.`
+                  }
+                  style={[
+                    styles.policyChip,
+                    {
+                      backgroundColor: todayIsKept
+                        ? colors.primary + "16"
+                        : colors.card,
+                      borderColor: todayIsKept
+                        ? colors.primary + "52"
+                        : colors.border,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    accessibilityElementsHidden
+                    importantForAccessibility="no"
+                    name={
+                      todayIsKept
+                        ? "checkmark-circle-outline"
+                        : "link-outline"
+                    }
+                    size={13}
+                    color={
+                      todayIsKept ? colors.primary : colors.mutedForeground
+                    }
+                  />
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.policyChipText,
+                      {
+                        color: todayIsKept
+                          ? colors.primary
+                          : colors.mutedForeground,
+                      },
+                    ]}
+                  >
+                    {releaseLabel}
+                  </Text>
+                </View>
+              ) : null}
             </View>
           </View>
 
@@ -647,18 +752,14 @@ const styles = StyleSheet.create({
   pauseContext: {
     width: "100%",
     minHeight: 76,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-    justifyContent: "space-between",
+    alignItems: "stretch",
     gap: SPACE.sm,
     padding: SPACE.sm,
     borderRadius: RADIUS.card,
     borderWidth: StyleSheet.hairlineWidth,
   },
   appRow: {
-    flex: 1,
-    minWidth: 174,
+    width: "100%",
     flexDirection: "row",
     alignItems: "center",
     gap: SPACE.sm,
@@ -685,24 +786,27 @@ const styles = StyleSheet.create({
   appName: {
     ...TYPE.sectionTitle,
   },
-  chainChip: {
-    maxWidth: 190,
+  policyRow: {
+    width: "100%",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: SPACE.xs,
+  },
+  policyChip: {
     minHeight: 28,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
     gap: SPACE.xxs,
     paddingHorizontal: SPACE.sm,
     paddingVertical: SPACE.xxs,
     borderRadius: RADIUS.capsule,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  chainChipText: {
+  policyChipText: {
     ...TYPE.eyebrow,
     fontSize: 10,
     lineHeight: 14,
     flexShrink: 1,
-    textAlign: "center",
   },
   orbSlot: {
     height: 236,

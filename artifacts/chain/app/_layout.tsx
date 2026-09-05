@@ -50,15 +50,13 @@ function RootLayoutNav() {
         options={{
           headerShown: false,
           presentation: 'card',
-          animation: 'simple_push',
+          animation: 'default',
           gestureEnabled: true,
           gestureDirection: 'horizontal',
-          // Chain details should behave like a native iOS drill-down. Keeping
-          // this explicit avoids the route falling back to an edge-only
-          // gesture when inherited Stack options change.
-          fullScreenGestureEnabled: true,
-          animationMatchesGesture: true,
-          fullScreenGestureShadowEnabled: true,
+          // Keep the standard iOS edge-pop interaction. The full-screen
+          // recognizer uses a different transition and competes with the
+          // detail ScrollView and its calendar gesture.
+          fullScreenGestureEnabled: false,
         }}
       />
       <Stack.Screen name="pause-gate-demo" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade' }} />

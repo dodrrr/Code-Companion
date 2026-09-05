@@ -1,0 +1,229 @@
+diff --git a/artifacts/chain/app/(tabs)/gate.tsx b/artifacts/chain/app/(tabs)/gate.tsx
+index 3d974d0..331f2b1 100644
+--- a/artifacts/chain/app/(tabs)/gate.tsx
++++ b/artifacts/chain/app/(tabs)/gate.tsx
+@@ -88,28 +88,38 @@ function TutorialModal({ onDone, reducedMotion }: { onDone: () => void; reducedM
+ 
+   return (
+     <Modal transparent animationType={reducedMotion ? 'none' : 'fade'} statusBarTranslucent onRequestClose={onDone}>
+-      <View style={tStyles.backdrop} accessibilityViewIsModal>
+-        <ScrollView
+-          style={[tStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+-          contentContainerStyle={tStyles.cardContent}
+-          bounces={false}
+-          showsVerticalScrollIndicator={false}
++      <View style={tStyles.backdrop}>
++        <View
++          accessibilityViewIsModal
++          style={[tStyles.frame, { backgroundColor: colors.card, borderColor: colors.border }]}
+         >
+-          <View style={[tStyles.iconWrap, { backgroundColor: colors.primary + '1A' }]}>
+-            <Ionicons name="pause-outline" size={32} color={accentText} />
+-          </View>
+-          <Text style={[tStyles.eyebrow, { color: accentText }]}>PAUSE GATE</Text>
+-          <Text style={[tStyles.title, { color: colors.foreground }]}>Create space for a choice.</Text>
+-          <Text style={[tStyles.body, { color: colors.mutedForeground }]}>Choose an app, decide when Gate should step in, and whether it can rest once today is kept. Native app controls connect later.</Text>
+-          <Pressable
+-            accessibilityRole="button"
+-            accessibilityLabel="Close Gate introduction"
+-            onPress={onDone}
+-            style={({ pressed }) => [tStyles.nextBtn, { backgroundColor: colors.primary, opacity: pressed ? 0.85 : 1 }]}
++          <ScrollView
++            style={tStyles.scroll}
++            bounces={false}
++            showsVerticalScrollIndicator={false}
++            contentContainerStyle={tStyles.cardContent}
+           >
+-            <Text style={[tStyles.nextText, { color: colors.primaryForeground }]}>Continue</Text>
+-          </Pressable>
+-        </ScrollView>
++            <View
++              accessibilityElementsHidden
++              importantForAccessibility="no-hide-descendants"
++              style={[tStyles.iconWrap, { backgroundColor: colors.primary + '1A' }]}
++            >
++              <Ionicons name="pause-outline" size={25} color={accentText} />
++            </View>
++            <Text style={[tStyles.eyebrow, { color: accentText }]}>PAUSE GATE</Text>
++            <Text accessibilityRole="header" style={[tStyles.title, { color: colors.foreground }]}>Create space for a choice.</Text>
++            <Text style={[tStyles.body, { color: colors.mutedForeground }]}>Choose when Gate steps in. Preview mode won’t block or monitor apps.</Text>
++            <Pressable
++              accessibilityRole="button"
++              accessibilityLabel="Continue"
++              accessibilityHint="Closes the introduction and shows Gate."
++              onPress={onDone}
++              style={({ pressed }) => [tStyles.nextBtn, { backgroundColor: colors.primary, opacity: pressed ? OPACITY.pressed : 1 }]}
++            >
++              <Text style={[tStyles.nextText, { color: colors.primaryForeground }]}>Continue</Text>
++            </Pressable>
++          </ScrollView>
++        </View>
+       </View>
+     </Modal>
+   );
+@@ -823,31 +833,34 @@ const tStyles = StyleSheet.create({
+     justifyContent: 'center',
+     paddingHorizontal: SPACE.xl,
+   },
+-  card: {
++  frame: {
+     width: '100%',
+-    maxWidth: 420,
+-    maxHeight: '88%',
++    maxWidth: 340,
++    maxHeight: '82%',
+     borderRadius: RADIUS.modal,
+     borderCurve: 'continuous',
+     borderWidth: StyleSheet.hairlineWidth,
++    overflow: 'hidden',
+   },
++  scroll: { flexShrink: 1 },
+   cardContent: {
+-    padding: SPACE.xl,
++    paddingHorizontal: SPACE.xl,
++    paddingVertical: SPACE.xxl,
+     alignItems: 'center',
+     gap: SPACE.sm,
+   },
+   iconWrap: {
+-    width: 72,
+-    height: 72,
+-    borderRadius: RADIUS.card,
++    width: 56,
++    height: 56,
++    borderRadius: RADIUS.button,
+     borderCurve: 'continuous',
+     alignItems: 'center',
+     justifyContent: 'center',
+-    marginBottom: 4,
++    marginBottom: SPACE.xs,
+   },
+   eyebrow: TYPE.eyebrow,
+   title: { ...TYPE.modalTitle, textAlign: 'center' },
+-  body: { ...TYPE.body, fontSize: 15, lineHeight: 23, textAlign: 'center' },
++  body: { ...TYPE.body, textAlign: 'center' },
+   nextBtn: {
+     width: '100%',
+     minHeight: CONTROL.buttonHeight,
+@@ -856,7 +869,7 @@ const tStyles = StyleSheet.create({
+     paddingHorizontal: SPACE.md,
+     borderRadius: RADIUS.button,
+     borderCurve: 'continuous',
+-    marginTop: SPACE.xxs,
++    marginTop: SPACE.md,
+   },
+   nextText: TYPE.bodyStrong,
+ });
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index 1548eaf..b37066d 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,6 +178,7 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
++            iconSize={22}
+           />
+         </View>
+       </View>
+diff --git a/artifacts/chain/app/_layout.tsx b/artifacts/chain/app/_layout.tsx
+index b1226b8..d335ad5 100644
+--- a/artifacts/chain/app/_layout.tsx
++++ b/artifacts/chain/app/_layout.tsx
+@@ -50,15 +50,13 @@ function RootLayoutNav() {
+         options={{
+           headerShown: false,
+           presentation: 'card',
+-          animation: 'simple_push',
++          animation: 'default',
+           gestureEnabled: true,
+           gestureDirection: 'horizontal',
+-          // Chain details should behave like a native iOS drill-down. Keeping
+-          // this explicit avoids the route falling back to an edge-only
+-          // gesture when inherited Stack options change.
+-          fullScreenGestureEnabled: true,
+-          animationMatchesGesture: true,
+-          fullScreenGestureShadowEnabled: true,
++          // Keep the standard iOS edge-pop interaction. The full-screen
++          // recognizer uses a different transition and competes with the
++          // detail ScrollView and its calendar gesture.
++          fullScreenGestureEnabled: false,
+         }}
+       />
+       <Stack.Screen name="pause-gate-demo" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade' }} />
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index 717616f..bf96aa5 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -615,7 +615,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={18} color={accentText} />
++              <Ionicons name="leaf-outline" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 646f96d..891d0fb 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -1,7 +1,6 @@
+ import React, { useCallback, useEffect, useRef, useState } from 'react';
+ import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+ import { useReducedMotion } from 'react-native-reanimated';
+-import Svg, { Path } from 'react-native-svg';
+ import { Ionicons } from '@expo/vector-icons';
+ import { router } from 'expo-router';
+ import { useColors } from '@/hooks/useColors';
+@@ -199,19 +198,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Svg width={23} height={23} viewBox="0 0 24 24" aria-hidden>
+-                    <Path
+-                      d="M7.1 12.4 10.3 15.6 17.2 8.7"
+-                      fill="none"
+-                      stroke={statusForeground}
+-                      strokeWidth={3.1}
+-                      strokeLinecap="round"
+-                      strokeLinejoin="round"
+-                    />
+-                  </Svg>
++                  <Ionicons name="checkmark" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={19} color={statusForeground} />
++                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index fe47d69..f0e2fff 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -40,6 +40,7 @@ export function IconButton({
+   onPress,
+   accentColor,
+   filled = false,
++  iconSize = 20,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -47,6 +48,7 @@ export function IconButton({
+   onPress: () => void;
+   accentColor?: string;
+   filled?: boolean;
++  iconSize?: number;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -68,7 +70,7 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={20} color={foreground} />
++    <Ionicons name={icon} size={iconSize} color={foreground} />
+   </AnimatedPressable>;
+ }
+ 

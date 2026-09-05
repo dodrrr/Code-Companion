@@ -10,6 +10,7 @@ import { getProtectedAppsWeeklyUsage, isNativeScreenTimeAvailable, pickProtected
 import { AmbientScreen, GlassSurface } from '@/components/AmbientSurface';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
 import { CONTROL, MOTION, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+import { CLOCK_MINUTE_OPTIONS, isClockMinuteOption } from '@/constants/time';
 import { readableAccentColor } from '@/constants/sectionTheme';
 import { playFeedback } from '@/lib/feedback';
 import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
@@ -26,7 +27,6 @@ const DAY_OPTIONS = [
   { label: 'S', value: 0, accessibilityLabel: 'Sunday' },
 ] as const;
 const HOURS = Array.from({ length: 24 }, (_, index) => index);
-const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
 const PRESETS = [{ name: 'Deep work', startHour: 9, endHour: 11, icon: 'laptop-outline' as const }, { name: 'Morning reset', startHour: 7, endHour: 9, icon: 'sunny-outline' as const }, { name: 'Wind down', startHour: 22, endHour: 0, icon: 'moon-outline' as const }];
 const ICON_TARGET = { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' } as const;
 const MIN_TARGET = { minHeight: 44, justifyContent: 'center' } as const;
@@ -70,6 +70,7 @@ function TimePicker({ visible, hour, minute, onConfirm, onClose }: { visible: bo
   const accentText = readableAccentColor(colors.primary, colors.cardSolid);
   const [selectedHour, setSelectedHour] = useState(hour);
   const [selectedMinute, setSelectedMinute] = useState(minute);
+  const selectedMinuteIsOnGrid = isClockMinuteOption(selectedMinute);
   useEffect(() => { if (visible) { setSelectedHour(hour); setSelectedMinute(minute); } }, [visible, hour, minute]);
   return <Modal transparent visible={visible} animationType={reducedMotion ? 'none' : 'slide'} statusBarTranslucent onRequestClose={onClose}>
     <View style={styles.shade} accessibilityViewIsModal>
@@ -79,9 +80,10 @@ function TimePicker({ visible, hour, minute, onConfirm, onClose }: { visible: bo
         <Text style={[styles.timePreview, { color: accentText }]}>{formatGateHour(selectedHour, selectedMinute)}</Text>
         <View style={styles.pickerColumns}>
           <View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>HOUR</Text><FlatList data={HOURS} showsVerticalScrollIndicator={false} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: item === selectedHour }} accessibilityLabel={formatGateHour(item, 0)} onPress={() => setSelectedHour(item)} style={[styles.pickerValue, MIN_TARGET, { backgroundColor: item === selectedHour ? colors.primary + '22' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === selectedHour ? accentText : colors.foreground }]}>{formatGateHour(item, 0).replace(':00', '')}</Text></Pressable>} /></View>
-          <View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={MINUTES} showsVerticalScrollIndicator={false} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: item === selectedMinute }} accessibilityLabel={`${item} minutes`} onPress={() => setSelectedMinute(item)} style={[styles.pickerValue, MIN_TARGET, { backgroundColor: item === selectedMinute ? colors.primary + '22' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === selectedMinute ? accentText : colors.foreground }]}>{String(item).padStart(2, '0')}</Text></Pressable>} /></View>
+          <View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={CLOCK_MINUTE_OPTIONS} showsVerticalScrollIndicator={false} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: item === selectedMinute }} accessibilityLabel={`${item} minutes`} onPress={() => setSelectedMinute(item)} style={[styles.pickerValue, MIN_TARGET, { backgroundColor: item === selectedMinute ? colors.primary + '22' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === selectedMinute ? accentText : colors.foreground }]}>{String(item).padStart(2, '0')}</Text></Pressable>} /></View>
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Use selected time" onPress={() => onConfirm(selectedHour, selectedMinute)} style={[styles.confirmTime, MIN_TARGET, { backgroundColor: colors.primary }]}><Text style={[styles.confirmTimeText, { color: colors.primaryForeground }]}>Use this time</Text></Pressable>
+        {!selectedMinuteIsOnGrid && <Text accessibilityLiveRegion="polite" style={[styles.legacyMinuteNote, { color: colors.mutedForeground }]}>{formatGateHour(hour, minute)} remains unchanged. Choose a 5-minute time to change it.</Text>}
+        <Pressable accessibilityRole="button" accessibilityLabel={selectedMinuteIsOnGrid ? 'Use selected time' : 'Choose a five-minute value to change this time'} accessibilityState={{ disabled: !selectedMinuteIsOnGrid }} disabled={!selectedMinuteIsOnGrid} onPress={() => onConfirm(selectedHour, selectedMinute)} style={[styles.confirmTime, MIN_TARGET, { backgroundColor: colors.primary, opacity: selectedMinuteIsOnGrid ? 1 : OPACITY.disabled }]}><Text style={[styles.confirmTimeText, { color: colors.primaryForeground }]}>{selectedMinuteIsOnGrid ? 'Use this time' : 'Choose a 5-minute time'}</Text></Pressable>
       </View>
     </View>
   </Modal>;
@@ -420,17 +422,19 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
     const appCount = window.appIds.length
       ? `${window.appIds.length} app${window.appIds.length === 1 ? '' : 's'}`
       : 'No apps yet';
-    const stateLabel = status.active
-      ? 'ACTIVE NOW'
+    const stateLabel = status.active ? 'ACTIVE NOW' : featuredCard ? 'UP NEXT' : status.skippedToday ? 'SKIPPED' : '';
+    const accessibilityStateLabel = status.active
+      ? 'active now'
       : featuredCard
-        ? 'UP NEXT'
+        ? 'up next'
         : status.skippedToday
-          ? 'SKIPPED'
+          ? 'skipped today'
           : status.completedToday
-            ? 'COMPLETED'
+            ? onDemand ? 'finished today' : 'schedule ended today'
             : onDemand
-              ? 'ON DEMAND'
-              : 'SCHEDULED';
+              ? 'on demand'
+              : 'scheduled';
+    const showStateLabel = stateLabel.length > 0;
     const icon = status.active ? 'timer' : onDemand ? 'play-outline' : status.skippedToday ? 'pause-outline' : 'calendar-outline';
     const stateColor = status.skippedToday || status.completedToday ? colors.mutedForeground : accentText;
     return <Animated.View
@@ -457,7 +461,9 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
           <View style={[styles.windowTileIcon, { backgroundColor: status.active ? colors.primary + '2B' : colors.primary + '18' }]}>
             <Ionicons name={icon} size={20} color={accentText} />
           </View>
-          <Text numberOfLines={1} style={[styles.windowState, { color: stateColor }]}>{stateLabel}</Text>
+          {showStateLabel
+            ? <Text numberOfLines={1} style={[styles.windowState, { color: stateColor }]}>{stateLabel}</Text>
+            : <View accessible={false} style={styles.windowStateSpacer} />}
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`More actions for ${displayName}`}
@@ -470,7 +476,7 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`${displayName}. ${description}. ${appCount}`}
+          accessibilityLabel={`${displayName}. ${accessibilityStateLabel}. ${description}. ${appCount}`}
           accessibilityHint="Opens the window editor"
           accessibilityState={{ disabled: mutationsBlocked, busy: saving }}
           disabled={mutationsBlocked}
@@ -549,6 +555,7 @@ const styles = StyleSheet.create({
   windowCardTop: { minHeight: CONTROL.minimumTarget + SPACE.xs, flexDirection: 'row', alignItems: 'center', paddingLeft: SPACE.md, paddingTop: SPACE.sm, paddingRight: SPACE.xs },
   windowTileIcon: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.control, alignItems: 'center', justifyContent: 'center' },
   windowState: { ...TYPE.eyebrow, flex: 1, minWidth: 0, marginLeft: SPACE.xs },
+  windowStateSpacer: { flex: 1, minWidth: 0 },
   windowMenuButton: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.capsule, alignItems: 'center', justifyContent: 'center' },
   windowCardDetails: { flex: 1, minHeight: 108, justifyContent: 'flex-end', paddingHorizontal: SPACE.md, paddingTop: SPACE.xs, paddingBottom: SPACE.md },
   windowTileName: { ...TYPE.cardTitle, minHeight: 21 },
@@ -617,6 +624,7 @@ const styles = StyleSheet.create({
   pickerList: { flex: 1 },
   pickerValue: { minHeight: CONTROL.minimumTarget, alignItems: 'center', borderRadius: RADIUS.compact, marginBottom: SPACE.xxs },
   pickerValueText: { fontSize: 15, lineHeight: 21, fontFamily: 'Inter_600SemiBold' },
+  legacyMinuteNote: { ...TYPE.caption, textAlign: 'center', marginTop: SPACE.sm },
   confirmTime: { minHeight: CONTROL.prominentButtonHeight, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.button, borderCurve: 'continuous', paddingHorizontal: SPACE.md, marginTop: SPACE.sm },
   confirmTimeText: TYPE.bodyStrong,
   usageSheet: { maxHeight: '90%', borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: CONTROL.screenHorizontal, paddingBottom: SPACE.xxl },

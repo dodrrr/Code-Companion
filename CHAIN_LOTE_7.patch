@@ -1,0 +1,244 @@
+diff --git a/artifacts/chain/app/(tabs)/plan.tsx b/artifacts/chain/app/(tabs)/plan.tsx
+index e358413..d522488 100644
+--- a/artifacts/chain/app/(tabs)/plan.tsx
++++ b/artifacts/chain/app/(tabs)/plan.tsx
+@@ -25,17 +25,18 @@ import { EXTRA_CHAIN_COLORS } from '@/constants/colors';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { Chain, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
+ import { PlanItem, usePlan } from '@/context/PlanContext';
+-import { decodeMorningBriefingTime } from '@/domain/plan';
++import { decodeMorningBriefingTime, parsePlanTimeSlot } from '@/domain/plan';
+ import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+ import { cancelPlanReminder, getPlanNotificationPermission, requestPlanNotificationPermission, scheduleMorningBriefing, schedulePlanReminder } from '@/lib/planNotifications';
+ import { reportDiagnostic } from '@/lib/diagnostics';
+ import { CONTROL, MOTION, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
++import { CLOCK_MINUTE_OPTIONS, isClockMinuteOption } from '@/constants/time';
+ import { playFeedback } from '@/lib/feedback';
+ import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
+ 
+ const QUICK_TIMES = ['7 AM', '9 AM', '12 PM', '3 PM', '6 PM', '8 PM'];
+ const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
+-const MINUTES = ['00', '05', '10', '15', '20', '30', '40', '45', '50', '55'];
++const MINUTES = CLOCK_MINUTE_OPTIONS.map((minute) => String(minute).padStart(2, '0'));
+ const REMINDER_OPTIONS = [0, 5, 15, 30, 60];
+ const DURATION_OPTIONS = [30, 60, 90, 120, 180, 240];
+ const UNLINKED_TASK_COLOR = '#8FA2B3';
+@@ -43,7 +44,6 @@ const TASK_ACCENTS = ['#8FA2B3', ...EXTRA_CHAIN_COLORS];
+ const MORNING_BRIEFING_KEY = '@chain_morning_briefing';
+ const MORNING_BRIEFING_PRESETS = [7, 8, 9] as const;
+ const MORNING_BRIEFING_HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+-const MORNING_BRIEFING_MINUTES = Array.from({ length: 60 }, (_, minute) => minute);
+ const WEEKDAY_OPTIONS = [
+   { label: 'M', value: 1, accessibilityLabel: 'Monday' },
+   { label: 'T', value: 2, accessibilityLabel: 'Tuesday' },
+@@ -628,6 +628,19 @@ export default function PlanScreen() {
+     playFeedback('selection');
+   }
+ 
++  function openTaskTimePicker() {
++    const current = parsePlanTimeSlot(selectedTime);
++    if (current) {
++      setPickerHour(current.hour);
++      setPickerMinute(String(current.minute).padStart(2, '0'));
++    } else {
++      setPickerHour(9);
++      setPickerMinute('00');
++    }
++    Keyboard.dismiss();
++    setShowTimePicker(true);
++  }
++
+   function continueToTomorrow() {
+     if (!isToday || isActiveDayClosed) {
+       showTomorrow();
+@@ -802,7 +815,7 @@ export default function PlanScreen() {
+                   setSelectedTaskColor={(color: string | undefined) => { setSelectedTaskColor(color); Keyboard.dismiss(); }}
+                   selectedTime={selectedTime}
+                   setSelectedTime={(time: string) => { setSelectedTime(time); if (!time) setSelectedReminder(undefined); Keyboard.dismiss(); }}
+-                  openTimePicker={() => { Keyboard.dismiss(); setShowTimePicker(true); }}
++                  openTimePicker={openTaskTimePicker}
+                   selectedReminder={selectedReminder}
+                   setSelectedReminder={(minutes: number | undefined) => { setSelectedReminder(minutes); Keyboard.dismiss(); }}
+                   allowPriority
+@@ -1192,6 +1205,7 @@ function MorningBriefingSheet({
+   const pickerHeight = Math.max(124, Math.min(210, Math.round((height * 0.28) / Math.max(1, fontScale * 0.82))));
+   const isPreset = hour !== null && minute === 0 && MORNING_BRIEFING_PRESETS.some((preset) => preset === hour);
+   const isCustom = hour !== null && !isPreset;
++  const draftMinuteIsOnGrid = isClockMinuteOption(draftMinute);
+ 
+   useEffect(() => {
+     if (!visible) return;
+@@ -1318,7 +1332,7 @@ function MorningBriefingSheet({
+             <View accessibilityRole="radiogroup" accessibilityLabel="Minute" style={styles.pickerColumn}>
+               <Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text>
+               <ScrollView ref={minuteListRef} style={styles.pickerList} showsVerticalScrollIndicator={false} onLayout={({ nativeEvent }) => { minuteListHeightRef.current = nativeEvent.layout.height; }}>
+-                {MORNING_BRIEFING_MINUTES.map((item) => <Pressable
++                {CLOCK_MINUTE_OPTIONS.map((item) => <Pressable
+                   key={item}
+                   accessibilityRole="radio"
+                   accessibilityLabel={`${item} minutes`}
+@@ -1331,15 +1345,16 @@ function MorningBriefingSheet({
+               </ScrollView>
+             </View>
+           </View>
++          {!draftMinuteIsOnGrid && <Text accessibilityLiveRegion="polite" style={[styles.briefingLegacyTime, { color: colors.mutedForeground }]}>{formatBriefingTime(hour, minute)} remains active. Choose a 5-minute time to change it.</Text>}
+           <Pressable
+             accessibilityRole="button"
+-            accessibilityLabel={`Set morning briefing for ${formatBriefingTime(draftHour, draftMinute)}`}
+-            accessibilityState={{ disabled: busy, busy }}
+-            disabled={busy}
++            accessibilityLabel={draftMinuteIsOnGrid ? `Set morning briefing for ${formatBriefingTime(draftHour, draftMinute)}` : 'Choose a five-minute value to change this briefing'}
++            accessibilityState={{ disabled: busy || !draftMinuteIsOnGrid, busy }}
++            disabled={busy || !draftMinuteIsOnGrid}
+             onPress={() => { void onSelect(draftHour, draftMinute); }}
+-            style={({ pressed }) => [styles.modalConfirm, { backgroundColor: colors.primary, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
++            style={({ pressed }) => [styles.modalConfirm, { backgroundColor: colors.primary, opacity: busy || !draftMinuteIsOnGrid ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
+           >
+-            <Text style={[styles.modalConfirmText, { color: colors.primaryForeground }]}>{busy ? 'Saving…' : `Set for ${formatBriefingTime(draftHour, draftMinute)}`}</Text>
++            <Text style={[styles.modalConfirmText, { color: colors.primaryForeground }]}>{busy ? 'Saving…' : draftMinuteIsOnGrid ? `Set for ${formatBriefingTime(draftHour, draftMinute)}` : 'Choose a 5-minute time'}</Text>
+           </Pressable>
+         </Animated.View>}
+       </View>
+@@ -1352,6 +1367,7 @@ function TimePickerModal({ visible, hour, minute, setHour, setMinute, onClose, o
+   const insets = useSafeAreaInsets();
+   const reduceMotion = useReducedMotion();
+   const { height, fontScale } = useWindowDimensions();
++  const minuteIsOnGrid = isClockMinuteOption(Number(minute));
+   const basePickerHeight = height < 650 ? 160 : Math.min(220, Math.round(height * 0.3));
+   const pickerHeight = Math.max(120, Math.round(basePickerHeight / Math.max(1, fontScale * 0.8)));
+   return <Modal transparent visible={visible} animationType={reduceMotion ? 'none' : 'slide'} onRequestClose={onClose}>
+@@ -1359,7 +1375,8 @@ function TimePickerModal({ visible, hour, minute, setHour, setMinute, onClose, o
+       <View style={styles.modalHeader}><Text style={[styles.modalTitle, { color: colors.foreground }]}>Choose a time</Text><Pressable accessibilityRole="button" accessibilityLabel="Close time picker" onPress={onClose} style={styles.modalClose}><Ionicons name="close" size={22} color={colors.mutedForeground} /></Pressable></View>
+       <Text style={[styles.timePreview, { color: colors.primary }]}>{formatTime(hour, minute)}</Text>
+       <View style={[styles.pickerColumns, { height: pickerHeight }]}><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>HOUR</Text><FlatList data={HOURS} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item % 12 || 12} ${item >= 12 ? 'PM' : 'AM'}`} accessibilityState={{ selected: item === hour }} onPress={() => setHour(item)} style={[styles.pickerValue, { backgroundColor: item === hour ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === hour ? colors.primary : colors.foreground }]}>{item % 12 || 12} {item >= 12 ? 'PM' : 'AM'}</Text></Pressable>} /></View><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={MINUTES} keyExtractor={(value) => value} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item} minutes`} accessibilityState={{ selected: item === minute }} onPress={() => setMinute(item)} style={[styles.pickerValue, { backgroundColor: item === minute ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === minute ? colors.primary : colors.foreground }]}>{item}</Text></Pressable>} /></View></View>
+-      <Pressable accessibilityRole="button" accessibilityLabel={`Use ${formatTime(hour, minute)}`} onPress={onConfirm} style={[styles.modalConfirm, { backgroundColor: colors.primary }]}><Text style={[styles.modalConfirmText, { color: colors.primaryForeground }]}>Use this time</Text></Pressable>
++      {!minuteIsOnGrid && <Text accessibilityLiveRegion="polite" style={[styles.briefingLegacyTime, { color: colors.mutedForeground }]}>The saved exact time remains unchanged until you choose a 5-minute time.</Text>}
++      <Pressable accessibilityRole="button" accessibilityLabel={minuteIsOnGrid ? `Use ${formatTime(hour, minute)}` : 'Choose a five-minute value to change this time'} accessibilityState={{ disabled: !minuteIsOnGrid }} disabled={!minuteIsOnGrid} onPress={onConfirm} style={[styles.modalConfirm, { backgroundColor: colors.primary, opacity: minuteIsOnGrid ? 1 : OPACITY.disabled }]}><Text style={[styles.modalConfirmText, { color: colors.primaryForeground }]}>{minuteIsOnGrid ? 'Use this time' : 'Choose a 5-minute time'}</Text></Pressable>
+     </View></View>
+   </Modal>;
+ }
+@@ -1388,6 +1405,7 @@ const styles = StyleSheet.create({
+   briefingOptionText: { ...TYPE.bodyStrong, flex: 1 },
+   briefingOptionValue: { ...TYPE.metadata, flexShrink: 1 },
+   briefingCustomContent: { minHeight: 0, flexShrink: 1, paddingTop: SPACE.xxs, paddingBottom: SPACE.xs },
++  briefingLegacyTime: { ...TYPE.caption, textAlign: 'center', marginTop: SPACE.sm },
+   advancedToggle: { alignSelf: 'center', minHeight: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', gap: SPACE.xxs, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, borderCurve: 'continuous', paddingHorizontal: SPACE.sm, marginVertical: SPACE.hairline },
+   advancedToggleText: { ...TYPE.metadata },
+   detailsToggle: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, borderCurve: 'continuous', paddingHorizontal: SPACE.sm, paddingVertical: SPACE.sm, marginHorizontal: SPACE.md, marginTop: SPACE.xs },
+diff --git a/artifacts/chain/app/gate-windows.tsx b/artifacts/chain/app/gate-windows.tsx
+index 06051d7..0d5b01b 100644
+--- a/artifacts/chain/app/gate-windows.tsx
++++ b/artifacts/chain/app/gate-windows.tsx
+@@ -10,6 +10,7 @@ import { getProtectedAppsWeeklyUsage, isNativeScreenTimeAvailable, pickProtected
+ import { AmbientScreen, GlassSurface } from '@/components/AmbientSurface';
+ import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+ import { CONTROL, MOTION, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
++import { CLOCK_MINUTE_OPTIONS, isClockMinuteOption } from '@/constants/time';
+ import { readableAccentColor } from '@/constants/sectionTheme';
+ import { playFeedback } from '@/lib/feedback';
+ import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
+@@ -26,7 +27,6 @@ const DAY_OPTIONS = [
+   { label: 'S', value: 0, accessibilityLabel: 'Sunday' },
+ ] as const;
+ const HOURS = Array.from({ length: 24 }, (_, index) => index);
+-const MINUTES = Array.from({ length: 12 }, (_, index) => index * 5);
+ const PRESETS = [{ name: 'Deep work', startHour: 9, endHour: 11, icon: 'laptop-outline' as const }, { name: 'Morning reset', startHour: 7, endHour: 9, icon: 'sunny-outline' as const }, { name: 'Wind down', startHour: 22, endHour: 0, icon: 'moon-outline' as const }];
+ const ICON_TARGET = { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' } as const;
+ const MIN_TARGET = { minHeight: 44, justifyContent: 'center' } as const;
+@@ -70,6 +70,7 @@ function TimePicker({ visible, hour, minute, onConfirm, onClose }: { visible: bo
+   const accentText = readableAccentColor(colors.primary, colors.cardSolid);
+   const [selectedHour, setSelectedHour] = useState(hour);
+   const [selectedMinute, setSelectedMinute] = useState(minute);
++  const selectedMinuteIsOnGrid = isClockMinuteOption(selectedMinute);
+   useEffect(() => { if (visible) { setSelectedHour(hour); setSelectedMinute(minute); } }, [visible, hour, minute]);
+   return <Modal transparent visible={visible} animationType={reducedMotion ? 'none' : 'slide'} statusBarTranslucent onRequestClose={onClose}>
+     <View style={styles.shade} accessibilityViewIsModal>
+@@ -79,9 +80,10 @@ function TimePicker({ visible, hour, minute, onConfirm, onClose }: { visible: bo
+         <Text style={[styles.timePreview, { color: accentText }]}>{formatGateHour(selectedHour, selectedMinute)}</Text>
+         <View style={styles.pickerColumns}>
+           <View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>HOUR</Text><FlatList data={HOURS} showsVerticalScrollIndicator={false} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: item === selectedHour }} accessibilityLabel={formatGateHour(item, 0)} onPress={() => setSelectedHour(item)} style={[styles.pickerValue, MIN_TARGET, { backgroundColor: item === selectedHour ? colors.primary + '22' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === selectedHour ? accentText : colors.foreground }]}>{formatGateHour(item, 0).replace(':00', '')}</Text></Pressable>} /></View>
+-          <View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={MINUTES} showsVerticalScrollIndicator={false} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: item === selectedMinute }} accessibilityLabel={`${item} minutes`} onPress={() => setSelectedMinute(item)} style={[styles.pickerValue, MIN_TARGET, { backgroundColor: item === selectedMinute ? colors.primary + '22' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === selectedMinute ? accentText : colors.foreground }]}>{String(item).padStart(2, '0')}</Text></Pressable>} /></View>
++          <View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={CLOCK_MINUTE_OPTIONS} showsVerticalScrollIndicator={false} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="button" accessibilityState={{ selected: item === selectedMinute }} accessibilityLabel={`${item} minutes`} onPress={() => setSelectedMinute(item)} style={[styles.pickerValue, MIN_TARGET, { backgroundColor: item === selectedMinute ? colors.primary + '22' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === selectedMinute ? accentText : colors.foreground }]}>{String(item).padStart(2, '0')}</Text></Pressable>} /></View>
+         </View>
+-        <Pressable accessibilityRole="button" accessibilityLabel="Use selected time" onPress={() => onConfirm(selectedHour, selectedMinute)} style={[styles.confirmTime, MIN_TARGET, { backgroundColor: colors.primary }]}><Text style={[styles.confirmTimeText, { color: colors.primaryForeground }]}>Use this time</Text></Pressable>
++        {!selectedMinuteIsOnGrid && <Text accessibilityLiveRegion="polite" style={[styles.legacyMinuteNote, { color: colors.mutedForeground }]}>{formatGateHour(hour, minute)} remains unchanged. Choose a 5-minute time to change it.</Text>}
++        <Pressable accessibilityRole="button" accessibilityLabel={selectedMinuteIsOnGrid ? 'Use selected time' : 'Choose a five-minute value to change this time'} accessibilityState={{ disabled: !selectedMinuteIsOnGrid }} disabled={!selectedMinuteIsOnGrid} onPress={() => onConfirm(selectedHour, selectedMinute)} style={[styles.confirmTime, MIN_TARGET, { backgroundColor: colors.primary, opacity: selectedMinuteIsOnGrid ? 1 : OPACITY.disabled }]}><Text style={[styles.confirmTimeText, { color: colors.primaryForeground }]}>{selectedMinuteIsOnGrid ? 'Use this time' : 'Choose a 5-minute time'}</Text></Pressable>
+       </View>
+     </View>
+   </Modal>;
+@@ -622,6 +624,7 @@ const styles = StyleSheet.create({
+   pickerList: { flex: 1 },
+   pickerValue: { minHeight: CONTROL.minimumTarget, alignItems: 'center', borderRadius: RADIUS.compact, marginBottom: SPACE.xxs },
+   pickerValueText: { fontSize: 15, lineHeight: 21, fontFamily: 'Inter_600SemiBold' },
++  legacyMinuteNote: { ...TYPE.caption, textAlign: 'center', marginTop: SPACE.sm },
+   confirmTime: { minHeight: CONTROL.prominentButtonHeight, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.button, borderCurve: 'continuous', paddingHorizontal: SPACE.md, marginTop: SPACE.sm },
+   confirmTimeText: TYPE.bodyStrong,
+   usageSheet: { maxHeight: '90%', borderTopLeftRadius: RADIUS.sheet, borderTopRightRadius: RADIUS.sheet, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: CONTROL.screenHorizontal, paddingBottom: SPACE.xxl },
+diff --git b/artifacts/chain/constants/time.ts b/artifacts/chain/constants/time.ts
+new file mode 100644
+index 0000000..3f4f896
+--- /dev/null
++++ b/artifacts/chain/constants/time.ts
+@@ -0,0 +1,7 @@
++export const CLOCK_MINUTE_OPTIONS: readonly number[] = Object.freeze(
++  Array.from({ length: 12 }, (_, index) => index * 5),
++);
++
++export function isClockMinuteOption(minute: number): boolean {
++  return Number.isInteger(minute) && CLOCK_MINUTE_OPTIONS.includes(minute);
++}
+diff --git a/artifacts/chain/domain/plan.ts b/artifacts/chain/domain/plan.ts
+index 48cf95c..acc620d 100644
+--- a/artifacts/chain/domain/plan.ts
++++ b/artifacts/chain/domain/plan.ts
+@@ -57,6 +57,18 @@ export function decodeMorningBriefingTime(value: unknown): MorningBriefingTime |
+   return { hour: candidate.hour as number, minute: minute as number };
+ }
+ 
++export function parsePlanTimeSlot(value: unknown): { hour: number; minute: number } | null {
++  if (typeof value !== 'string') return null;
++  const match = /^(\d{1,2})(?::(\d{2}))?\s(AM|PM)$/.exec(value);
++  if (!match) return null;
++  let hour = Number(match[1]);
++  const minute = Number(match[2] || 0);
++  if (!Number.isInteger(hour) || hour < 1 || hour > 12 || !Number.isInteger(minute) || minute < 0 || minute > 59) return null;
++  if (match[3] === 'PM' && hour !== 12) hour += 12;
++  if (match[3] === 'AM' && hour === 12) hour = 0;
++  return { hour, minute };
++}
++
+ export type PlanNotificationIntent = 'complete' | 'snooze' | 'open' | 'ignore';
+ 
+ export function isMorningBriefingNotificationData(data: unknown): boolean {
+diff --git b/artifacts/chain/tests/time-options.test.mjs b/artifacts/chain/tests/time-options.test.mjs
+new file mode 100644
+index 0000000..b6af1bf
+--- /dev/null
++++ b/artifacts/chain/tests/time-options.test.mjs
+@@ -0,0 +1,26 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++
++import { CLOCK_MINUTE_OPTIONS, isClockMinuteOption } from '../constants/time.ts';
++import { parsePlanTimeSlot } from '../domain/plan.ts';
++
++test('manual clock pickers expose every five-minute step', () => {
++  assert.deepEqual(CLOCK_MINUTE_OPTIONS, [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]);
++});
++
++test('the picker grid is separate from exact persisted clock values', () => {
++  assert.equal(isClockMinuteOption(0), true);
++  assert.equal(isClockMinuteOption(25), true);
++  assert.equal(isClockMinuteOption(55), true);
++  assert.equal(isClockMinuteOption(37), false);
++  assert.equal(isClockMinuteOption(60), false);
++});
++
++test('editing a task restores its saved clock time safely', () => {
++  assert.deepEqual(parsePlanTimeSlot('8:35 AM'), { hour: 8, minute: 35 });
++  assert.deepEqual(parsePlanTimeSlot('12 AM'), { hour: 0, minute: 0 });
++  assert.deepEqual(parsePlanTimeSlot('12:05 PM'), { hour: 12, minute: 5 });
++  assert.deepEqual(parsePlanTimeSlot('9:37 PM'), { hour: 21, minute: 37 });
++  assert.equal(parsePlanTimeSlot('13:00 PM'), null);
++  assert.equal(parsePlanTimeSlot('8:60 AM'), null);
++});
