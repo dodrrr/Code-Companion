@@ -1,0 +1,60 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getGateWindowStatus, getGateWindows } from './gateWindows';
+import { reportDiagnostic } from './diagnostics';
+
+const GATE_SAVE_EVENTS_KEY = '@chain_gate_save_events';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export type GateSaveEvent = {
+  appId: string;
+  at: number;
+  windowId?: string;
+  outcome?: 'saved' | 'opened';
+  source?: 'native' | 'preview';
+};
+
+function isNativeEvent(event: GateSaveEvent): boolean {
+  // Events written before sources were introduced came from the interactive
+  // preview. Excluding them prevents demo taps from becoming product metrics.
+  return event.source === 'native';
+}
+
+async function readRecentEvents(): Promise<GateSaveEvent[]> {
+  try {
+    const raw = await AsyncStorage.getItem(GATE_SAVE_EVENTS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    const cutoff = Date.now() - DAY_MS;
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is GateSaveEvent => Boolean(entry) && typeof entry.appId === 'string' && typeof entry.at === 'number' && entry.at >= cutoff)
+      : [];
+  } catch (error) {
+    reportDiagnostic({ area: 'gate', operation: 'stats.read', severity: 'error', error });
+    return [];
+  }
+}
+
+export async function getGateSaves24h(): Promise<GateSaveEvent[]> {
+  const events = await readRecentEvents();
+  await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
+  return events.filter((event) => isNativeEvent(event) && event.outcome !== 'opened');
+}
+
+export async function getGateAttempts24h(): Promise<GateSaveEvent[]> {
+  const events = await readRecentEvents();
+  await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
+  return events.filter(isNativeEvent);
+}
+
+export async function recordGateSave(appId: string): Promise<GateSaveEvent[]> {
+  const now = new Date();
+  const windows = await getGateWindows();
+  const activeWindow = windows.find((window) => window.appIds.includes(appId) && getGateWindowStatus(window, now).active);
+  const events = [...await readRecentEvents(), { appId, at: now.getTime(), outcome: 'saved' as const, source: 'preview' as const, ...(activeWindow ? { windowId: activeWindow.id } : {}) }];
+  await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
+  return events.filter((event) => isNativeEvent(event) && event.outcome !== 'opened');
+}
+
+export async function recordGateOpenAnyway(appId: string): Promise<void> {
+  const events = [...await readRecentEvents(), { appId, at: Date.now(), outcome: 'opened' as const, source: 'preview' as const }];
+  await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
+}

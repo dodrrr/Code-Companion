@@ -1,0 +1,187 @@
+{
+  "patch": "Chain experience v4 \u2014 incremental after clarity v3",
+  "files": [
+    {
+      "path": "artifacts/chain/app/(tabs)/gate.tsx",
+      "accepted_sha256": [
+        "e122bdacf0b28fdc9bd74a4a0af13419708a9bf0e6a5024886c5f1efdb254c27"
+      ],
+      "final_sha256": "afac008d5ec5ed0da06ac342185298ea1b290f34cb34302ad7ef099d3419eb03"
+    },
+    {
+      "path": "artifacts/chain/app/(tabs)/index.tsx",
+      "accepted_sha256": [
+        "cc3bb12313b866951a0403d5c44d97bbfa70478e7df6783e66035d647035ba28"
+      ],
+      "final_sha256": "611d7b2578206db8af85a1dba5c4602c07f09f957d4a4c202a7b2a02262be474"
+    },
+    {
+      "path": "artifacts/chain/app/(tabs)/plan.tsx",
+      "accepted_sha256": [
+        "df34683fbc9d38e2c54e054025f4fda999f81f2b5b0632bb69b17b2d349526a6"
+      ],
+      "final_sha256": "915102eaea490889aa34beaefaf28a911546ce4d701f1e3230d46aded8451b61"
+    },
+    {
+      "path": "artifacts/chain/app/_layout.tsx",
+      "accepted_sha256": [
+        "ac1ebf4ac68dec38821348ccdbd49bd0b5552aab4b8813d753d795ed519e6a3d"
+      ],
+      "final_sha256": "6907e0f3e347674492611c936563d1ac8515788c9196fa6d97adcca39fcb9229"
+    },
+    {
+      "path": "artifacts/chain/app/chain/[id].tsx",
+      "accepted_sha256": [
+        "97a0d6fc0ebc2771e404995716eab8e1fcb85996881dc486316a95821539870e"
+      ],
+      "final_sha256": "69ffbc8695bbab721742c2648464432f719870b426eb34648be08154c8b0ecf8"
+    },
+    {
+      "path": "artifacts/chain/app/chain/new.tsx",
+      "accepted_sha256": [
+        "0067fb276cdca855b6f71cba63925d2ec3ed504642708467ebc399a4d40ad005"
+      ],
+      "final_sha256": "11a937de205832fe03b9270c8f91a710aa9d4450ff077e8b298a253c0ab7ab3e"
+    },
+    {
+      "path": "artifacts/chain/app/focus/[id].tsx",
+      "accepted_sha256": [
+        "ac983921f77f48fe11292795f6a5a6625c0aa421e96da21cf91b2255fd76a58d"
+      ],
+      "final_sha256": "b614dd321df7adbab005a2d28690b93cf748b5eac7d117a102e6dcd5e0bc21bb"
+    },
+    {
+      "path": "artifacts/chain/app/gate-insights.tsx",
+      "accepted_sha256": [
+        null
+      ],
+      "final_sha256": "66233e7641c179f7bd9c38ebe482323edb709571506d9f8aa5d5d4b43fc0a584"
+    },
+    {
+      "path": "artifacts/chain/app/pause-gate-demo.tsx",
+      "accepted_sha256": [
+        "555657d3ff8bacec3e95a73bf0267fcd3e974a110c16b5e66eabee0d5262d1ab"
+      ],
+      "final_sha256": "0b23a776f093fe27d541a0b27246f299db69e60d7c411efc0f5cf9be3bb600d9"
+    },
+    {
+      "path": "artifacts/chain/app/rhythm/[id].tsx",
+      "accepted_sha256": [
+        null
+      ],
+      "final_sha256": "e1cde5596ac31b1eb504eaece1709c6f9bc923ccf7e01559d6bd5f4c92db4143"
+    },
+    {
+      "path": "artifacts/chain/app/settings.tsx",
+      "accepted_sha256": [
+        "9de45c1533c29bd7795f2c7bdab650b130acb4e94db0054f9120373a915683b7"
+      ],
+      "final_sha256": "f2f83cc810c8b0772e1213515c41f4ba9e5f37547656a8da7d7e71dd5bc99559"
+    },
+    {
+      "path": "artifacts/chain/constants/colors.ts",
+      "accepted_sha256": [
+        "6115ebadf710705292ece3baf9e3fdf45b2d8d879f6654bda855baa072743f77"
+      ],
+      "final_sha256": "0849ec5a98e5566cccec820e71951fce1a5945928c8b1d5755354fdac13b26a4"
+    },
+    {
+      "path": "artifacts/chain/context/ChainsContext.tsx",
+      "accepted_sha256": [
+        "442eae7f70e7ffb98bf836042f8ab3207bae8fedef58c3d6e01cfb53454dd692"
+      ],
+      "final_sha256": "2dfd1fd5d20b647b05fa852a8922bb8beff05be7b487045801bcdae85e2743fd"
+    },
+    {
+      "path": "artifacts/chain/context/PlanContext.tsx",
+      "accepted_sha256": [
+        "33a4124337f2d34471ce8bbd266c25b9879cb2d0739b8c534cc3a1275b28588b"
+      ],
+      "final_sha256": "aa5584fc906b2e7a4f4b41a0758cb5c5b947e0d5a8b16f98620775edbc97baa3"
+    },
+    {
+      "path": "artifacts/chain/domain/chains.ts",
+      "accepted_sha256": [
+        "a0e4e0f73416fda6dd452bad1707638603ce55092cd52b90b8c51cb50004d6db"
+      ],
+      "final_sha256": "b726db345899097dd4a9b47014888b03c3bc5c92449e4e97b5cd20f8d06f1263"
+    },
+    {
+      "path": "artifacts/chain/domain/gateStats.ts",
+      "accepted_sha256": [
+        null
+      ],
+      "final_sha256": "439ddde2ce7fba27fbbe75e39255beb8a30b6b464a6ca35fbaeb153e254cd700"
+    },
+    {
+      "path": "artifacts/chain/domain/plan.ts",
+      "accepted_sha256": [
+        "e8521c938045de70817ecdc1edcf845bd3bd051cb77df9d397bf7b6e6e126964"
+      ],
+      "final_sha256": "2aef99644c2405cf2cd04b4fc3817647f0fa1fadde105905e20ada5b4730445b"
+    },
+    {
+      "path": "artifacts/chain/domain/rhythm.ts",
+      "accepted_sha256": [
+        null
+      ],
+      "final_sha256": "c700de6263ce026f27140333579a17ee06008e9c413f2bd4b53da3e4ebf0fd8a"
+    },
+    {
+      "path": "artifacts/chain/hooks/useLocalClock.ts",
+      "accepted_sha256": [
+        null
+      ],
+      "final_sha256": "1eb86dc5320f223444209d67eddcf3809af64b7eb5554f08b467231f9ab3bf39"
+    },
+    {
+      "path": "artifacts/chain/lib/gateEventsRepository.ts",
+      "accepted_sha256": [
+        null
+      ],
+      "final_sha256": "6e959502b2109e89347c31145fa62089fb8fdf18b84c7895e8929ed2971fb9b0"
+    },
+    {
+      "path": "artifacts/chain/lib/gateStats.ts",
+      "accepted_sha256": [
+        "9d93379c43a2540c04def2d1481779e80736c5533471a21163f0cd95b844595e"
+      ],
+      "final_sha256": "28392761188acb8c01b165043ecc84e9a9504c1f57d5f30498c7e955f55b7569"
+    },
+    {
+      "path": "artifacts/chain/lib/planRepository.ts",
+      "accepted_sha256": [
+        "17ca7a3dd2f5cdd04bda87abe9f715c6ebcdadf0496276af50a3c25ad8a8d45d"
+      ],
+      "final_sha256": "a2b063af50cb9410dcb12b4c5ec41e9c575e4e00b6fa4107a5a2d37319cd3c2d"
+    },
+    {
+      "path": "artifacts/chain/lib/rhythmRepository.ts",
+      "accepted_sha256": [
+        null
+      ],
+      "final_sha256": "1919b767aadb4bf52bc478cebe4dd810ec896ad0860ec6e4ed48c0acc66ebba8"
+    },
+    {
+      "path": "artifacts/chain/lib/rhythmStorage.ts",
+      "accepted_sha256": [
+        null
+      ],
+      "final_sha256": "5f8d301680e7cea23f3694e2d81959047d587993a84b15f10d5f417425799c5e"
+    },
+    {
+      "path": "artifacts/chain/tests/gate-stats-regressions.test.mjs",
+      "accepted_sha256": [
+        null
+      ],
+      "final_sha256": "7d3ab71334731b625edd89c27c0638a00cd37b005771ad45afb043794c9dd486"
+    },
+    {
+      "path": "artifacts/chain/tests/rhythm-data.test.mjs",
+      "accepted_sha256": [
+        null
+      ],
+      "final_sha256": "7d0a7330e87def00019abe20096cba8e1fa2818aecd6575616713f2a910fe841"
+    }
+  ]
+}

@@ -1,0 +1,3523 @@
+--- a/artifacts/chain/app/(tabs)/gate.tsx
++++ b/artifacts/chain/app/(tabs)/gate.tsx
+@@ -39,6 +39,7 @@
+ import { readableAccentColor } from '@/constants/sectionTheme';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { playFeedback } from '@/lib/feedback';
++import { getGateInsights, type GateSummary } from '@/lib/gateStats';
+ 
+ interface AppEntry {
+   id: string;
+@@ -355,6 +356,22 @@
+   const { width: pageWidth, fontScale } = useWindowDimensions();
+   const { chains, isReady: chainsReady } = useChains();
+   const reducedMotion = useReducedMotion();
++  const [insights, setInsights] = useState<GateSummary | null>(null);
++  const [insightsError, setInsightsError] = useState(false);
++  useFocusEffect(useCallback(() => {
++    let active = true;
++    const refresh = () => {
++      void getGateInsights(7).then((value) => {
++        if (active) { setInsights(value); setInsightsError(false); }
++      }).catch((error) => {
++        reportDiagnostic({ area: 'gate', operation: 'insights.read', severity: 'error', error });
++        if (active) { setInsights(null); setInsightsError(true); }
++      });
++    };
++    refresh();
++    const subscription = AppState.addEventListener('change', (state) => { if (state === 'active') refresh(); });
++    return () => { active = false; subscription.remove(); };
++  }, []));
+   const [enabled,         setEnabled]         = useState<Record<string, boolean>>({});
+   const [rules,           setRules]           = useState<GateRules>({});
+   const [showAppPicker,   setShowAppPicker]   = useState(false);
+@@ -565,6 +582,7 @@
+     router.push({
+       pathname: '/pause-gate-demo',
+       params: {
++        appId: previewApp.id,
+         appName: previewApp.name,
+         appIcon: previewApp.icon,
+         appColor: previewApp.iconColor,
+@@ -729,6 +747,23 @@
+         <Pressable accessibilityRole="button" accessibilityLabel="About Gate preview mode" onPress={() => setShowTutorial(true)} style={({ pressed }) => [styles.previewNote, { opacity: pressed ? OPACITY.secondaryPressed : 1 }]}>
+           <Ionicons name="information-circle-outline" size={16} color={gateTextAccent} />
+           <Text numberOfLines={useSingleColumn ? 2 : 1} style={[styles.previewNoteText, { color: colors.mutedForeground }]}>Preview mode · No apps are blocked or monitored.</Text>
++        </Pressable>
++
++        <Pressable
++          accessibilityRole="button"
++          accessibilityLabel="Gate insights. Preview choices and measurement details"
++          onPress={() => router.push('/gate-insights')}
++          style={({ pressed }) => [{ backgroundColor: colors.cardSolid, borderColor: colors.border, borderWidth: 1, borderRadius: RADIUS.card, padding: SPACE.md, gap: SPACE.xs, opacity: pressed ? OPACITY.pressed : 1 }]}
++        >
++          <View style={{ flexDirection: 'row', alignItems: 'center', gap: SPACE.sm }}>
++            <Ionicons name="stats-chart-outline" size={20} color={gateTextAccent} />
++            <Text style={[TYPE.sectionTitle, { flex: 1, color: colors.foreground }]}>Gate insights</Text>
++            <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
++          </View>
++          <Text style={[TYPE.body, { color: colors.mutedForeground }]}>
++            {insightsError ? 'History could not load. Open to retry.' : !insights ? 'Loading recorded choices…' : insights.attempts === 0 ? 'Try a preview to see your choices here.' : `${insights.leave} chose to leave · ${insights.continued} chose to continue · ${insights.pending} undecided`}
++          </Text>
++          <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>Preview examples · Last 7 days. Actual app use is not measured.</Text>
+         </Pressable>
+ 
+         <View style={styles.sectionHeader}>
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -15,7 +15,6 @@
+ import { useColors } from '@/hooks/useColors';
+ import {
+   Chain,
+-  getTodayStr,
+   getChainCommitmentStatus,
+   isRestDay,
+   toLocalDateString,
+@@ -28,8 +27,11 @@
+ import { CONTROL, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor } from '@/constants/sectionTheme';
+ import { playFeedback } from '@/lib/feedback';
++import { useLocalClock } from '@/hooks/useLocalClock';
+ 
+ const GLASS_SURFACE_COLOR = '#121214';
++// Presentation only: the minimum remains available inside a Chain at any time.
++const MINIMUM_SUGGESTION_HOUR = 18;
+ 
+ function formatDate(): string {
+   return new Date().toLocaleDateString('en-US', {
+@@ -44,7 +46,9 @@
+   const insets = useSafeAreaInsets();
+   const { chains, isReady, setDayStatus } = useChains();
+   const { items, activeDate, readItemsForDate } = usePlan();
+-  const [localDay, setLocalDay] = useState(getTodayStr());
++  const localNow = useLocalClock();
++  const localDay = toLocalDateString(localNow);
++  const suggestMinimum = localNow.getHours() >= MINIMUM_SUGGESTION_HOUR;
+   const [todayItems, setTodayItems] = useState<PlanItem[]>([]);
+   const [savingMinimumId, setSavingMinimumId] = useState<string>();
+ 
+@@ -63,10 +67,12 @@
+ 
+   useFocusEffect(useCallback(() => {
+     let cancelled = false;
+-    void readItemsForDate(localDay).then((snapshot) => {
+-      if (!cancelled) setTodayItems(snapshot.filter((item) => item.planDate === localDay));
++    const interaction = InteractionManager.runAfterInteractions(() => {
++      void readItemsForDate(localDay).then((snapshot) => {
++        if (!cancelled) setTodayItems(snapshot.filter((item) => item.planDate === localDay));
++      });
+     });
+-    return () => { cancelled = true; };
++    return () => { cancelled = true; interaction.cancel(); };
+   }, [localDay, readItemsForDate]));
+ 
+   useEffect(() => {
+@@ -74,21 +80,6 @@
+       setTodayItems(items.filter((item) => item.planDate === localDay));
+     }
+   }, [activeDate, items, localDay]);
+-
+-  useEffect(() => {
+-    let timer: ReturnType<typeof setTimeout>;
+-    const scheduleNextDay = () => {
+-      const now = new Date();
+-      const nextDay = new Date(now);
+-      nextDay.setHours(24, 0, 1, 0);
+-      timer = setTimeout(() => {
+-        setLocalDay(getTodayStr());
+-        scheduleNextDay();
+-      }, nextDay.getTime() - now.getTime());
+-    };
+-    scheduleNextDay();
+-    return () => clearTimeout(timer);
+-  }, []);
+ 
+   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+   const bottomSafe = Platform.OS === 'web' ? 0 : insets.bottom;
+@@ -150,6 +141,7 @@
+           chain={interventionChain}
+           taskText={interventionTask}
+           recovering={interventionChain.id === recoveryChain?.id}
++          suggestMinimum={suggestMinimum}
+           minimumBusy={savingMinimumId === interventionChain.id}
+           onMinimum={async () => {
+             if (savingMinimumId) return;
+@@ -232,12 +224,14 @@
+   chain,
+   taskText,
+   recovering,
++  suggestMinimum,
+   minimumBusy,
+   onMinimum,
+ }: {
+   chain: Chain;
+   taskText?: string;
+   recovering: boolean;
++  suggestMinimum: boolean;
+   minimumBusy: boolean;
+   onMinimum: () => void;
+ }) {
+@@ -259,20 +253,25 @@
+             numberOfLines={2}
+             style={[TYPE.caption, { color: colors.mutedForeground, flexShrink: 1 }]}
+           >
+-            {recovering
+-              ? `${chain.minimumLabel} is enough to return today.`
+-              : `On a hard day, ${chain.minimumLabel} still keeps the promise.`}
++            {suggestMinimum
++              ? `If the full version won’t fit today, try: ${chain.minimumLabel}.`
++              : recovering ? 'Make room for your next full check-in.' : 'Choose a moment for the full version today.'}
+           </Text>
+         </View>
+       </View>
+-      <AppButton
++      {suggestMinimum ? <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
+         symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+-      />
++      /> : <AppButton
++        label="Open chain"
++        icon="arrow-forward"
++        onPress={() => router.push({ pathname: '/chain/[id]', params: { id: chain.id } })}
++        accentColor={chain.color}
++      />}
+     </Surface>
+   );
+ }
+--- a/artifacts/chain/app/(tabs)/plan.tsx
++++ b/artifacts/chain/app/(tabs)/plan.tsx
+@@ -21,7 +21,7 @@
+ import { AmbientScreen, GlassSurface } from '@/components/AmbientSurface';
+ import { router, useLocalSearchParams } from 'expo-router';
+ import { useColors } from '@/hooks/useColors';
+-import { EXTRA_CHAIN_COLORS } from '@/constants/colors';
++import { CHAIN_COLOR_NAMES, EXTRA_CHAIN_COLORS } from '@/constants/colors';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { Chain, getTodayStr, getChainCommitmentStatus, isRestDay, useChains } from '@/context/ChainsContext';
+ import { PlanItem, usePlan } from '@/context/PlanContext';
+@@ -1041,9 +1041,9 @@
+             colors={colors}
+           />
+           {openSection === 'accent' && !accentLocked && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.taskDetailChips}>
+-            {[undefined, ...TASK_ACCENTS].map((color, index) => {
++            {[undefined, ...TASK_ACCENTS].map((color) => {
+               const selected = color === selectedTaskColor;
+-              return <Pressable key={color ?? 'neutral'} accessibilityRole="radio" accessibilityLabel={color ? `Accent color ${index}` : 'Neutral accent'} accessibilityState={{ checked: selected }} onPress={() => setSelectedTaskColor(color)} style={[styles.colorChoice, { borderColor: selected ? (color || colors.primary) : colors.border, backgroundColor: selected ? (color || colors.mutedForeground) + '20' : colors.background }]}>{color ? <View style={[styles.colorChoiceDot, { backgroundColor: color }]} /> : <Ionicons name="remove-outline" size={17} color={colors.mutedForeground} />}{!color && <Text style={[styles.colorChoiceText, { color: colors.mutedForeground }]}>Neutral</Text>}</Pressable>;
++              return <Pressable key={color ?? 'neutral'} accessibilityRole="radio" accessibilityLabel={color ? `Accent color ${CHAIN_COLOR_NAMES[color] ?? (color === '#8FA2B3' ? 'Steel' : 'Custom')}` : 'Neutral accent'} accessibilityState={{ checked: selected }} onPress={() => setSelectedTaskColor(color)} style={[styles.colorChoice, { borderColor: selected ? (color || colors.primary) : colors.border, backgroundColor: selected ? (color || colors.mutedForeground) + '20' : colors.background }]}>{color ? <View style={[styles.colorChoiceDot, { backgroundColor: color }]} /> : <Ionicons name="remove-outline" size={17} color={colors.mutedForeground} />}{!color && <Text style={[styles.colorChoiceText, { color: colors.mutedForeground }]}>Neutral</Text>}</Pressable>;
+             })}
+           </ScrollView>}
+ 
+--- a/artifacts/chain/app/_layout.tsx
++++ b/artifacts/chain/app/_layout.tsx
+@@ -1,4 +1,6 @@
+ import React, { useEffect, useRef } from 'react';
++import { Platform } from 'react-native';
++import { useReducedMotion } from 'react-native-reanimated';
+ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+ import { GestureHandlerRootView } from 'react-native-gesture-handler';
+ import { KeyboardProvider } from 'react-native-keyboard-controller';
+@@ -26,12 +28,21 @@
+ const queryClient = new QueryClient();
+ 
+ function RootLayoutNav() {
++  const reduceMotion = useReducedMotion();
++  // Screens 4 uses the system's content-pop recognizer on iOS 26+. Older
++  // versions keep the native edge gesture instead of a custom full-width push.
++  const nativeContentSwipe = Platform.OS === 'ios' && Number.parseInt(String(Platform.Version), 10) >= 26;
+   return (
+     <Stack
+       screenOptions={{
+-        animation: 'simple_push',
++        animation: reduceMotion ? 'none' : 'default',
++        presentation: 'card',
++        headerShown: false,
+         gestureEnabled: true,
+-        fullScreenGestureEnabled: true,
++        gestureDirection: 'horizontal',
++        fullScreenGestureEnabled: nativeContentSwipe,
++        animationMatchesGesture: false,
++        contentStyle: { backgroundColor: '#050506' },
+       }}
+     >
+       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+@@ -40,9 +51,7 @@
+         name="chain/new"
+         options={{
+           headerShown: false,
+-          presentation: 'fullScreenModal',
+-          animation: 'slide_from_bottom',
+-          gestureDirection: 'vertical',
++          presentation: 'card',
+         }}
+       />
+       <Stack.Screen
+@@ -50,20 +59,15 @@
+         options={{
+           headerShown: false,
+           presentation: 'card',
+-          animation: 'default',
+-          gestureEnabled: true,
+-          gestureDirection: 'horizontal',
+-          // Keep the standard iOS edge-pop interaction. The full-screen
+-          // recognizer uses a different transition and competes with the
+-          // detail ScrollView and its calendar gesture.
+-          fullScreenGestureEnabled: false,
+         }}
+       />
+-      <Stack.Screen name="pause-gate-demo" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade' }} />
+-      <Stack.Screen name="gate-windows" options={{ headerShown: false, animation: 'slide_from_right' }} />
+-      <Stack.Screen name="focus/[id]" options={{ headerShown: false, presentation: 'fullScreenModal', animation: 'fade' }} />
+-      <Stack.Screen name="settings" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
+-      <Stack.Screen name="paywall" options={{ headerShown: false, presentation: 'modal', animation: 'slide_from_bottom', gestureDirection: 'vertical' }} />
++      <Stack.Screen name="rhythm/[id]" />
++      <Stack.Screen name="gate-insights" />
++      <Stack.Screen name="pause-gate-demo" />
++      <Stack.Screen name="gate-windows" />
++      <Stack.Screen name="focus/[id]" options={{ gestureEnabled: false }} />
++      <Stack.Screen name="settings" />
++      <Stack.Screen name="paywall" />
+     </Stack>
+   );
+ }
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -1,5 +1,4 @@
+-import React, { useEffect, useRef, useState } from 'react';
+-import AsyncStorage from '@react-native-async-storage/async-storage';
++import React, { useCallback, useRef, useState } from 'react';
+ import {
+   Alert,
+   KeyboardAvoidingView,
+@@ -10,16 +9,19 @@
+   StyleSheet,
+   Text,
+   TextInput,
++  useWindowDimensions,
+   View,
+ } from 'react-native';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { useReducedMotion } from 'react-native-reanimated';
+ import { Ionicons } from '@expo/vector-icons';
+-import { router, useLocalSearchParams } from 'expo-router';
++import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+ import { useColors } from '@/hooks/useColors';
++import { useLocalClock } from '@/hooks/useLocalClock';
+ import {
+   CHAIN_COLORS,
+   EXTRA_CHAIN_COLORS,
++  CHAIN_COLOR_NAMES,
+ } from '@/constants/colors';
+ import {
+   Chain,
+@@ -32,8 +34,7 @@
+   toLocalDateString,
+   useChains,
+ } from '@/context/ChainsContext';
+-import { FOCUS_LOG_KEY, type FocusLogEntry } from '@/context/PlanContext';
+-import { formatStreakCount, getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
++import { type FocusLogEntry } from '@/context/PlanContext';
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
+@@ -42,7 +43,7 @@
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { playFeedback } from '@/lib/feedback';
+-import { normalizeFocusLog } from '@/domain/plan';
++import { readRhythmFocusLog } from '@/lib/rhythmStorage';
+ import { getChainCommitmentStatus } from '@/domain/chains';
+ import { reportDiagnostic } from '@/lib/diagnostics';
+ 
+@@ -73,11 +74,7 @@
+   label: narrowLabel,
+   accessibilityLabel: `${label} rest day`,
+ }));
+-const COLOR_NAMES: Record<string, string> = {
+-  '#FF6B35': 'Orange', '#00C896': 'Emerald', '#A855F7': 'Violet', '#F43F5E': 'Rose',
+-  '#F59E0B': 'Amber', '#3B82F6': 'Blue', '#FBBF24': 'Gold', '#84CC16': 'Lime',
+-  '#22D3EE': 'Cyan', '#EF4444': 'Red', '#4F46E5': 'Indigo',
+-};
++type SettingsSection = 'accent' | 'schedule' | 'minimum' | null;
+ 
+ const BRIGHT_CALENDAR_COLORS: Record<string, string> = {
+   '#FF6B35': '#FF8A5C', '#00C896': '#2FE0B2', '#A855F7': '#BF7BFF', '#F43F5E': '#FF6B84',
+@@ -95,41 +92,6 @@
+ 
+ function formatMonth(date: Date) {
+   return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+-}
+-
+-function rhythmFrom(chain: Chain, focusLog: FocusLogEntry[]) {
+-  const stamps = chain.completedDates.map((date) => chain.completionTimes?.[date]).filter((value): value is string => Boolean(value));
+-  const hourCounts = new Map<number, number>();
+-  const weekdayCounts = new Map<number, number>();
+-  stamps.forEach((stamp) => { const date = new Date(stamp); hourCounts.set(date.getHours(), (hourCounts.get(date.getHours()) || 0) + 1); weekdayCounts.set(date.getDay(), (weekdayCounts.get(date.getDay()) || 0) + 1); });
+-  const top = <T,>(map: Map<T, number>) => Array.from(map.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+-  const hour = top(hourCounts);
+-  const day = top(weekdayCounts);
+-  const sessions = focusLog.filter((entry) => entry.chainId === chain.id);
+-  const minutes = sessions.reduce((total, entry) => total + entry.minutes, 0);
+-  return { hour, day, minutes, samples: stamps.length };
+-}
+-
+-function readableHour(hour?: number) {
+-  if (hour === undefined) return 'still forming';
+-  const start = new Date(2024, 0, 1, hour, 0);
+-  const end = new Date(2024, 0, 1, hour + 1, 0);
+-  const options = { hour: 'numeric' } as const;
+-  return `${start.toLocaleTimeString(undefined, options)}–${end.toLocaleTimeString(undefined, options)}`;
+-}
+-
+-function countDueDays(chain: Chain, throughDate: string) {
+-  const cursor = new Date(`${chain.createdAt}T12:00:00`);
+-  const end = new Date(`${throughDate}T12:00:00`);
+-  let due = 0;
+-  let scanned = 0;
+-  while (cursor <= end && scanned < 4000) {
+-    const date = toLocalDateString(cursor);
+-    if (!isRestDay(chain, date)) due += 1;
+-    cursor.setDate(cursor.getDate() + 1);
+-    scanned += 1;
+-  }
+-  return Math.max(1, due);
+ }
+ 
+ function CalendarGrid({
+@@ -234,6 +196,7 @@
+   const colors = useColors();
+   const insets = useSafeAreaInsets();
+   const reducedMotion = useReducedMotion();
++  const { height } = useWindowDimensions();
+   const { id } = useLocalSearchParams<{ id: string }>();
+   const {
+     chains,
+@@ -252,14 +215,15 @@
+   } = useChains();
+   const [month, setMonth] = useState(() => startOfMonth(new Date()));
+   const [settingsOpen, setSettingsOpen] = useState(false);
+-  const [progressOpen, setProgressOpen] = useState(false);
+-  const [showMoreColors, setShowMoreColors] = useState(false);
+-  const [minimumEditorOpen, setMinimumEditorOpen] = useState(false);
++  const [settingsSection, setSettingsSection] = useState<SettingsSection>(null);
++  const [settingsSaving, setSettingsSaving] = useState(false);
+   const [minimumDraft, setMinimumDraft] = useState('');
+   const [minimumSaving, setMinimumSaving] = useState(false);
+   const mutationBusyRef = useRef(false);
+   const [focusLog, setFocusLog] = useState<FocusLogEntry[]>([]);
+-  const touchStartX = useRef<number | null>(null);
++  const [focusState, setFocusState] = useState<'loading' | 'ready' | 'error'>('loading');
++  const now = useLocalClock();
++  const localDay = toLocalDateString(now);
+ 
+   const chain = chains.find((c) => c.id === id);
+ 
+@@ -271,20 +235,26 @@
+     else router.replace('/(tabs)');
+   }
+ 
+-  useEffect(() => {
++  useFocusEffect(useCallback(() => {
+     let cancelled = false;
+     if (!chain) {
+       setFocusLog([]);
+       return;
+     }
+-    void AsyncStorage.getItem(FOCUS_LOG_KEY)
+-      .then((raw) => { if (!cancelled) setFocusLog(normalizeFocusLog(raw)); })
++    setFocusState('loading');
++    void readRhythmFocusLog()
++      .then((entries) => {
++        if (!cancelled) {
++          setFocusLog(entries);
++          setFocusState('ready');
++        }
++      })
+       .catch((error) => {
+-        if (!cancelled) setFocusLog([]);
++        if (!cancelled) setFocusState('error');
+         reportDiagnostic({ area: 'storage', operation: 'chainDetail.focusLog', severity: 'warning', error });
+       });
+     return () => { cancelled = true; };
+-  }, [chain?.id]);
++  }, [chain?.id, localDay]));
+ 
+   if (!chain) {
+     return (
+@@ -315,13 +285,9 @@
+   const frozen = isFrozenToday(chain);
+   const freezeTokens = getRemainingFreezeTokens(chain);
+   const freezeRecoveryRemaining = freezeTokens < 2 ? Math.max(0, 14 - chain.freezeRecoveryProgress) : 0;
+-  const totalCompleted = chain.completedDates.length;
+   const totalProtected = chain.completedDates.length + chain.minimumDates.length;
+-  const dueDaysSinceStart = countDueDays(chain, getTodayStr());
+-  const consistency = Math.min(100, Math.round((totalProtected / dueDaysSinceStart) * 100));
+   const restingToday = commitment.status === 'rest';
+   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
+-  const rhythm = rhythmFrom(chain, focusLog);
+   const weekStart = new Date();
+   weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+   const weekStartKey = toLocalDateString(weekStart);
+@@ -329,14 +295,9 @@
+   const weeklyKeptDays = new Set(
+     [...chain.completedDates, ...chain.minimumDates].filter((date) => date >= weekStartKey && date <= todayKey),
+   ).size;
+-  const weeklyFocus = focusLog.filter((entry) => entry.chainId === chain.id && entry.date >= weekStartKey);
++  const weeklyFocus = focusLog.filter((entry) => entry.chainId === chain.id && entry.date >= weekStartKey && entry.date <= todayKey && entry.source === 'timer');
+   const weeklyFocusMinutes = weeklyFocus.reduce((total, entry) => total + entry.minutes, 0);
+-  const stage = getProgressionStage(streak);
+-  const milestoneStages = PROGRESSION_STAGES.filter((item) => [7, 30, 100, 365].includes(item.at));
+-  const nextStage = milestoneStages.find((item) => item.at > streak);
+-  const stageStart = [...milestoneStages].reverse().find((item) => item.at <= streak)?.at ?? 0;
+-  const stageProgress = nextStage ? Math.min(1, Math.max(0, (streak - stageStart) / (nextStage.at - stageStart))) : 1;
+-  const stageUnit = chain.cadence === 'weekly' ? 'week' : 'day';
++  const weeklyFocusLabel = weeklyFocusMinutes < 1 ? 'Less than 1 focus minute' : `${Math.floor(weeklyFocusMinutes)} focus minute${Math.floor(weeklyFocusMinutes) === 1 ? '' : 's'}`;
+   const accentText = readableAccentColor(chain.color, colors.cardSolid);
+   const solidAccentText = readableTextColor(chain.color);
+ 
+@@ -347,12 +308,22 @@
+   ) {
+     if (mutationBusyRef.current) return false;
+     mutationBusyRef.current = true;
+-    const result = await action();
+-    mutationBusyRef.current = false;
+-    if (result.status === 'persisted') return true;
+-    playFeedback('error');
+-    Alert.alert(title, message);
+-    return false;
++    setSettingsSaving(true);
++    try {
++      const result = await action();
++      if (result.status === 'persisted') return true;
++      playFeedback('error');
++      Alert.alert(title, message);
++      return false;
++    } catch (error) {
++      reportDiagnostic({ area: 'storage', operation: 'chainDetail.setting', severity: 'error', error });
++      playFeedback('error');
++      Alert.alert(title, 'Chain couldn’t confirm that this change was saved. Please try again.');
++      return false;
++    } finally {
++      mutationBusyRef.current = false;
++      setSettingsSaving(false);
++    }
+   }
+ 
+   function handleDelete() {
+@@ -402,15 +373,31 @@
+     playFeedback('selection');
+   }
+ 
+-  function editMinimum() {
++  function openSettings() {
+     if (!chain) return;
+     setMinimumDraft(chain.minimumLabel);
+-    setMinimumEditorOpen(true);
+-  }
+-
+-  function closeMinimumEditor() {
+-    if (minimumSaving) return;
+-    setMinimumEditorOpen(false);
++    setSettingsSection(null);
++    setSettingsOpen(true);
++  }
++
++  function finishWithDraft(action: () => void) {
++    if (settingsSaving || minimumSaving) return;
++    if (chain && minimumDraft.trim() !== chain.minimumLabel) {
++      Alert.alert('Discard minimum changes?', 'Your minimum version has not been saved yet.', [
++        { text: 'Keep editing', style: 'cancel' },
++        { text: 'Discard', style: 'destructive', onPress: () => { setMinimumDraft(chain.minimumLabel); action(); } },
++      ]);
++      return;
++    }
++    action();
++  }
++
++  function closeSettings() {
++    finishWithDraft(() => setSettingsOpen(false));
++  }
++
++  function toggleSettingsSection(section: Exclude<SettingsSection, null>) {
++    finishWithDraft(() => setSettingsSection((current) => current === section ? null : section));
+   }
+ 
+   async function saveMinimum() {
+@@ -419,7 +406,7 @@
+     const updated = await commitChainChange(() => updateChainMinimumLabel(chain.id, minimumDraft));
+     setMinimumSaving(false);
+     if (!updated) return;
+-    setMinimumEditorOpen(false);
++    setSettingsSection(null);
+     playFeedback('selection');
+   }
+ 
+@@ -577,6 +564,21 @@
+           </View>
+         )}
+ 
++        {!restingToday && !done && !frozen && commitment.status !== 'minimum' && !commitment.weeklyTargetMet && (
++          <AnimatedPressable
++            onPress={() => { void applyDayStatus(todayKey, 'minimum'); }}
++            accessibilityRole="button"
++            accessibilityLabel={'Log minimum for ' + chain.name + ': ' + chain.minimumLabel}
++            accessibilityState={{ disabled: settingsSaving }}
++            disabled={settingsSaving}
++            style={styles.minimumShortcut}
++            scaleTo={0.99}
++          >
++            <ChainSymbol name="minimum" size={16} color={colors.mutedForeground} />
++            <Text style={[styles.minimumShortcutText, { color: colors.mutedForeground }]}>Log minimum · {chain.minimumLabel}</Text>
++          </AnimatedPressable>
++        )}
++
+         <Surface style={styles.weekReflection}>
+           <View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={accentText} /></View>
+           <View style={styles.rhythmCopy}>
+@@ -585,7 +587,10 @@
+               {isWeekly ? `${weeklyProgress}/${chain.weeklyTarget} days logged` : `${weeklyKeptDays} day${weeklyKeptDays === 1 ? '' : 's'} kept`}
+             </Text>
+             <Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>
+-              {weeklyFocus.length ? `${weeklyFocusMinutes} focus minutes logged across ${weeklyFocus.length} block${weeklyFocus.length === 1 ? '' : 's'}.` : 'Full and minimum versions both count.'}
++              {focusState === 'loading' ? 'Loading focus history…'
++                : focusState === 'error' ? 'Focus history is unavailable. Open Rhythm to retry.'
++                : weeklyFocus.length ? `${weeklyFocusLabel} logged across ${weeklyFocus.length} block${weeklyFocus.length === 1 ? '' : 's'}.`
++                : 'Full and minimum versions both count.'}
+             </Text>
+           </View>
+         </Surface>
+@@ -598,16 +603,7 @@
+           <Text style={[styles.calendarStreakSub, { color: colors.mutedForeground }]}>{totalProtected} days kept</Text>
+         </View>
+         <Surface style={styles.calendarCard}>
+-          <View
+-            onTouchStart={(event) => { touchStartX.current = event.nativeEvent.pageX; }}
+-            onTouchEnd={(event) => {
+-              if (touchStartX.current === null) return;
+-              const distance = event.nativeEvent.pageX - touchStartX.current;
+-              touchStartX.current = null;
+-              if (Math.abs(distance) > 48) changeMonth(distance > 0 ? -1 : 1);
+-            }}
+-            style={styles.calendarInner}
+-          >
++          <View style={styles.calendarInner}>
+             <View style={styles.monthHeader}>
+               <AnimatedPressable
+                 onPress={() => changeMonth(-1)}
+@@ -661,226 +657,19 @@
+         </Surface>
+ 
+         <Surface style={styles.disclosureCard}>
+-          <AnimatedPressable
+-            onPress={() => setProgressOpen((open) => !open)}
+-            accessibilityRole="button"
+-            accessibilityLabel="Progress"
+-            accessibilityState={{ expanded: progressOpen }}
+-            style={styles.scheduleHeader}
+-          >
+-            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="stats-chart-outline" size={18} color={accentText} /></View>
+-            <View style={styles.scheduleCopy}>
+-              <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Progress</Text>
+-              <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>Milestones and recorded patterns</Text>
+-            </View>
+-            <Ionicons name={progressOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
++          <AnimatedPressable onPress={() => router.push({ pathname: '/rhythm/[id]', params: { id: chain.id } })} accessibilityRole="button" accessibilityLabel={'Open Rhythm for ' + chain.name} accessibilityHint="View your recorded patterns, focus history and milestones." style={styles.scheduleHeader}>
++            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="pulse-outline" size={19} color={accentText} /></View>
++            <View style={styles.scheduleCopy}><Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Rhythm</Text><Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>Your patterns, progress and focus</Text></View>
++            <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+           </AnimatedPressable>
+         </Surface>
+-        {progressOpen && (
+-          <View style={styles.disclosureContent}>
+-            {/* Streak hero */}
+-            <View style={[styles.streakHero, { backgroundColor: chain.color + '14', borderColor: chain.color + '33' }]}>
+-              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={[styles.streakNumber, { color: accentText }]}>{streak}</Text>
+-              <Text style={[styles.streakWord, { color: colors.mutedForeground }]}>
+-                {chain.cadence === 'weekly' ? 'week streak' : 'day streak'}
+-              </Text>
+-              <Text style={[styles.streakSub, { color: colors.mutedForeground }]}>
+-                {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : `${totalCompleted} total completed`}
+-              </Text>
+-              <View style={[styles.stagePill, { backgroundColor: chain.color + '22' }]}><Text style={[styles.stageText, { color: accentText }]}>{stage.label.toUpperCase()} · {stage.copy}</Text></View>
+-              {nextStage ? <View style={styles.nextStage}><View style={[styles.nextStageTrack, { backgroundColor: chain.color + '22' }]}><View style={[styles.nextStageFill, { backgroundColor: chain.color, width: `${Math.max(5, stageProgress * 100)}%` }]} /></View><Text style={[styles.nextStageText, { color: colors.mutedForeground }]}>{nextStage.at - streak} {stageUnit}{nextStage.at - streak === 1 ? '' : 's'} to {nextStage.label}</Text></View> : <Text style={[styles.nextStageText, { color: accentText }]}>All current milestones reached.</Text>}
+-            </View>
+-
+-            <Surface style={styles.milestoneCard}>
+-              <Text style={[styles.milestoneTitle, { color: colors.mutedForeground }]}>MILESTONES · {isWeekly ? 'WEEKS' : 'DAYS'}</Text>
+-              <View style={styles.milestoneRow}>
+-                {PROGRESSION_STAGES.filter((item) => [1, 7, 30, 100, 365].includes(item.at)).map((milestone) => {
+-                  const unlocked = streak >= milestone.at;
+-                  const milestoneLabel = formatStreakCount(milestone.at, chain.cadence);
+-                  return (
+-                    <View
+-                      key={milestone.key}
+-                      accessible
+-                      accessibilityLabel={`${milestoneLabel}, ${unlocked ? 'unlocked' : 'locked'}`}
+-                      style={styles.milestoneItem}
+-                    >
+-                      <View style={[styles.milestoneDot, { backgroundColor: unlocked ? chain.color : colors.background, borderColor: unlocked ? chain.color : colors.border }]}>
+-                        <Ionicons name={unlocked ? 'checkmark' : 'lock-closed'} size={13} color={unlocked ? solidAccentText : colors.mutedForeground} />
+-                      </View>
+-                      <Text style={[styles.milestoneLabel, { color: unlocked ? accentText : colors.mutedForeground }]}>
+-                        {milestone.at}
+-                      </Text>
+-                    </View>
+-                  );
+-                })}
+-              </View>
+-            </Surface>
+-
+-            <Surface style={styles.insightsCard}>
+-              <View style={styles.insight}><Text style={[styles.insightValue, { color: accentText }]}>{chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget}` : `${consistency}%`}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>{chain.cadence === 'weekly' ? 'THIS WEEK' : 'CONSISTENCY'}</Text></View>
+-              <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
+-              <View style={styles.insight}><Text style={[styles.insightValue, { color: colors.foreground }]}>{totalProtected}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>DAYS KEPT</Text></View>
+-              {!isWeekly && <><View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
+-              <View style={styles.insight}><Text style={[styles.insightValue, { color: '#5B8CFF' }]}>{chain.frozenDates.length}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>FROZEN</Text></View></>}
+-            </Surface>
+-
+-            <View style={[styles.rhythmCard, { backgroundColor: chain.color + '10', borderColor: chain.color + '38' }]}>
+-              <View style={[styles.rhythmIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="pulse-outline" size={18} color={accentText} /></View>
+-              <View style={styles.rhythmCopy}>
+-                <Text style={[styles.rhythmEyebrow, { color: accentText }]}>CHECK-IN RHYTHM</Text>
+-                <Text style={[styles.rhythmTitle, { color: colors.foreground }]}>
+-                  {rhythm.samples >= 3 ? `Most frequent check-in hour: ${readableHour(rhythm.hour)}.` : 'A few more full check-ins will help show a pattern.'}
+-                </Text>
+-                <Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>
+-                  {rhythm.samples >= 3 && rhythm.day !== undefined ? `${weekdayLabel(rhythm.day)} has the most full check-ins. ` : ''}
+-                  {rhythm.minutes > 0 ? `${rhythm.minutes} focus minutes logged. ` : ''}
+-                  {`Based on ${rhythm.samples} full-version check-in${rhythm.samples === 1 ? '' : 's'}. Times may differ from when you did the activity.`}
+-                </Text>
+-              </View>
+-            </View>
+-          </View>
+-        )}
+-
+         <Surface style={styles.disclosureCard}>
+-          <AnimatedPressable
+-            onPress={() => setSettingsOpen((open) => !open)}
+-            accessibilityRole="button"
+-            accessibilityLabel="Chain settings"
+-            accessibilityState={{ expanded: settingsOpen }}
+-            style={styles.scheduleHeader}
+-          >
++          <AnimatedPressable onPress={openSettings} accessibilityRole="button" accessibilityLabel="Chain settings" accessibilityHint="Opens schedule, minimum version and color options." style={styles.scheduleHeader}>
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="settings-outline" size={18} color={accentText} /></View>
+-            <View style={styles.scheduleCopy}>
+-              <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Chain settings</Text>
+-              <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>Schedule, minimum version and color</Text>
+-            </View>
+-            <Ionicons name={settingsOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
++            <View style={styles.scheduleCopy}><Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Chain settings</Text><Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>Schedule, minimum version and color</Text></View>
++            <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+           </AnimatedPressable>
+         </Surface>
+-        {settingsOpen && (
+-          <View style={styles.disclosureContent}>
+-            <View style={styles.accentSection}>
+-              <SectionLabel>CHAIN ACCENT</SectionLabel>
+-              <View style={styles.colorRow}>
+-                {[...CHAIN_COLORS, ...(showMoreColors ? EXTRA_CHAIN_COLORS : [])].map((color) => {
+-                  const selected = color === chain.color;
+-                  return (
+-                    <AnimatedPressable
+-                      key={color}
+-                      accessibilityRole="radio"
+-                      accessibilityLabel={`${COLOR_NAMES[color] ?? 'Custom'} chain color`}
+-                      accessibilityState={{ checked: selected }}
+-                      onPress={() => handleColorChange(color)}
+-                      style={[
+-                        styles.colorRing,
+-                        {
+-                          borderColor: selected ? color : 'transparent',
+-                        },
+-                      ]}
+-                      scaleTo={0.92}
+-                    >
+-                      <View style={[styles.colorSwatch, { backgroundColor: color }]}>
+-                        {selected && <ChainSymbol name="check" size={16} color={readableTextColor(color)} />}
+-                      </View>
+-                    </AnimatedPressable>
+-                  );
+-                })}
+-                <AnimatedPressable
+-                  onPress={() => setShowMoreColors((open) => !open)}
+-                  accessibilityRole="button"
+-                  accessibilityLabel={showMoreColors ? 'Show fewer chain colors' : 'Show more chain colors'}
+-                  accessibilityState={{ expanded: showMoreColors }}
+-                  style={[styles.colorRing, { borderColor: colors.border }]}
+-                  scaleTo={0.92}
+-                >
+-                  <View style={[styles.colorSwatch, { backgroundColor: colors.card }]}>
+-                    <Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={15} color={colors.mutedForeground} />
+-                  </View>
+-                </AnimatedPressable>
+-              </View>
+-            </View>
+-
+-            <Surface style={styles.scheduleCard}>
+-              <View style={styles.scheduleHeader}>
+-                <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}>
+-                  <Ionicons name="calendar-outline" size={18} color={accentText} />
+-                </View>
+-                <View style={styles.scheduleCopy}>
+-                  <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>
+-                    {chain.cadence === 'weekly' ? 'Weekly goal' : 'Weekly schedule'}
+-                  </Text>
+-                  <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>
+-                    {chain.cadence === 'weekly'
+-                      ? `${weeklyProgress}/${chain.weeklyTarget} days this week`
+-                      : chain.restDays.length
+-                        ? `${SCHEDULE_DAYS.filter(({ value }) => chain.restDays.includes(value)).map(({ label }) => label).join(', ')} off`
+-                        : 'Every day counts'}
+-                  </Text>
+-                </View>
+-              </View>
+-              <View style={styles.scheduleExpanded}>
+-                  <Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>
+-                    {chain.cadence === 'weekly'
+-                      ? 'Reach your target in a week to extend your week streak.'
+-                      : 'Choose rest days. They never break your streak.'}
+-                  </Text>
+-                  <View style={styles.scheduleSelector}>
+-                    <SevenChoiceSelector
+-                      options={chain.cadence === 'weekly' ? WEEKLY_TARGET_OPTIONS : REST_DAY_OPTIONS}
+-                      selectionMode={chain.cadence === 'weekly' ? 'single' : 'multiple'}
+-                      selectedValues={chain.cadence === 'weekly' ? [chain.weeklyTarget] : chain.restDays}
+-                      onSelectionChange={(selectedValues) => {
+-                        if (chain.cadence === 'weekly') {
+-                          const target = selectedValues[0];
+-                          if (target !== undefined) void changeWeeklyTarget(target);
+-                        } else {
+-                          void changeRestDays(selectedValues);
+-                        }
+-                      }}
+-                      accentColor={chain.color}
+-                      selectedTextColor={solidAccentText}
+-                      textColor={colors.mutedForeground}
+-                      borderColor={colors.border}
+-                      backgroundColor={colors.background}
+-                      accessibilityLabel={chain.cadence === 'weekly' ? 'Weekly target' : 'Rest days'}
+-                    />
+-                  </View>
+-              </View>
+-            </Surface>
+-
+-            <View style={[styles.minimumPanel, { backgroundColor: chain.color + '12', borderColor: chain.color + '44' }]}>
+-              <AnimatedPressable
+-                onPress={editMinimum}
+-                accessibilityRole="button"
+-                accessibilityLabel="Edit minimum version"
+-                accessibilityValue={{ text: chain.minimumLabel }}
+-                accessibilityHint="Opens the minimum version editor."
+-                style={styles.minimumCard}
+-              >
+-                <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-                  <ChainSymbol name="minimum" size={20} color={accentText} />
+-                </View>
+-                <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+-                <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+-                <Ionicons name="chevron-forward" size={17} color={accentText} />
+-              </AnimatedPressable>
+-            </View>
+-
+-            {!isWeekly && freezeTokens < 2 && <View style={[styles.safetyNetCard, { backgroundColor: '#4488ff12', borderColor: '#4488ff44' }]}><View style={[styles.safetyNetIcon, { backgroundColor: '#4488ff22' }]}><ChainSymbol name="freeze" size={16} color="#4488ff" /></View><View style={styles.scheduleCopy}><Text style={[styles.safetyNetTitle, { color: '#4488ff' }]}>Safety net · {freezeTokens} available</Text><Text style={[styles.safetyNetBody, { color: colors.mutedForeground }]}>{freezeRecoveryRemaining} real completed day{freezeRecoveryRemaining === 1 ? '' : 's'} to restore one.</Text></View></View>}
+-
+-              <AnimatedPressable
+-                onPress={handleDelete}
+-                accessibilityRole="button"
+-                accessibilityLabel={`Delete ${chain.name}`}
+-                accessibilityHint="Asks for confirmation before permanently deleting this chain."
+-                style={[styles.deleteSetting, { borderColor: colors.border }]}
+-                scaleTo={0.98}
+-              >
+-                <Ionicons name="trash-outline" size={20} color={colors.destructive} />
+-                <Text style={[styles.actionBtnText, { color: colors.destructive }]}>Delete chain</Text>
+-              </AnimatedPressable>
+-          </View>
+-        )}
+ 
+         {/* Started date */}
+         <Text style={[styles.startedText, { color: colors.mutedForeground }]}>
+@@ -893,119 +682,90 @@
+         </Text>
+       </ScrollView>
+ 
+-      {minimumEditorOpen ? (
+-        <Modal
+-          visible
+-          transparent
+-          statusBarTranslucent
+-          animationType={reducedMotion ? 'none' : 'slide'}
+-          onRequestClose={closeMinimumEditor}
+-        >
+-          <KeyboardAvoidingView
+-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+-            style={styles.minimumModal}
+-          >
+-            <Pressable
+-              accessible={false}
+-              accessibilityElementsHidden
+-              importantForAccessibility="no-hide-descendants"
+-              disabled={minimumSaving}
+-              onPress={closeMinimumEditor}
+-              style={StyleSheet.absoluteFill}
+-            />
+-            <View
+-              accessibilityViewIsModal
+-              importantForAccessibility="yes"
+-              onAccessibilityEscape={closeMinimumEditor}
+-              style={[
+-                styles.minimumSheet,
+-                {
+-                  backgroundColor: colors.card,
+-                  borderColor: colors.border,
+-                },
+-              ]}
+-            >
+-              <SheetHandle />
+-              <ScrollView
+-                bounces={false}
+-                keyboardShouldPersistTaps="handled"
+-                showsVerticalScrollIndicator={false}
+-                contentContainerStyle={[
+-                  styles.minimumSheetContent,
+-                  { paddingBottom: Math.max(insets.bottom, SPACE.md) },
+-                ]}
+-              >
+-                <View style={styles.minimumSheetHeader}>
+-                  <View style={styles.minimumSheetHeading}>
+-                    <Text style={[styles.minimumSheetEyebrow, { color: accentText }]}>MINIMUM VERSION</Text>
+-                    <Text accessibilityRole="header" style={[styles.minimumSheetTitle, { color: colors.foreground }]}>What still counts on a difficult day?</Text>
++      <Modal visible={settingsOpen} transparent statusBarTranslucent animationType={reducedMotion ? 'none' : 'slide'} onRequestClose={closeSettings}>
++        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.minimumModal}>
++          <Pressable accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" disabled={settingsSaving || minimumSaving} onPress={closeSettings} style={StyleSheet.absoluteFill} />
++          <View accessibilityViewIsModal importantForAccessibility="yes" onAccessibilityEscape={closeSettings} style={[styles.minimumSheet, { backgroundColor: colors.cardSolid, borderColor: colors.border, maxHeight: height - Math.max(topPad, SPACE.sm) }]}>
++            <SheetHandle />
++            <View style={[styles.minimumSheetHeader, styles.settingsHeader]}>
++              <View style={styles.minimumSheetHeading}><Text accessibilityRole="header" style={[styles.minimumSheetTitle, { color: colors.foreground }]}>Chain settings</Text><Text numberOfLines={2} style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{chain.name}</Text></View>
++              <AnimatedPressable accessibilityRole="button" accessibilityLabel="Close chain settings" accessibilityState={{ disabled: settingsSaving || minimumSaving }} disabled={settingsSaving || minimumSaving} onPress={closeSettings} scaleTo={0.94} style={styles.minimumSheetClose}><Ionicons name="close" size={22} color={colors.mutedForeground} /></AnimatedPressable>
++            </View>
++            <ScrollView style={styles.settingsScroll} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" showsVerticalScrollIndicator={false} contentContainerStyle={styles.settingsContent}>
++              <View style={[styles.settingsGroup, { borderColor: colors.border }]}>
++                <SettingsRow title="Accent" summary={CHAIN_COLOR_NAMES[chain.color] || 'Custom color'} icon="color-palette-outline" active={settingsSection === 'accent'} disabled={settingsSaving || minimumSaving} color={chain.color} onPress={() => toggleSettingsSection('accent')} />
++                {settingsSection === 'accent' && <View style={styles.settingsExpanded}>
++                  <View accessibilityRole="radiogroup" accessibilityLabel="Chain accent" style={styles.colorRow}>
++                    {[...CHAIN_COLORS, ...EXTRA_CHAIN_COLORS].map((color) => {
++                      const selected = color === chain.color;
++                      return <AnimatedPressable key={color} accessibilityRole="radio" accessibilityLabel={(CHAIN_COLOR_NAMES[color] || 'Custom') + ' chain color'} accessibilityState={{ checked: selected, disabled: settingsSaving }} disabled={settingsSaving} onPress={() => { void handleColorChange(color); }} style={[styles.colorRing, { borderColor: selected ? color : 'transparent' }]} scaleTo={0.92}><View style={[styles.colorSwatch, { backgroundColor: color }]}>{selected && <ChainSymbol name="check" size={16} color={readableTextColor(color)} />}</View></AnimatedPressable>;
++                    })}
+                   </View>
+-                  <AnimatedPressable
+-                    accessibilityRole="button"
+-                    accessibilityLabel="Close minimum version editor"
+-                    accessibilityState={{ disabled: minimumSaving }}
+-                    disabled={minimumSaving}
+-                    onPress={closeMinimumEditor}
+-                    scaleTo={0.94}
+-                    style={[styles.minimumSheetClose, { opacity: minimumSaving ? OPACITY.disabled : 1 }]}
+-                  >
+-                    <Ionicons name="close" size={22} color={colors.mutedForeground} />
+-                  </AnimatedPressable>
+-                </View>
+-
+-                <TextInput
+-                  accessibilityLabel="Minimum version"
+-                  autoCapitalize="sentences"
+-                  autoCorrect
+-                  autoFocus
+-                  editable={!minimumSaving}
+-                  maxLength={48}
+-                  onChangeText={setMinimumDraft}
+-                  onSubmitEditing={() => { void saveMinimum(); }}
+-                  returnKeyType="done"
+-                  selectTextOnFocus
+-                  value={minimumDraft}
+-                  style={[
+-                    styles.minimumInput,
+-                    {
+-                      backgroundColor: colors.background,
+-                      borderColor: colors.border,
+-                      color: colors.foreground,
+-                    },
+-                  ]}
+-                />
+-                <Text
+-                  accessibilityLabel={`${minimumDraft.length} of 48 characters`}
+-                  style={[styles.minimumCounter, { color: colors.mutedForeground }]}
+-                >
+-                  {minimumDraft.length}/48
+-                </Text>
+-
+-                <AnimatedPressable
+-                  accessibilityRole="button"
+-                  accessibilityLabel="Save minimum version"
+-                  accessibilityState={{ busy: minimumSaving, disabled: minimumSaving || !minimumDraft.trim() }}
+-                  disabled={minimumSaving || !minimumDraft.trim()}
+-                  onPress={() => { void saveMinimum(); }}
+-                  style={[
+-                    styles.minimumSave,
+-                    {
+-                      backgroundColor: chain.color,
+-                      borderColor: chain.color,
+-                      opacity: minimumSaving || !minimumDraft.trim() ? OPACITY.disabled : 1,
+-                    },
+-                  ]}
+-                >
+-                  <Text style={[styles.minimumSaveText, { color: solidAccentText }]}>
+-                    {minimumSaving ? 'Saving…' : 'Save minimum'}
+-                  </Text>
+-                </AnimatedPressable>
+-              </ScrollView>
++                  <Text style={[styles.settingsHint, { color: colors.mutedForeground }]}>A color to recognize this Chain at a glance.</Text>
++                </View>}
++
++                <View style={[styles.settingsDivider, { backgroundColor: colors.border }]} />
++                <SettingsRow title={isWeekly ? 'Weekly goal' : 'Schedule'} summary={isWeekly ? chain.weeklyTarget + ' days each week' : chain.restDays.length ? SCHEDULE_DAYS.filter(({ value }) => chain.restDays.includes(value)).map(({ label }) => label).join(', ') + ' off' : 'Every day'} icon="calendar-outline" active={settingsSection === 'schedule'} disabled={settingsSaving || minimumSaving} color={chain.color} onPress={() => toggleSettingsSection('schedule')} />
++                {settingsSection === 'schedule' && <View style={styles.settingsExpanded}>
++                  <Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>{isWeekly ? 'Choose how many days to check in each week. Full and minimum versions count.' : 'Choose rest days. Keep at least one active day each week.'}</Text>
++                  <View pointerEvents={settingsSaving ? 'none' : 'auto'} accessibilityElementsHidden={settingsSaving} style={styles.scheduleSelector}>
++                    <SevenChoiceSelector options={isWeekly ? WEEKLY_TARGET_OPTIONS : REST_DAY_OPTIONS} selectionMode={isWeekly ? 'single' : 'multiple'} selectedValues={isWeekly ? [chain.weeklyTarget] : chain.restDays} onSelectionChange={(values) => { if (settingsSaving) return; if (isWeekly) { if (values[0] !== undefined) void changeWeeklyTarget(values[0]); } else void changeRestDays(values); }} accentColor={chain.color} selectedTextColor={solidAccentText} textColor={colors.mutedForeground} borderColor={colors.border} backgroundColor={colors.background} accessibilityLabel={isWeekly ? 'Weekly target' : 'Rest days'} />
++                  </View>
++                  <Text style={[styles.settingsHint, { color: colors.mutedForeground }]}>Changes save when you select them.</Text>
++                </View>}
++
++                <View style={[styles.settingsDivider, { backgroundColor: colors.border }]} />
++                <SettingsRow title="Minimum version" summary={chain.minimumLabel} icon="leaf-outline" active={settingsSection === 'minimum'} disabled={settingsSaving || minimumSaving} color={chain.color} onPress={() => toggleSettingsSection('minimum')} />
++                {settingsSection === 'minimum' && <View style={styles.settingsExpanded}>
++                  <Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>What small, specific action still counts on a difficult day?</Text>
++                  <TextInput accessibilityLabel="Minimum version" autoCapitalize="sentences" autoCorrect editable={!minimumSaving && !settingsSaving} maxLength={48} onChangeText={setMinimumDraft} onSubmitEditing={() => { void saveMinimum(); }} returnKeyType="done" selectTextOnFocus value={minimumDraft} style={[styles.minimumInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.foreground }]} />
++                  <Text accessibilityLabel={minimumDraft.length + ' of 48 characters'} style={[styles.minimumCounter, { color: colors.mutedForeground }]}>{minimumDraft.length}/48</Text>
++                  <AnimatedPressable accessibilityRole="button" accessibilityLabel="Save minimum version" accessibilityState={{ busy: minimumSaving, disabled: minimumSaving || settingsSaving || !minimumDraft.trim() }} disabled={minimumSaving || settingsSaving || !minimumDraft.trim()} onPress={() => { void saveMinimum(); }} style={[styles.minimumSave, { backgroundColor: chain.color, borderColor: chain.color, opacity: minimumSaving || settingsSaving || !minimumDraft.trim() ? OPACITY.disabled : 1 }]}><Text style={[styles.minimumSaveText, { color: solidAccentText }]}>{minimumSaving ? 'Saving…' : 'Save minimum'}</Text></AnimatedPressable>
++                </View>}
++              </View>
++
++              {!isWeekly && freezeTokens < 2 && <View style={[styles.safetyNetCard, { backgroundColor: '#4488ff12', borderColor: '#4488ff44' }]}><View style={[styles.safetyNetIcon, { backgroundColor: '#4488ff22' }]}><ChainSymbol name="freeze" size={16} color="#4488ff" /></View><View style={styles.scheduleCopy}><Text style={[styles.safetyNetTitle, { color: '#4488ff' }]}>Safety net · {freezeTokens} available</Text><Text style={[styles.safetyNetBody, { color: colors.mutedForeground }]}>{freezeRecoveryRemaining} full check-in{freezeRecoveryRemaining === 1 ? '' : 's'} to restore one.</Text></View></View>}
++              <AnimatedPressable onPress={handleDelete} disabled={settingsSaving || minimumSaving} accessibilityRole="button" accessibilityLabel={'Delete ' + chain.name} accessibilityState={{ disabled: settingsSaving || minimumSaving }} accessibilityHint="Asks for confirmation before permanently deleting this chain." style={[styles.deleteSetting, { borderColor: colors.border }]} scaleTo={0.98}><Ionicons name="trash-outline" size={20} color={colors.destructive} /><Text style={[styles.actionBtnText, { color: colors.destructive }]}>Delete chain</Text></AnimatedPressable>
++            </ScrollView>
++            <View style={[styles.settingsFooter, { paddingBottom: Math.max(insets.bottom, SPACE.md) }]}>
++              <Text accessibilityLiveRegion="polite" style={[styles.settingsHint, { color: colors.mutedForeground }]}>{settingsSaving ? 'Saving…' : 'Accent and schedule save automatically.'}</Text>
++              <AnimatedPressable onPress={closeSettings} accessibilityRole="button" accessibilityLabel="Done editing chain settings" accessibilityState={{ disabled: settingsSaving || minimumSaving }} disabled={settingsSaving || minimumSaving} style={[styles.minimumSave, { backgroundColor: colors.secondary, borderColor: colors.border }]}><Text style={[styles.minimumSaveText, { color: colors.foreground }]}>Done</Text></AnimatedPressable>
+             </View>
+-          </KeyboardAvoidingView>
+-        </Modal>
+-      ) : null}
++          </View>
++        </KeyboardAvoidingView>
++      </Modal>
+     </AmbientScreen>
++  );
++}
++
++function SettingsRow({ title, summary, icon, active, disabled, color, onPress }: {
++  title: string;
++  summary: string;
++  icon: React.ComponentProps<typeof Ionicons>['name'];
++  active: boolean;
++  disabled: boolean;
++  color: string;
++  onPress: () => void;
++}) {
++  const colors = useColors();
++  const accent = readableAccentColor(color, colors.cardSolid);
++  return (
++    <AnimatedPressable
++      accessibilityRole="button"
++      accessibilityLabel={title + ', ' + summary}
++      accessibilityState={{ expanded: active, disabled }}
++      disabled={disabled}
++      onPress={onPress}
++      style={[styles.scheduleHeader, { opacity: disabled ? OPACITY.disabled : 1 }]}
++      scaleTo={0.99}
++    >
++      <View style={[styles.scheduleIcon, { backgroundColor: color + '18' }]}><Ionicons name={icon} size={18} color={accent} /></View>
++      <View style={styles.scheduleCopy}>
++        <Text style={[styles.settingsRowTitle, { color: colors.foreground }]}>{title}</Text>
++        <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>{summary}</Text>
++      </View>
++      <Ionicons name={active ? 'chevron-up' : 'chevron-down'} size={17} color={colors.mutedForeground} />
++    </AnimatedPressable>
+   );
+ }
+ 
+@@ -1031,8 +791,18 @@
+   },
+   deleteSetting: { minHeight: CONTROL.buttonHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xs, borderRadius: RADIUS.button, borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm },
+   disclosureCard: { borderRadius: RADIUS.card, overflow: 'hidden' },
+-  disclosureContent: { gap: SPACE.md },
++  settingsHeader: { paddingHorizontal: CONTROL.screenHorizontal, paddingTop: SPACE.xs, paddingBottom: SPACE.md },
++  settingsScroll: { flexShrink: 1 },
++  settingsContent: { paddingHorizontal: CONTROL.screenHorizontal, paddingBottom: SPACE.md, gap: SPACE.md },
++  settingsGroup: { borderRadius: RADIUS.card, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
++  settingsExpanded: { paddingHorizontal: SPACE.md, paddingBottom: SPACE.md },
++  settingsDivider: { height: StyleSheet.hairlineWidth, marginLeft: SPACE.md },
++  settingsFooter: { paddingHorizontal: CONTROL.screenHorizontal, paddingTop: SPACE.xs },
++  settingsHint: { ...TYPE.caption, marginTop: SPACE.xs },
++  settingsRowTitle: { ...TYPE.bodyStrong },
+   todayStatus: { ...TYPE.body, marginTop: -SPACE.xs },
++  minimumShortcut: { flexDirection: 'row', alignItems: 'center', gap: SPACE.xs, minHeight: CONTROL.minimumTarget, paddingHorizontal: SPACE.sm, marginTop: -SPACE.sm },
++  minimumShortcutText: { ...TYPE.caption, flex: 1 },
+   notFound: {
+     flex: 1,
+     alignItems: 'center',
+@@ -1049,9 +819,6 @@
+     flexDirection: 'row',
+     alignItems: 'center',
+     gap: SPACE.sm,
+-  },
+-  accentSection: {
+-    gap: SPACE.xs,
+   },
+   colorRow: {
+     flexDirection: 'row',
+@@ -1083,26 +850,6 @@
+     ...TYPE.modalTitle,
+     flex: 1,
+   },
+-  scheduleCard: {
+-    borderRadius: RADIUS.card,
+-    overflow: 'hidden',
+-  },
+-  minimumPanel: {
+-    borderRadius: RADIUS.card,
+-    borderCurve: 'continuous',
+-    borderWidth: StyleSheet.hairlineWidth,
+-    overflow: 'hidden',
+-  },
+-  minimumCard: {
+-    minHeight: 60,
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    gap: SPACE.sm,
+-    paddingHorizontal: SPACE.md,
+-    paddingVertical: SPACE.xs,
+-  },
+-  minimumTitle: { ...TYPE.bodyStrong, flexShrink: 0 },
+-  minimumValue: { ...TYPE.caption, flex: 1, minWidth: 0, textAlign: 'right' },
+   scheduleHeader: {
+     minHeight: 64,
+     flexDirection: 'row',
+@@ -1121,7 +868,6 @@
+   scheduleCopy: { flex: 1 },
+   scheduleTitle: { ...TYPE.cardTitle },
+   scheduleBody: { ...TYPE.caption, marginTop: SPACE.hairline },
+-  scheduleExpanded: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#ffffff12', padding: SPACE.md, paddingTop: SPACE.sm },
+   scheduleHint: { ...TYPE.caption, marginBottom: SPACE.sm },
+   scheduleSelector: { marginHorizontal: -SPACE.md },
+   minimumModal: {
+@@ -1139,14 +885,12 @@
+     overflow: 'hidden',
+     paddingTop: SPACE.sm,
+   },
+-  minimumSheetContent: { paddingHorizontal: CONTROL.screenHorizontal },
+   minimumSheetHeader: {
+     flexDirection: 'row',
+     alignItems: 'flex-start',
+     gap: SPACE.md,
+   },
+   minimumSheetHeading: { flex: 1, minWidth: 0, gap: SPACE.xxs },
+-  minimumSheetEyebrow: { ...TYPE.eyebrow },
+   minimumSheetTitle: { ...TYPE.sectionTitle },
+   minimumSheetClose: {
+     width: CONTROL.minimumTarget,
+@@ -1179,54 +923,11 @@
+     marginTop: SPACE.md,
+   },
+   minimumSaveText: { ...TYPE.bodyStrong, textAlign: 'center' },
+-  streakHero: {
+-    alignItems: 'center',
+-    borderRadius: RADIUS.hero,
+-    borderCurve: 'continuous',
+-    borderWidth: StyleSheet.hairlineWidth,
+-    paddingVertical: SPACE.xxl,
+-    paddingHorizontal: SPACE.lg,
+-    gap: SPACE.xxs,
+-  },
+-  streakNumber: {
+-    fontSize: 64,
+-    fontFamily: 'Inter_700Bold',
+-    lineHeight: 68,
+-  },
+-  streakWord: {
+-    ...TYPE.cardTitle,
+-    textTransform: 'uppercase',
+-    letterSpacing: 1,
+-  },
+-  streakSub: {
+-    ...TYPE.caption,
+-    marginTop: SPACE.xxs,
+-  },
+-  stagePill: { alignSelf: 'center', borderRadius: RADIUS.compact, paddingHorizontal: SPACE.sm, paddingVertical: SPACE.xs, marginTop: SPACE.sm },
+-  stageText: { ...TYPE.eyebrow, letterSpacing: 0.4, textAlign: 'center' },
+-  nextStage: { alignSelf: 'stretch', gap: SPACE.xs, marginTop: SPACE.sm },
+-  nextStageTrack: { height: 5, borderRadius: RADIUS.capsule, overflow: 'hidden' },
+-  nextStageFill: { height: '100%', borderRadius: RADIUS.capsule },
+-  nextStageText: { ...TYPE.metadata, textAlign: 'center' },
+-  milestoneCard: { borderRadius: RADIUS.card, padding: SPACE.md },
+-  milestoneTitle: { ...TYPE.eyebrow, marginBottom: SPACE.sm },
+-  milestoneRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: SPACE.xs },
+-  milestoneItem: { alignItems: 'center', gap: SPACE.xxs, minWidth: 40 },
+-  milestoneDot: { width: 30, height: 30, borderRadius: RADIUS.capsule, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+-  milestoneLabel: { ...TYPE.metadata },
+-  insightsCard: { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.card, paddingVertical: SPACE.md },
+-  insight: { flex: 1, alignItems: 'center', gap: SPACE.xxs, minWidth: 0 },
+-  insightValue: { fontSize: 18, lineHeight: 24, fontFamily: 'Inter_700Bold' },
+-  insightLabel: { ...TYPE.metadata, letterSpacing: 0.5, textAlign: 'center' },
+-  insightDivider: { width: 1, height: 28 },
+-  rhythmCard: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACE.sm, borderRadius: RADIUS.card, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: SPACE.md },
+   weekReflection: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACE.sm, borderRadius: RADIUS.card, padding: SPACE.md },
+   weekReflectionIcon: { width: 36, height: 36, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
+   weekReflectionTitle: { ...TYPE.bodyStrong, marginTop: SPACE.xxs },
+-  rhythmIcon: { width: 36, height: 36, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
+   rhythmCopy: { flex: 1, minWidth: 0 },
+   rhythmEyebrow: { ...TYPE.eyebrow },
+-  rhythmTitle: { ...TYPE.bodyStrong, marginTop: SPACE.xxs },
+   rhythmBody: { ...TYPE.caption, marginTop: SPACE.xxs },
+   actionRow: {
+     flexDirection: 'row',
+--- a/artifacts/chain/app/chain/new.tsx
++++ b/artifacts/chain/app/chain/new.tsx
+@@ -13,7 +13,7 @@
+ import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { router } from 'expo-router';
+ import { useColors } from '@/hooks/useColors';
+-import { CHAIN_COLORS, EXTRA_CHAIN_COLORS } from '@/constants/colors';
++import { CHAIN_COLORS, EXTRA_CHAIN_COLORS, CHAIN_COLOR_NAMES } from '@/constants/colors';
+ import { CONTROL, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useChains } from '@/context/ChainsContext';
+@@ -57,12 +57,6 @@
+   'Take a real break',
+   'Get outside',
+ ];
+-
+-const COLOR_NAMES: Record<string, string> = {
+-  '#FF6B35': 'Orange', '#00C896': 'Emerald', '#A855F7': 'Violet', '#F43F5E': 'Rose',
+-  '#F59E0B': 'Amber', '#3B82F6': 'Blue', '#FBBF24': 'Gold', '#84CC16': 'Lime',
+-  '#22D3EE': 'Cyan', '#EF4444': 'Red', '#4F46E5': 'Indigo',
+-};
+ 
+ const WEEKLY_TARGET_OPTIONS = [1, 2, 3, 4, 5, 6, 7].map((target) => ({
+   label: String(target),
+@@ -230,7 +224,7 @@
+               >
+                 <Pressable
+                   accessibilityRole="radio"
+-                  accessibilityLabel={`${COLOR_NAMES[c] || 'Custom'} Chain color`}
++                  accessibilityLabel={`${CHAIN_COLOR_NAMES[c] || 'Custom'} Chain color`}
+                   accessibilityState={{ checked: isSelected }}
+                   onPress={() => {
+                     setSelectedColor(c);
+--- a/artifacts/chain/app/focus/[id].tsx
++++ b/artifacts/chain/app/focus/[id].tsx
+@@ -16,6 +16,7 @@
+   type FocusSessionSnapshot,
+ } from '@/domain/focus';
+ import { readFocusSession, removeFocusSession, writeFocusSession } from '@/lib/focusSession';
++import { planDataStore } from '@/lib/rhythmStorage';
+ import { reportDiagnostic } from '@/lib/diagnostics';
+ import { CONTROL, MOTION, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { playFeedback } from '@/lib/feedback';
+@@ -225,6 +226,7 @@
+   const [session, setSession] = useState<FocusSessionSnapshot | null>(null);
+   const [timerCompleted, setTimerCompleted] = useState(false);
+   const [itemLookupSettled, setItemLookupSettled] = useState(false);
++  const [itemLookupError, setItemLookupError] = useState(false);
+   const [sessionUnavailable, setSessionUnavailable] = useState(false);
+   const [restoring, setRestoring] = useState(true);
+   const [sessionSaveError, setSessionSaveError] = useState(false);
+@@ -254,11 +256,26 @@
+   useEffect(() => {
+     if (item) {
+       setItemLookupSettled(true);
++      setItemLookupError(false);
+       return;
+     }
++    let cancelled = false;
+     setItemLookupSettled(false);
+-    const timer = setTimeout(() => setItemLookupSettled(true), 450);
+-    return () => clearTimeout(timer);
++    setItemLookupError(false);
++    // A saved timer can belong to yesterday after midnight or a restart.
++    // Restore only its exact task occurrence; do not switch the visible Plan day.
++    void (async () => {
++      const saved = id ? await readFocusSession(id) : null;
++      if (!saved || cancelled) return;
++      const history = await planDataStore.readSnapshot();
++      const savedItems = history.days[saved.planDate] ?? [];
++      const savedItem = savedItems.find((entry) => entry.id === id && entry.planDate === saved.planDate);
++      if (!cancelled && savedItem) setRetainedItem(savedItem);
++    })().catch((error) => {
++      if (!cancelled) setItemLookupError(true);
++      reportDiagnostic({ area: 'storage', operation: 'focusSession.lookup', severity: 'error', error });
++    }).finally(() => { if (!cancelled) setItemLookupSettled(true); });
++    return () => { cancelled = true; };
+   }, [id, item]);
+ 
+   useEffect(() => {
+@@ -378,13 +395,13 @@
+     setFinishing(true);
+     try {
+       const finishedAt = Date.now();
+-      const actualMinutes = Math.max(1, Math.round(getFocusElapsedSeconds(session, finishedAt) / 60));
++      const actualMinutes = getFocusElapsedSeconds(session, finishedAt) / 60;
+       const completed = await completeFocusItem(finishingItemId, actualMinutes, item.planDate);
+       if (!completed) {
+         if (restoreGenerationRef.current === generation) {
+           finishingRef.current = false;
+           setFinishing(false);
+-          Alert.alert('Focus couldn’t finish', 'Your session is still saved. Reopen today and try again.');
++          Alert.alert('Focus couldn’t finish', 'Your session is still saved. Please try again.');
+         }
+         return;
+       }
+@@ -427,7 +444,7 @@
+       if (restoreGenerationRef.current === generation) {
+         finishingRef.current = false;
+         setFinishing(false);
+-        Alert.alert('Focus couldn’t finish', 'Your session is still saved. Reopen today and try again.');
++        Alert.alert('Focus couldn’t finish', 'Your session is still saved. Please try again.');
+       }
+     }
+   }
+@@ -557,7 +574,7 @@
+       <View style={styles.unavailable}>
+         <View style={[styles.unavailableIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name={unavailable ? 'hourglass-outline' : 'ellipsis-horizontal'} size={24} color={colors.primary} /></View>
+         <Text style={[styles.unavailableTitle, { color: colors.foreground }]}>{unavailable ? 'Focus unavailable' : 'Preparing focus…'}</Text>
+-        {unavailable && <Text style={[styles.unavailableBody, { color: colors.mutedForeground }]}>{sessionUnavailable ? 'Chain couldn’t safely save this session.' : 'This task may have been completed, moved or removed.'}</Text>}
++        {unavailable && <Text style={[styles.unavailableBody, { color: colors.mutedForeground }]}>{itemLookupError ? 'Chain couldn’t load the saved session. Return to Plan and try again.' : sessionUnavailable ? 'Chain couldn’t safely save this session.' : 'This task may have been completed, moved or removed.'}</Text>}
+         {unavailable && <Pressable accessibilityRole="button" accessibilityLabel="Back to plan" onPress={() => { if (sessionMatchesItem) void closeSession(); else router.back(); }} style={[styles.unavailableButton, { backgroundColor: colors.primary }]}><Text style={[styles.unavailableButtonText, { color: colors.primaryForeground }]}>Back to plan</Text></Pressable>}
+       </View>
+     </AmbientScreen>;
+--- /dev/null
++++ b/artifacts/chain/app/gate-insights.tsx
+@@ -0,0 +1,135 @@
++import React, { useCallback, useState } from 'react';
++import { AppState, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
++import { router, useFocusEffect } from 'expo-router';
++import { Ionicons } from '@expo/vector-icons';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { AmbientScreen } from '@/components/AmbientSurface';
++import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
++import { readableAccentColor } from '@/constants/sectionTheme';
++import { useColors } from '@/hooks/useColors';
++import { getGateInsights, type GatePeriod, type GateSummary } from '@/lib/gateStats';
++import { reportDiagnostic } from '@/lib/diagnostics';
++
++const APP_NAMES: Record<string, string> = { instagram: 'Instagram', tiktok: 'TikTok', twitter: 'X / Twitter', youtube: 'YouTube', reddit: 'Reddit', snapchat: 'Snapchat', facebook: 'Facebook', linkedin: 'LinkedIn', 'sample-app': 'Sample app' };
++
++export default function GateInsightsScreen() {
++  const colors = useColors('gate');
++  const insets = useSafeAreaInsets();
++  const [period, setPeriod] = useState<GatePeriod>(7);
++  const [summary, setSummary] = useState<GateSummary | null>(null);
++  const [error, setError] = useState(false);
++  const [retry, setRetry] = useState(0);
++  const accent = readableAccentColor(colors.primary, colors.cardSolid);
++
++  useFocusEffect(useCallback(() => {
++    let active = true;
++    setSummary(null);
++    setError(false);
++    const refresh = () => {
++      void getGateInsights(period).then((value) => {
++        if (active) { setSummary(value); setError(false); }
++      }).catch((cause) => {
++        reportDiagnostic({ area: 'gate', operation: 'insights.detail.read', severity: 'error', error: cause });
++        if (active) { setSummary(null); setError(true); }
++      });
++    };
++    refresh();
++    const subscription = AppState.addEventListener('change', (state) => { if (state === 'active') refresh(); });
++    return () => { active = false; subscription.remove(); };
++  }, [period, retry]));
++
++  const card = { backgroundColor: colors.cardSolid, borderColor: colors.border };
++  return (
++    <AmbientScreen tone="gate" style={styles.root}>
++      <View style={[styles.header, { paddingTop: (Platform.OS === 'web' ? 48 : insets.top) + SPACE.xs }]}>
++        <Pressable accessibilityRole="button" accessibilityLabel="Back to Gate" onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)/gate')} style={styles.back}>
++          <Ionicons name="chevron-back" size={25} color={colors.foreground} />
++        </Pressable>
++        <Text accessibilityRole="header" style={[TYPE.sectionTitle, { color: colors.foreground }]}>Gate insights</Text>
++      </View>
++      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, SPACE.lg) + SPACE.xl }]} showsVerticalScrollIndicator={false}>
++        <Text style={[TYPE.screenTitle, { color: colors.foreground }]}>Notice your choices.</Text>
++        <Text style={[TYPE.body, { color: colors.mutedForeground }]}>See what you chose after a pause, with a clear distinction between a choice and what happened next.</Text>
++
++        <View style={[styles.periods, card]}>
++          {([7, 28, 90] as const).map((days) => <Pressable key={days} accessibilityRole="button" accessibilityState={{ selected: period === days }} accessibilityLabel={`Last ${days} days`} onPress={() => setPeriod(days)} style={({ pressed }) => [styles.period, { backgroundColor: period === days ? colors.primary + '24' : 'transparent', opacity: pressed ? OPACITY.pressed : 1 }]}>
++            <Text style={[TYPE.bodyStrong, { color: period === days ? accent : colors.mutedForeground }]}>{days} days</Text>
++          </Pressable>)}
++        </View>
++
++        <View style={[styles.card, card]}>
++          <View style={styles.row}>
++            <Ionicons name="eye-off-outline" size={21} color={colors.mutedForeground} />
++            <Text style={[TYPE.sectionTitle, { flex: 1, color: colors.foreground }]}>App outcomes</Text>
++          </View>
++          <Text style={[TYPE.bodyStrong, { color: colors.mutedForeground }]}>Not available in this build</Text>
++          <Text style={[TYPE.body, { color: colors.mutedForeground }]}>Chain cannot confirm whether you stayed in or left another app. Preview choices do not count as distractions avoided or time saved.</Text>
++        </View>
++
++        {error ? <View style={[styles.card, card]}>
++          <Text accessibilityRole="alert" style={[TYPE.sectionTitle, { color: colors.foreground }]}>History couldn’t load</Text>
++          <Text style={[TYPE.body, { color: colors.mutedForeground }]}>Your existing records have not been replaced with an empty history.</Text>
++          <Pressable accessibilityRole="button" onPress={() => setRetry((value) => value + 1)} style={[styles.retry, { backgroundColor: colors.primary }]}><Text style={[TYPE.bodyStrong, { color: colors.primaryForeground }]}>Try again</Text></Pressable>
++        </View> : !summary ? <Text accessibilityLiveRegion="polite" style={[TYPE.body, { color: colors.mutedForeground }]}>Loading recorded choices…</Text> : <>
++          <View style={[styles.card, card]}>
++            <Text style={[TYPE.eyebrow, { color: accent }]}>PREVIEW EXAMPLES · LAST {period} DAYS</Text>
++            {summary.attempts === 0 ? <>
++              <Text style={[TYPE.sectionTitle, { color: colors.foreground }]}>No preview choices yet</Text>
++              <Text style={[TYPE.body, { color: colors.mutedForeground }]}>Open an app tile in Gate and try the pause. Choosing either option will appear here; closing the preview stays undecided.</Text>
++            </> : <>
++              <Text style={[TYPE.display, { color: colors.foreground }]}>{summary.leaveRate === null ? '—' : `${Math.round(summary.leaveRate * 100)}%`}</Text>
++              <Text style={[TYPE.sectionTitle, { color: colors.foreground }]}>Chose to leave</Text>
++              <Text style={[TYPE.body, { color: colors.mutedForeground }]}>{summary.leave} of {summary.knownDecisions} recorded decisions. {summary.pending} undecided {summary.pending === 1 ? 'pause is' : 'pauses are'} excluded from this percentage.</Text>
++              {summary.knownDecisions > 0 && <View accessibilityElementsHidden style={[styles.bar, { backgroundColor: colors.border }]}><View style={{ height: '100%', width: `${(summary.leaveRate ?? 0) * 100}%`, backgroundColor: colors.primary }} /></View>}
++              <View style={styles.metrics}>
++                <Metric label="Pauses shown" value={summary.attempts} />
++                <Metric label="Chose to leave" value={summary.leave} />
++                <Metric label="Chose to continue" value={summary.continued} />
++                <Metric label="Undecided" value={summary.pending} />
++              </View>
++            </>}
++          </View>
++
++          {summary.byApp.length > 0 && <View style={[styles.card, card]}>
++            <Text style={[TYPE.sectionTitle, { color: colors.foreground }]}>Your preview choices by app</Text>
++            {summary.byApp.map((app) => <View key={app.appId} style={[styles.app, { borderColor: colors.border }]}>
++              <Text style={[TYPE.bodyStrong, { color: colors.foreground }]}>{APP_NAMES[app.appId] ?? 'Selected app'}</Text>
++              <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>{app.leave} leave · {app.continued} continue · {app.pending} undecided</Text>
++            </View>)}
++          </View>}
++
++          {summary.unverified > 0 && <View style={[styles.card, card]}>
++            <Text style={[TYPE.sectionTitle, { color: colors.foreground }]}>Earlier records kept separately</Text>
++            <Text style={[TYPE.body, { color: colors.mutedForeground }]}>{summary.unverified} older {summary.unverified === 1 ? 'record has' : 'records have'} incomplete provenance. These records are excluded from attempts, choices and outcome rates.</Text>
++          </View>}
++        </>}
++
++        <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>History is stored on this device. Periods cover the previous 7, 28 or 90 days from now. The active history keeps 90 days when a new event is saved. No cloud sync is connected.</Text>
++      </ScrollView>
++    </AmbientScreen>
++  );
++}
++
++function Metric({ label, value }: { label: string; value: number }) {
++  const colors = useColors('gate');
++  return <View accessible accessibilityLabel={`${value} ${label.toLowerCase()}`} style={styles.metric}>
++    <Text style={[TYPE.modalTitle, { color: colors.foreground }]}>{value}</Text>
++    <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>{label}</Text>
++  </View>;
++}
++
++const styles = StyleSheet.create({
++  root: { flex: 1 },
++  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACE.xs, paddingBottom: SPACE.xs },
++  back: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, alignItems: 'center', justifyContent: 'center' },
++  content: { paddingHorizontal: CONTROL.screenHorizontal, paddingTop: SPACE.sm, gap: SPACE.md },
++  card: { padding: SPACE.lg, borderWidth: 1, borderRadius: RADIUS.card, gap: SPACE.sm },
++  row: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm },
++  periods: { flexDirection: 'row', padding: 4, borderWidth: 1, borderRadius: RADIUS.control },
++  period: { flex: 1, minHeight: CONTROL.minimumTarget, alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.compact },
++  bar: { height: 7, borderRadius: 4, overflow: 'hidden', marginVertical: SPACE.xs },
++  metrics: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.sm },
++  metric: { flexGrow: 1, flexBasis: '42%', gap: SPACE.xxs, paddingVertical: SPACE.xs },
++  app: { gap: SPACE.xxs, paddingVertical: SPACE.sm, borderTopWidth: 1 },
++  retry: { minHeight: CONTROL.minimumTarget, borderRadius: RADIUS.button, alignItems: 'center', justifyContent: 'center', paddingHorizontal: SPACE.lg },
++});
+--- a/artifacts/chain/app/pause-gate-demo.tsx
++++ b/artifacts/chain/app/pause-gate-demo.tsx
+@@ -1,4 +1,4 @@
+-import React, { useEffect, useRef, useState } from "react";
++import React, { useCallback, useEffect, useRef, useState } from "react";
+ import {
+   AccessibilityInfo,
+   AppState,
+@@ -20,7 +20,7 @@
+   withTiming,
+ } from "react-native-reanimated";
+ import { Ionicons } from "@expo/vector-icons";
+-import { router, useLocalSearchParams } from "expo-router";
++import { router, useFocusEffect, useLocalSearchParams } from "expo-router";
+ import { AmbientScreen } from "@/components/AmbientSurface";
+ import {
+   CONTROL,
+@@ -31,6 +31,8 @@
+ } from "@/constants/designSystem";
+ import { useColors } from "@/hooks/useColors";
+ import { playFeedback } from "@/lib/feedback";
++import { beginGatePreview, createGateAttemptId, recordGatePreviewDecision } from "@/lib/gateStats";
++import { reportDiagnostic } from "@/lib/diagnostics";
+ 
+ const PAUSE_DURATION_MS = 8_000;
+ const BREATH_PHASE_MS = 4_000;
+@@ -91,6 +93,7 @@
+   const insets = useSafeAreaInsets();
+   const reduceMotion = useReducedMotion();
+   const params = useLocalSearchParams<{
++    appId?: string | string[];
+     appName?: string | string[];
+     appIcon?: string | string[];
+     appColor?: string | string[];
+@@ -105,6 +108,7 @@
+   }>();
+ 
+   const appName = safeRouteText(params.appName, "Selected app", 48);
++  const appId = safeRouteText(params.appId, "sample-app", 80);
+   const iconCandidate = firstRouteValue(params.appIcon)?.trim();
+   const appIcon =
+     iconCandidate &&
+@@ -141,6 +145,35 @@
+   const [phase, setPhase] = useState<BreathPhase>("in");
+   const [ready, setReady] = useState(false);
+   const [isExiting, setIsExiting] = useState(false);
++  const [historyError, setHistoryError] = useState(false);
++  const attemptRef = useRef({ id: createGateAttemptId(), at: Date.now(), appId });
++  const attemptWriteRef = useRef<Promise<void> | null>(null);
++  const mountedRef = useRef(true);
++  const focusedRef = useRef(true);
++  useFocusEffect(useCallback(() => {
++    focusedRef.current = true;
++    return () => { focusedRef.current = false; };
++  }, []));
++
++  function ensureAttempt() {
++    if (!attemptWriteRef.current) {
++      const attempt = attemptRef.current;
++      attemptWriteRef.current = beginGatePreview(attempt.id, attempt.appId, attempt.at);
++    }
++    return attemptWriteRef.current;
++  }
++
++  useEffect(() => {
++    mountedRef.current = true;
++    void ensureAttempt().catch((error) => {
++      attemptWriteRef.current = null;
++      reportDiagnostic({ area: 'gate', operation: 'previewAttempt.write', severity: 'error', error });
++      if (mountedRef.current) setHistoryError(true);
++    });
++    // Dismissing or swiping back leaves an undecided attempt. AppState changes
++    // are not evidence of choosing either option or of using another app.
++    return () => { mountedRef.current = false; };
++  }, []);
+ 
+   const orbScale = useSharedValue(ORB_MIN_SCALE);
+   const pauseFill = useSharedValue(0);
+@@ -319,17 +352,33 @@
+     return true;
+   }
+ 
+-  function handleReturn() {
++  function handleClose() {
+     if (!beginExit()) return;
+     playFeedback("light");
+     exitToGate();
+   }
+ 
+-  function handleContinue() {
+-    if (!readyRef.current || !beginExit()) return;
+-    playFeedback("light");
+-    exitTimerRef.current = setTimeout(exitToGate, CONTINUE_EXIT_DELAY_MS);
++  async function saveChoice(choice: 'leave' | 'continue') {
++    if ((choice === 'continue' && !readyRef.current) || !beginExit()) return;
++    try {
++      await ensureAttempt();
++      await recordGatePreviewDecision(attemptRef.current.id, choice, Math.max(Date.now(), attemptRef.current.at));
++      if (!mountedRef.current || !focusedRef.current) return;
++      playFeedback("light");
++      if (choice === 'continue') exitTimerRef.current = setTimeout(() => { if (mountedRef.current && focusedRef.current) exitToGate(); }, CONTINUE_EXIT_DELAY_MS);
++      else exitToGate();
++    } catch (error) {
++      attemptWriteRef.current = null;
++      reportDiagnostic({ area: 'gate', operation: 'previewDecision.write', severity: 'error', error });
++      if (!mountedRef.current) return;
++      isExitingRef.current = false;
++      setIsExiting(false);
++      setHistoryError(true);
++    }
+   }
++
++  const handleReturn = () => { void saveChoice('leave'); };
++  const handleContinue = () => { void saveChoice('continue'); };
+ 
+   const phaseLabel =
+     phase === "in"
+@@ -366,7 +415,7 @@
+               accessibilityLabel="Close Gate"
+               accessibilityState={{ busy: isExiting }}
+               hitSlop={8}
+-              onPress={handleReturn}
++              onPress={handleClose}
+               style={({ pressed }) => [
+                 styles.closeButton,
+                 {
+@@ -621,13 +670,20 @@
+             >
+               Notice the impulse. You can still choose what matters.
+             </Text>
++            <Text style={[TYPE.caption, { color: colors.mutedForeground, textAlign: 'center', marginTop: SPACE.xs }]}>
++              Preview · Your choices are saved as examples. No other app is opened or monitored.
++            </Text>
++            {historyError && <Text accessibilityRole="alert" style={[TYPE.caption, { color: colors.foreground, textAlign: 'center', marginTop: SPACE.xs }]}>
++              This preview could not be saved. Tap your choice to retry, or close to leave without recording a choice.
++            </Text>}
+           </View>
+ 
+           <View style={styles.actions}>
+             <Pressable
+               accessibilityRole="button"
+-              accessibilityLabel="Go back"
+-              accessibilityHint="Available throughout the pause"
++              accessibilityLabel="Choose to leave, preview"
++              accessibilityHint="Records a preview choice and returns to Gate"
++              disabled={isExiting}
+               accessibilityState={{ busy: isExiting }}
+               onPress={handleReturn}
+               style={({ pressed }) => [
+@@ -652,7 +708,7 @@
+                   { color: colors.primaryForeground },
+                 ]}
+               >
+-                Go back
++                Choose to leave
+               </Text>
+             </Pressable>
+ 
+@@ -660,12 +716,12 @@
+               accessibilityRole="button"
+               accessibilityLabel={
+                 ready
+-                  ? "Continue"
++                  ? "Choose to continue, preview"
+                   : "Continue, available after the pause"
+               }
+               accessibilityHint={
+                 ready
+-                  ? "Returns to Gate"
++                  ? "Records a preview choice and returns to Gate"
+                   : "Wait for the eight-second pause to complete"
+               }
+               accessibilityState={{
+@@ -698,7 +754,7 @@
+                 ]}
+               >
+                 {isExiting
+-                  ? "Continuing…"
++                  ? "Saving choice…"
+                   : ready
+                     ? "Continue"
+                     : "Continue · " + countdown + "s"}
+--- /dev/null
++++ b/artifacts/chain/app/rhythm/[id].tsx
+@@ -0,0 +1,376 @@
++import React, { useCallback, useMemo, useState } from 'react';
++import {
++  ActivityIndicator,
++  AppState,
++  Pressable,
++  ScrollView,
++  StyleSheet,
++  Text,
++  View,
++} from 'react-native';
++import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { Ionicons } from '@expo/vector-icons';
++import { AmbientScreen } from '@/components/AmbientSurface';
++import { AppButton, Surface } from '@/components/ui/AppUI';
++import { ChainSymbol, type ChainSymbolName } from '@/components/ui/ChainSymbol';
++import { CONTROL, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
++import { formatStreakCount, getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
++import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
++import { type Chain, getStreak, toLocalDateString, useChains } from '@/context/ChainsContext';
++import { type FocusLogEntry } from '@/domain/plan';
++import { buildChainRhythm } from '@/domain/rhythm';
++import { useColors } from '@/hooks/useColors';
++import { useLocalClock } from '@/hooks/useLocalClock';
++import { readRhythmFocusLog } from '@/lib/rhythmStorage';
++
++type PeriodDays = 7 | 28 | 90;
++type Rhythm = ReturnType<typeof buildChainRhythm>;
++const PERIODS: readonly PeriodDays[] = [7, 28, 90];
++const MILESTONES = PROGRESSION_STAGES.filter((stage) => [1, 7, 30, 100, 365].includes(stage.at));
++const FREEZE_COLOR = '#5B8CFF';
++
++function dateLabel(date: string) {
++  return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', {
++    month: 'short', day: 'numeric',
++  });
++}
++
++function countLabel(count: number, singular: string, plural = `${singular}s`) {
++  return `${count} ${count === 1 ? singular : plural}`;
++}
++
++function minutesLabel(minutes: number) {
++  return minutes > 0 && minutes < 1 ? '<1' : minutes.toLocaleString('en-US', { maximumFractionDigits: 1 });
++}
++
++function Metric({ value, label, symbol, color }: {
++  value: number;
++  label: string;
++  symbol: ChainSymbolName;
++  color: string;
++}) {
++  const colors = useColors();
++  return <View accessible accessibilityLabel={`${value} ${label}`} style={styles.metric}>
++    <ChainSymbol name={symbol} size={18} color={color} />
++    <Text style={[TYPE.modalTitle, { color: colors.foreground }]}>{value}</Text>
++    <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>{label}</Text>
++  </View>;
++}
++
++function CountBar({ label, value, maximum, color }: {
++  label: string;
++  value: number;
++  maximum: number;
++  color: string;
++}) {
++  const colors = useColors();
++  const percentage = maximum > 0 ? Math.min(100, Math.max(0, (value / maximum) * 100)) : 0;
++  return <View accessible accessibilityLabel={`${label}, ${value}`} style={styles.barRow}>
++    <View style={styles.barHeading}>
++      <Text style={[TYPE.body, styles.flexText, { color: colors.foreground }]}>{label}</Text>
++      <Text style={[TYPE.bodyStrong, { color: colors.foreground }]}>{value}</Text>
++    </View>
++    <View style={[styles.barTrack, { backgroundColor: colors.secondary }]}>
++      <View style={[styles.barFill, { backgroundColor: color, width: `${percentage}%` }]} />
++    </View>
++  </View>;
++}
++
++function StreakMilestones({ chain, referenceDate }: { chain: Chain; referenceDate: string }) {
++  const colors = useColors();
++  const accentText = readableAccentColor(chain.color, colors.cardSolid);
++  const streak = getStreak(chain, referenceDate);
++  const stage = getProgressionStage(streak);
++  const next = MILESTONES.find((milestone) => milestone.at > streak);
++  const previous = [...MILESTONES].reverse().find((milestone) => milestone.at <= streak)?.at ?? 0;
++  const progress = next ? Math.min(1, Math.max(0, (streak - previous) / (next.at - previous))) : 1;
++  const nextLabel = next
++    ? `${formatStreakCount(next.at - streak, chain.cadence)} to ${next.label}`
++    : 'All current milestones reached.';
++
++  return <View style={[styles.dividerBlock, { borderColor: colors.border }]}>
++    <Text accessibilityRole="header" style={[TYPE.bodyStrong, { color: colors.foreground }]}>Current streak · {formatStreakCount(streak, chain.cadence)}</Text>
++    <Text style={[TYPE.caption, { color: accentText }]}>{stage.label}</Text>
++    <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>Milestones follow your current streak across your full history, independent of the selected period.</Text>
++    <View
++      accessible
++      accessibilityRole="progressbar"
++      accessibilityLabel="Next streak milestone"
++      accessibilityValue={next ? { min: previous, max: next.at, now: streak, text: nextLabel } : { text: nextLabel }}
++      style={styles.milestoneProgress}
++    >
++      <View style={[styles.barTrack, { backgroundColor: chain.color + '20' }]}>
++        <View style={[styles.barFill, { width: `${progress * 100}%`, backgroundColor: chain.color }]} />
++      </View>
++      <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>{nextLabel}</Text>
++    </View>
++    <Text style={[TYPE.eyebrow, { color: colors.mutedForeground }]}>MILESTONES · {chain.cadence === 'weekly' ? 'WEEKS' : 'DAYS'}</Text>
++    <View style={styles.milestoneRow}>
++      {MILESTONES.map((milestone) => {
++        const reached = streak >= milestone.at;
++        return <View
++          key={milestone.key}
++          accessible
++          accessibilityLabel={`${formatStreakCount(milestone.at, chain.cadence)}, ${milestone.label}, ${reached ? 'reached in the current streak' : 'not reached in the current streak'}`}
++          style={styles.milestoneItem}
++        >
++          <View style={[styles.milestoneDot, { backgroundColor: reached ? chain.color : colors.background, borderColor: reached ? chain.color : colors.border }]}>
++            {reached
++              ? <ChainSymbol name="check" size={14} color={readableTextColor(chain.color)} />
++              : <Ionicons name="lock-closed-outline" size={13} color={colors.mutedForeground} />}
++          </View>
++          <Text style={[TYPE.metadata, { color: reached ? accentText : colors.mutedForeground }]}>{milestone.at}</Text>
++        </View>;
++      })}
++    </View>
++  </View>;
++}
++
++function Consistency({ rhythm, accent, chain, referenceDate }: { rhythm: Rhythm; accent: string; chain: Chain; referenceDate: string }) {
++  const colors = useColors();
++  const accentText = readableAccentColor(accent, colors.cardSolid);
++  const { adherence, comparison, weekly, counts } = rhythm;
++  const unit = adherence.unit === 'weeks' ? 'complete weeks' : 'scheduled days';
++  const comparisonText = comparison === null
++    ? 'A comparison will appear when both periods have enough history.'
++    : comparison.changePoints === 0
++      ? 'The same rate as the previous period.'
++      : `${Math.abs(comparison.changePoints).toLocaleString('en-US', { maximumFractionDigits: 1 })} percentage points ${comparison.changePoints > 0 ? 'higher' : 'lower'} than the previous period.`;
++
++  return <Surface style={styles.section}>
++    <Text accessibilityRole="header" style={[TYPE.sectionTitle, { color: colors.foreground }]}>Consistency</Text>
++    <View style={styles.rateRow}>
++      <Text style={[TYPE.display, { color: accentText }]}>
++        {adherence.rate === null ? '—' : `${Math.round(adherence.rate)}%`}
++      </Text>
++      <Text style={[TYPE.body, styles.flexText, { color: colors.mutedForeground }]}>
++        {rhythm.scheduleChanged
++          ? 'Your schedule changed in this period'
++          : adherence.denominator === 0
++          ? adherence.unit === 'weeks' ? 'No full closed weeks yet' : 'No closed scheduled days yet'
++          : `${adherence.numerator} of ${adherence.denominator} ${unit} kept`}
++      </Text>
++    </View>
++    <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>
++      {adherence.unit === 'weeks'
++        ? 'A week counts when Done and Minimum days reach its target. The current week is still in progress.'
++        : 'Done and Minimum count as action. Rest days and today are excluded from this rate. Freeze protects a streak without counting as action.'}
++    </Text>
++    <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>
++      {rhythm.scheduleChanged
++        ? 'Your recorded actions remain visible. A single rate would mix different schedules, so it is not shown for this period.'
++        : comparisonText}
++    </Text>
++    {rhythm.scheduleAssumption && <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>Earlier entries have no saved schedule history. Those dates use your current schedule, so the rate is an estimate.</Text>}
++    {weekly ? <View style={[styles.inset, { backgroundColor: accent + '12' }]}>
++      <Text style={[TYPE.bodyStrong, { color: colors.foreground }]}>This week · {weekly.currentProgress}/{weekly.currentTarget}</Text>
++      <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>Days recorded toward this week’s target.</Text>
++    </View> : <View style={styles.smallStats}>
++      <Text style={[TYPE.caption, styles.flexText, { color: colors.mutedForeground }]}>{countLabel(counts.rest, 'rest day')}</Text>
++      <Text style={[TYPE.caption, styles.flexText, { color: colors.mutedForeground }]}>{countLabel(counts.missed, 'missed day')}</Text>
++    </View>}
++    <StreakMilestones chain={chain} referenceDate={referenceDate} />
++  </Surface>;
++}
++
++function CheckInTimes({ rhythm, accent }: { rhythm: Rhythm; accent: string }) {
++  const colors = useColors();
++  const { checkIns } = rhythm;
++  const largest = Math.max(1, ...checkIns.buckets.map((bucket) => bucket.count));
++  return <Surface style={styles.section}>
++    <Text accessibilityRole="header" style={[TYPE.sectionTitle, { color: colors.foreground }]}>Check-in times</Text>
++    <Text style={[TYPE.body, { color: colors.mutedForeground }]}>When you recorded an action in Chain. This is not a measurement of when you did the habit.</Text>
++    {checkIns.sampleCount === 0 ? <View style={styles.emptyBlock}>
++      <Ionicons name="time-outline" size={24} color={colors.mutedForeground} />
++      <Text style={[TYPE.bodyStrong, { color: colors.foreground }]}>Your pattern starts here</Text>
++      <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>New same-day check-ins will build this view. Older entries stay in your history without an invented time.</Text>
++    </View> : <>
++      {checkIns.buckets.map((bucket) => <CountBar
++        key={bucket.key}
++        label={bucket.label}
++        value={bucket.count}
++        maximum={largest}
++        color={accent}
++      />)}
++      <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>
++        Based on {countLabel(checkIns.sampleCount, 'same-day check-in')} with a recorded local time.
++      </Text>
++      {checkIns.mostCommonLabel ? <Text style={[TYPE.bodyStrong, { color: colors.foreground }]}>
++        Most common check-in window: {checkIns.mostCommonLabel.toLowerCase()}.
++      </Text> : <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>No clear timing pattern yet.</Text>}
++    </>}
++    {checkIns.missingCount > 0 || checkIns.retrospectiveCount > 0 ? <View style={[styles.dividerBlock, { borderColor: colors.border }]}>
++      {checkIns.missingCount > 0 && <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>{countLabel(checkIns.missingCount, 'entry', 'entries')} without a reliable local check-in time.</Text>}
++      {checkIns.retrospectiveCount > 0 && <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>{countLabel(checkIns.retrospectiveCount, 'entry', 'entries')} logged for a previous day.</Text>}
++      <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>These entries count toward your recorded actions, but are excluded from the time pattern.</Text>
++    </View> : null}
++  </Surface>;
++}
++
++export default function RhythmScreen() {
++  const colors = useColors();
++  const insets = useSafeAreaInsets();
++  const params = useLocalSearchParams<{ id: string | string[] }>();
++  const id = Array.isArray(params.id) ? params.id[0] : params.id;
++  const { chains, isReady } = useChains();
++  const chain = chains.find((item) => item.id === id);
++  const [periodDays, setPeriodDays] = useState<PeriodDays>(28);
++  const now = useLocalClock();
++  const referenceDate = toLocalDateString(now);
++  const [focusLog, setFocusLog] = useState<FocusLogEntry[]>([]);
++  const [focusState, setFocusState] = useState<'loading' | 'ready' | 'error'>('loading');
++  const [retry, setRetry] = useState(0);
++
++  useFocusEffect(useCallback(() => {
++    let active = true;
++    let request = 0;
++    const refresh = async () => {
++      const currentRequest = ++request;
++      setFocusState('loading');
++      try {
++        const entries = await readRhythmFocusLog();
++        if (active && currentRequest === request) {
++          setFocusLog(entries);
++          setFocusState('ready');
++        }
++      } catch {
++        if (active && currentRequest === request) setFocusState('error');
++      }
++    };
++    void refresh();
++    const subscription = AppState.addEventListener('change', (state) => {
++      if (state === 'active') void refresh();
++    });
++    return () => {
++      active = false;
++      subscription.remove();
++    };
++  }, [retry]));
++
++  const rhythm = useMemo(() => chain
++    ? buildChainRhythm(chain, { periodDays, referenceDate, focusLog })
++    : null, [chain, periodDays, referenceDate, focusLog]);
++  const accent = chain?.color ?? colors.primary;
++  const accentText = readableAccentColor(accent, colors.cardSolid);
++  const back = () => {
++    if (router.canGoBack()) router.back();
++    else if (chain) router.replace({ pathname: '/chain/[id]', params: { id: chain.id } });
++    else router.replace('/(tabs)');
++  };
++
++  return <AmbientScreen tone="today" color={accent}>
++    <View style={[styles.navigation, { paddingTop: insets.top + SPACE.xxs }]}>
++      <Pressable
++        accessibilityRole="button"
++        accessibilityLabel="Back to chain"
++        onPress={back}
++        style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.6 : 1 }]}
++      >
++        <Ionicons name="chevron-back" size={28} color={colors.foreground} />
++        <Text style={[TYPE.bodyStrong, { color: colors.foreground }]}>Chain</Text>
++      </Pressable>
++    </View>
++    {!isReady ? <View accessibilityLiveRegion="polite" style={styles.screenNotice}>
++      <ActivityIndicator color={accentText} />
++      <Text style={[TYPE.body, { color: colors.mutedForeground }]}>Loading your chain…</Text>
++    </View> : !chain || !rhythm ? <View style={styles.screenNotice}>
++      <Text accessibilityRole="header" style={[TYPE.sectionTitle, { color: colors.foreground }]}>This chain is unavailable</Text>
++      <Text style={[TYPE.body, { color: colors.mutedForeground }]}>Return to Chains to choose another one.</Text>
++      <AppButton label="Go to Chains" onPress={() => router.replace('/(tabs)')} />
++    </View> : <ScrollView
++      contentInsetAdjustmentBehavior="never"
++      showsVerticalScrollIndicator={false}
++      contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, SPACE.lg) + SPACE.xl }]}
++    >
++      <View style={styles.titleBlock}>
++        <Text accessibilityRole="header" style={[TYPE.screenTitle, { color: colors.foreground }]}>Rhythm</Text>
++        <Text style={[TYPE.body, { color: accentText }]}>{chain.name}</Text>
++        <Text style={[TYPE.body, { color: colors.mutedForeground }]}>A clear view of what you have recorded.</Text>
++      </View>
++
++      <View accessibilityRole="tablist" style={[styles.periods, { backgroundColor: colors.cardSolid, borderColor: colors.border }]}>
++        {PERIODS.map((period) => <Pressable
++          key={period}
++          accessibilityRole="tab"
++          accessibilityLabel={`Last ${period} days`}
++          accessibilityState={{ selected: period === periodDays }}
++          onPress={() => setPeriodDays(period)}
++          style={({ pressed }) => [styles.period, {
++            backgroundColor: period === periodDays ? accent + '20' : 'transparent',
++            opacity: pressed ? 0.7 : 1,
++          }]}
++        >
++          <Text style={[TYPE.bodyStrong, { color: period === periodDays ? accentText : colors.mutedForeground }]}>{period} days</Text>
++        </Pressable>)}
++      </View>
++
++      <Surface accentColor={accent} style={styles.section}>
++        <Text accessibilityRole="header" style={[TYPE.sectionTitle, { color: colors.foreground }]}>Your recorded days</Text>
++        <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>{dateLabel(rhythm.startDate)} – {dateLabel(rhythm.endDate)}</Text>
++        <View style={styles.metrics}>
++          <Metric value={rhythm.counts.done} label="Done" symbol="check" color={accentText} />
++          <Metric value={rhythm.counts.minimum} label="Minimum" symbol="minimum" color={accentText} />
++          <Metric value={rhythm.counts.frozen} label="Frozen" symbol="freeze" color={FREEZE_COLOR} />
++        </View>
++        <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>One state per day. A full version replaces a minimum; it never counts twice.</Text>
++        {chain.cadence === 'weekly' && rhythm.counts.frozen > 0 && <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>Saved Freeze entries remain in your history. They do not count toward a weekly goal.</Text>}
++      </Surface>
++
++      <Consistency rhythm={rhythm} accent={accent} chain={chain} referenceDate={referenceDate} />
++      <CheckInTimes rhythm={rhythm} accent={accent} />
++
++      <Surface style={styles.section}>
++        <Text accessibilityRole="header" style={[TYPE.sectionTitle, { color: colors.foreground }]}>Focus</Text>
++        {focusState === 'loading' ? <View accessibilityLiveRegion="polite" style={styles.loadingRow}>
++          <ActivityIndicator color={accentText} size="small" />
++          <Text style={[TYPE.body, styles.flexText, { color: colors.mutedForeground }]}>Loading saved sessions…</Text>
++        </View> : focusState === 'error' ? <View style={styles.emptyBlock}>
++          <Text accessibilityRole="alert" style={[TYPE.bodyStrong, { color: colors.foreground }]}>Focus history could not be loaded</Text>
++          <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>Your saved history has not been replaced. Try loading it again.</Text>
++          <AppButton label="Try again" variant="secondary" onPress={() => setRetry((value) => value + 1)} />
++        </View> : <>
++          <View style={styles.rateRow}>
++            <Text style={[TYPE.display, { color: accentText }]}>{minutesLabel(rhythm.focus.minutes)}</Text>
++            <Text style={[TYPE.body, styles.flexText, { color: colors.mutedForeground }]}>{rhythm.focus.minutes > 0 && rhythm.focus.minutes <= 1 ? 'minute logged' : 'minutes logged'}</Text>
++          </View>
++          <Text style={[TYPE.body, { color: colors.foreground }]}>{countLabel(rhythm.focus.sessions, 'recorded session')} linked to this chain.</Text>
++          <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>These are recorded timer sessions, not a measure of productivity or a guarantee of uninterrupted attention.</Text>
++          {rhythm.focus.legacySessions > 0 && <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>{countLabel(rhythm.focus.legacySessions, 'older entry', 'older entries')} cannot distinguish a planned duration from timer activity and are excluded from these totals.</Text>}
++          {rhythm.focus.sessions === 0 && <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>Use a Focus timer linked to this chain to build this history.</Text>}
++          <Text style={[TYPE.caption, { color: colors.mutedForeground }]}>Totals use the history still saved on this device. Earlier versions may not have retained every older session.</Text>
++        </>}
++      </Surface>
++      <Text style={[TYPE.caption, styles.footnote, { color: colors.mutedForeground }]}>Saved on this device. The period follows local calendar dates; check-in times use the local time saved with each new entry.</Text>
++    </ScrollView>}
++  </AmbientScreen>;
++}
++
++const styles = StyleSheet.create({
++  navigation: { paddingHorizontal: SPACE.sm, paddingBottom: SPACE.xxs },
++  backButton: { minHeight: CONTROL.minimumTarget, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: SPACE.xxs, paddingRight: SPACE.sm },
++  content: { paddingHorizontal: CONTROL.screenHorizontal, paddingTop: SPACE.sm, gap: SPACE.md },
++  titleBlock: { gap: SPACE.xs, paddingBottom: SPACE.xs },
++  periods: { flexDirection: 'row', padding: SPACE.xxs, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control },
++  period: { flex: 1, minHeight: CONTROL.minimumTarget, paddingHorizontal: SPACE.xxs, paddingVertical: SPACE.xs, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
++  section: { padding: SPACE.lg, gap: SPACE.sm },
++  metrics: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.sm, paddingVertical: SPACE.xs },
++  metric: { minWidth: 72, flexBasis: '28%', flexGrow: 1, gap: SPACE.xxs },
++  rateRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: SPACE.sm },
++  flexText: { flex: 1, minWidth: 110 },
++  inset: { padding: SPACE.sm, borderRadius: RADIUS.compact, gap: SPACE.xxs },
++  smallStats: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACE.sm },
++  barRow: { gap: SPACE.xs },
++  barHeading: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm },
++  barTrack: { height: 7, borderRadius: RADIUS.capsule, overflow: 'hidden' },
++  barFill: { height: '100%', borderRadius: RADIUS.capsule },
++  dividerBlock: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: SPACE.sm, gap: SPACE.xxs },
++  milestoneProgress: { gap: SPACE.xs, paddingVertical: SPACE.xs },
++  milestoneRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: SPACE.xs, paddingTop: SPACE.xs },
++  milestoneItem: { alignItems: 'center', minWidth: 40, gap: SPACE.xxs },
++  milestoneDot: { width: 30, height: 30, borderRadius: RADIUS.capsule, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
++  emptyBlock: { gap: SPACE.sm, paddingVertical: SPACE.xs },
++  loadingRow: { flexDirection: 'row', gap: SPACE.sm, alignItems: 'center', paddingVertical: SPACE.sm },
++  screenNotice: { flex: 1, justifyContent: 'center', padding: SPACE.xl, gap: SPACE.md },
++  footnote: { paddingHorizontal: SPACE.xxs },
++});
+--- a/artifacts/chain/app/settings.tsx
++++ b/artifacts/chain/app/settings.tsx
+@@ -85,7 +85,7 @@
+         <Text style={[TYPE.eyebrow, { color: accentText }]}>CHAIN</Text>
+         <Text style={[TYPE.screenTitle, { color: colors.foreground }]}>Settings</Text>
+       </View>
+-      <IconButton icon="close" label="Close settings" onPress={() => router.back()} />
++      <IconButton icon="chevron-back" label="Back from settings" onPress={() => router.back()} />
+     </View>
+ 
+     <ScrollView
+--- a/artifacts/chain/constants/colors.ts
++++ b/artifacts/chain/constants/colors.ts
+@@ -13,7 +13,22 @@
+   '#22D3EE', // cyan
+   '#EF4444', // red
+   '#4F46E5', // indigo
++  '#14B8A6', // teal
++  '#38BDF8', // sky
++  '#818CF8', // periwinkle
++  '#E879F9', // orchid
++  '#FB7185', // coral
++  '#A3E635', // spring
++  '#94A3B8', // slate
+ ];
++
++export const CHAIN_COLOR_NAMES: Record<string, string> = {
++  '#FF6B35': 'Orange', '#00C896': 'Emerald', '#A855F7': 'Violet', '#F43F5E': 'Rose',
++  '#F59E0B': 'Amber', '#3B82F6': 'Blue', '#FBBF24': 'Gold', '#84CC16': 'Lime',
++  '#22D3EE': 'Cyan', '#EF4444': 'Red', '#4F46E5': 'Indigo', '#14B8A6': 'Teal',
++  '#38BDF8': 'Sky', '#818CF8': 'Periwinkle', '#E879F9': 'Orchid', '#FB7185': 'Coral',
++  '#A3E635': 'Spring', '#94A3B8': 'Slate',
++};
+ 
+ const palette = {
+   text: '#F5F5F7',
+--- a/artifacts/chain/context/ChainsContext.tsx
++++ b/artifacts/chain/context/ChainsContext.tsx
+@@ -9,6 +9,7 @@
+   normalizeRestDayUpdate,
+   normalizeWeeklyTarget,
+   parseChains,
++  withChainScheduleRevision,
+   type Chain,
+   type DayStatus,
+ } from '@/domain/chains';
+@@ -47,7 +48,7 @@
+ const chainsRepository = createVersionedRepository<Chain[]>({
+   storage: AsyncStorage,
+   key: STORAGE_KEY,
+-  version: 3,
++  version: 4,
+   decode: decodeChains,
+   empty: () => [],
+ });
+@@ -59,6 +60,7 @@
+   const [isReady, setIsReady] = useState(false);
+   const chainsRef = useRef<Chain[]>([]);
+   const mutationRevisionRef = useRef(0);
++  const storageBlockedRef = useRef(true);
+ 
+   useEffect(() => {
+     let cancelled = false;
+@@ -81,6 +83,8 @@
+                 : 'Chains storage and backup could not be decoded',
+             ),
+           });
++          // Never replace an unreadable archive with the empty display state.
++          return;
+         }
+ 
+         // A valid empty v2 envelope is authoritative: it can mean the user
+@@ -108,6 +112,7 @@
+         }
+ 
+         if (!cancelled) {
++          storageBlockedRef.current = false;
+           chainsRef.current = next;
+           setChains(next);
+         }
+@@ -125,6 +130,7 @@
+   }, []);
+ 
+   async function persist(next: Chain[], operation: string): Promise<ChainMutationResult> {
++    if (storageBlockedRef.current) return { status: 'failed', error: new Error('Saved Chains are not ready for changes') };
+     const revision = ++mutationRevisionRef.current;
+     chainsRef.current = next;
+     setChains(next);
+@@ -149,7 +155,7 @@
+   }
+ 
+   function addChain(name: string, color: string, options?: { cadence?: Chain['cadence']; weeklyTarget?: number }) {
+-    const chain: Chain = {
++    const chain: Chain = withChainScheduleRevision({
+       id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+       name: name.trim(),
+       color,
+@@ -165,7 +171,8 @@
+       cadence: options?.cadence === 'weekly' ? 'weekly' : 'daily',
+       weeklyTarget: normalizeWeeklyTarget(options?.weeklyTarget),
+       completionTimes: {},
+-    };
++      checkIns: {},
++    });
+     return persist([...chainsRef.current, chain], 'chains.add');
+   }
+ 
+@@ -184,19 +191,19 @@
+     const normalizedDays = normalizeRestDayUpdate(restDays);
+     if (normalizedDays === null) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
+     return persist(
+-      chainsRef.current.map((chain) => (chain.id === id ? { ...chain, restDays: normalizedDays } : chain)),
++      chainsRef.current.map((chain) => (chain.id === id ? withChainScheduleRevision({ ...chain, restDays: normalizedDays }) : chain)),
+       'chains.updateRestDays',
+     );
+   }
+ 
+   function updateChainCadence(id: string, cadence: Chain['cadence'], weeklyTarget?: number) {
+     if (!chainsRef.current.some((chain) => chain.id === id)) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
+-    return persist(chainsRef.current.map((chain) => chain.id === id ? {
++    return persist(chainsRef.current.map((chain) => chain.id === id ? withChainScheduleRevision({
+       ...chain,
+       cadence,
+       weeklyTarget: normalizeWeeklyTarget(weeklyTarget ?? chain.weeklyTarget),
+       restDays: cadence === 'weekly' ? [] : chain.restDays,
+-    } : chain), 'chains.updateCadence');
++    }) : chain), 'chains.updateCadence');
+   }
+ 
+   function updateChainMinimumLabel(id: string, label: string) {
+--- a/artifacts/chain/context/PlanContext.tsx
++++ b/artifacts/chain/context/PlanContext.tsx
+@@ -5,15 +5,13 @@
+   getPlanTodayKey,
+   getPlanTomorrowKey,
+   normalizeClosedDates,
+-  normalizeFocusLog,
+   type FocusLogEntry,
+   type PlanItem,
+   type PlanItemOptions,
+ } from '@/domain/plan';
+-import { createPlanStore } from '@/lib/planRepository';
++import { planDataStore as planStore } from '@/lib/rhythmStorage';
+ import { reportDiagnostic } from '@/lib/diagnostics';
+-import { removeFocusSession } from '@/lib/focusSession';
+-import { cancelPlanReminder } from '@/lib/planNotifications';
++import { readFocusSession, removeFocusSession } from '@/lib/focusSession';
+ 
+ export type { FocusLogEntry, PlanItem, PlanItemOptions } from '@/domain/plan';
+ export { getPlanTodayKey, getPlanTomorrowKey } from '@/domain/plan';
+@@ -62,11 +60,6 @@
+ const CLOSED_DATES_KEY = '@chain_plan_closed_dates';
+ export const FOCUS_LOG_KEY = '@chain_focus_log';
+ 
+-const planStore = createPlanStore({
+-  storage: AsyncStorage,
+-  createId: () => `${Date.now()}${Math.random().toString(36).substring(2, 9)}`,
+-  cancelReminder: cancelPlanReminder,
+-});
+ const getPlanRepository = planStore.forDate;
+ 
+ const readPlan = (date: string) => getPlanRepository(date).read();
+@@ -91,7 +84,6 @@
+   const activeDateRef = useRef(activeDate);
+   const visibleRevisionRef = useRef(0);
+   const navigationRequestRef = useRef(0);
+-  const focusLogWriteQueue = useRef<Promise<void>>(Promise.resolve());
+ 
+   const readItemsForDate = useCallback(async (date: string): Promise<PlanItem[]> => {
+     try {
+@@ -349,23 +341,6 @@
+     setClosedDateKeys(next);
+   }
+ 
+-  function recordFocus(item: PlanItem, completedAt: string, actualMinutes = item.durationMinutes) {
+-    if (!item.chainId || !item.durationMinutes) return Promise.resolve();
+-    const operation = focusLogWriteQueue.current
+-      .catch(() => undefined)
+-      .then(async () => {
+-        const raw = await AsyncStorage.getItem(FOCUS_LOG_KEY);
+-        const existing = normalizeFocusLog(raw).filter((entry) => entry.itemId !== item.id);
+-        const next = [...existing, { itemId: item.id, chainId: item.chainId!, date: item.planDate, minutes: Math.max(1, actualMinutes || item.durationMinutes!), completedAt }];
+-        await AsyncStorage.setItem(FOCUS_LOG_KEY, JSON.stringify(next.slice(-500)));
+-      });
+-    focusLogWriteQueue.current = operation.then(() => undefined, () => undefined);
+-    void operation.catch((error) => {
+-      reportDiagnostic({ area: 'storage', operation: 'focusLog.persist', severity: 'error', error });
+-    });
+-    return operation;
+-  }
+-
+   function addItem(options: PlanItemOptions) {
+     const date = activeDateRef.current;
+     const item: PlanItem = {
+@@ -463,48 +438,16 @@
+ 
+   async function completeFocusItem(id: string, actualMinutes: number, requestedDate?: string): Promise<PlanItem | undefined> {
+     const date = requestedDate ?? activeDateRef.current;
+-    if (date !== getPlanTodayKey() || closedDateKeys.includes(date)) return undefined;
++    if (date > getPlanTodayKey() || closedDateKeys.includes(date)) return undefined;
+     const revisionAtStart = visibleRevisionRef.current;
+-    let completed: PlanItem | undefined;
+-    let completionMutation: PlanMutation = (current) => current;
+-    const next = await getPlanRepository(date).update(async (current) => {
+-      const item = current.find((entry) => entry.id === id);
+-      if (!item) return current;
+-      if (item.notificationId) {
+-        try {
+-          // Focus can finish before a later start reminder fires. Do not make
+-          // completion durable unless that future interruption is cancelled.
+-          await cancelPlanReminder(item.notificationId);
+-        } catch (error) {
+-          reportDiagnostic({ area: 'notifications', operation: 'focusCompletion.cancelReminder', severity: 'error', error });
+-          throw error;
+-        }
+-      }
+-      const completedAt = new Date().toISOString();
+-      completed = {
+-        ...item,
+-        completed: true,
+-        completedAt,
+-        reminderMinutes: undefined,
+-        notificationId: undefined,
+-      };
+-      // Write the replaceable log before task completion becomes durable. If
+-      // this fails, repository.update aborts and the saved session can retry.
+-      await recordFocus(completed, completedAt, actualMinutes);
+-      completionMutation = (visible) => visible.map((entry) => (
+-        entry.id === id
+-          ? {
+-              ...entry,
+-              completed: true,
+-              completedAt,
+-              reminderMinutes: undefined,
+-              notificationId: undefined,
+-            }
+-          : entry
+-      ));
+-      return completionMutation(current);
+-    });
++    const savedSession = date < getPlanTodayKey() ? await readFocusSession(id) : undefined;
++    const next = await planStore.completeFocus(date, id, actualMinutes, new Date().toISOString(), savedSession);
++    const completed = next.find((item) => item.id === id && item.completed);
+     if (!completed) return undefined;
++    const completionMutation: PlanMutation = (current) => current.map((item) => item.id === id ? {
++      ...item, completed: true, completedAt: completed.completedAt,
++      reminderMinutes: undefined, notificationId: undefined,
++    } : item);
+     reconcileVisibleMutation(date, next, completionMutation, revisionAtStart);
+     return completed;
+   }
+--- a/artifacts/chain/domain/chains.ts
++++ b/artifacts/chain/domain/chains.ts
+@@ -1,5 +1,21 @@
+ export const MAX_FREEZE_CREDITS = 2;
+ export const COMPLETIONS_PER_FREEZE = 14;
++
++/** Time of the latest saved check-in, never an inferred time of doing the habit. */
++export interface ChainCheckIn {
++  status: 'done' | 'minimum';
++  recordedAt: string;
++  /** JavaScript getTimezoneOffset convention: UTC minus local time, in minutes. */
++  timezoneOffsetMinutes: number;
++  retrospective: boolean;
++}
++
++export interface ChainScheduleRevision {
++  fromDate: string;
++  cadence: 'daily' | 'weekly';
++  weeklyTarget: number;
++  restDays: number[];
++}
+ 
+ export interface Chain {
+   id: string;
+@@ -19,6 +35,10 @@
+   cadence: 'daily' | 'weekly';
+   weeklyTarget: number;
+   completionTimes: Record<string, string>;
++  /** Missing on older records: do not manufacture local times during migration. */
++  checkIns?: Record<string, ChainCheckIn>;
++  /** Settings known from this date forward. Earlier settings may be unknown. */
++  scheduleHistory?: ChainScheduleRevision[];
+ }
+ 
+ export type DayStatus = 'done' | 'minimum' | 'frozen' | 'missed';
+@@ -224,7 +244,45 @@
+             ),
+           )
+         : {},
++    ...(raw.checkIns ? { checkIns: normalizeCheckIns(raw.checkIns, completedDates, minimumDates) } : {}),
++    ...(raw.scheduleHistory ? { scheduleHistory: normalizeScheduleHistory(raw.scheduleHistory) } : {}),
+   };
++}
++
++function normalizeCheckIns(value: unknown, completed: string[], minimum: string[]): Record<string, ChainCheckIn> {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
++  return Object.fromEntries(Object.entries(value).flatMap(([date, candidate]) => {
++    if (!isDateKey(date) || !candidate || typeof candidate !== 'object') return [];
++    const entry = candidate as Partial<ChainCheckIn>;
++    if ((entry.status !== 'done' && entry.status !== 'minimum')
++      || !(entry.status === 'done' ? completed : minimum).includes(date)
++      || typeof entry.recordedAt !== 'string' || !Number.isFinite(Date.parse(entry.recordedAt))
++      || !Number.isInteger(entry.timezoneOffsetMinutes) || Math.abs(entry.timezoneOffsetMinutes!) > 840
++      || typeof entry.retrospective !== 'boolean') return [];
++    // Recompute this flag from the stored instant and offset, never today's zone.
++    const localDate = new Date(Date.parse(entry.recordedAt) - entry.timezoneOffsetMinutes! * 60_000).toISOString().slice(0, 10);
++    return [[date, { status: entry.status, recordedAt: entry.recordedAt, timezoneOffsetMinutes: entry.timezoneOffsetMinutes!, retrospective: localDate !== date }]];
++  }));
++}
++
++function normalizeScheduleHistory(value: unknown): ChainScheduleRevision[] {
++  if (!Array.isArray(value)) return [];
++  const revisions = new Map<string, ChainScheduleRevision>();
++  for (const candidate of value) {
++    if (!candidate || typeof candidate !== 'object' || !isDateKey(candidate.fromDate)
++      || (candidate.cadence !== 'daily' && candidate.cadence !== 'weekly')) continue;
++    revisions.set(candidate.fromDate, {
++      fromDate: candidate.fromDate, cadence: candidate.cadence,
++      weeklyTarget: normalizeWeeklyTarget(candidate.weeklyTarget), restDays: normalizeRestDays(candidate.restDays),
++    });
++  }
++  return [...revisions.values()].sort((a, b) => a.fromDate.localeCompare(b.fromDate));
++}
++
++/** Record only settings that are known now; do not backfill an unknown past. */
++export function withChainScheduleRevision(chain: Chain, date = getTodayStr()): Chain {
++  const revision: ChainScheduleRevision = { fromDate: date, cadence: chain.cadence, weeklyTarget: chain.weeklyTarget, restDays: [...chain.restDays] };
++  return { ...chain, scheduleHistory: normalizeScheduleHistory([...(chain.scheduleHistory ?? []).filter((entry) => entry.fromDate < date), revision]) };
+ }
+ 
+ export function decodeChains(value: unknown): Chain[] | null {
+@@ -303,6 +361,7 @@
+   date: string,
+   status: DayStatus,
+   completedAt = new Date().toISOString(),
++  timezoneOffsetMinutes = new Date(completedAt).getTimezoneOffset(),
+ ): DayStatusResult {
+   if (!isDateKey(date)) return { accepted: false, changed: false, chain };
+ 
+@@ -324,6 +383,7 @@
+   const minimumDates = chain.minimumDates.filter((day) => day !== date);
+   const frozenDates = chain.frozenDates.filter((day) => day !== date);
+   const completionTimes = { ...chain.completionTimes };
++  const checkIns = { ...chain.checkIns };
+   let freezeCredits = chain.freezeCredits;
+   let freezeRecoveryProgress = chain.freezeRecoveryProgress;
+   const freezeRecoveryCountedDates = new Set([
+@@ -350,6 +410,14 @@
+     delete completionTimes[date];
+   }
+ 
++  if ((status === 'done' || status === 'minimum') && Number.isFinite(Date.parse(completedAt))
++    && Number.isInteger(timezoneOffsetMinutes) && Math.abs(timezoneOffsetMinutes) <= 840) {
++    const localDate = new Date(Date.parse(completedAt) - timezoneOffsetMinutes * 60_000).toISOString().slice(0, 10);
++    checkIns[date] = { status, recordedAt: completedAt, timezoneOffsetMinutes, retrospective: localDate !== date };
++  } else {
++    delete checkIns[date];
++  }
++
+   if (status === 'frozen') {
+     frozenDates.push(date);
+     if (!wasFrozen) {
+@@ -370,6 +438,7 @@
+       minimumDates,
+       frozenDates,
+       completionTimes,
++      checkIns,
+       freezeCredits,
+       freezeRecoveryProgress,
+       freezeRecoveryCountedDates: Array.from(freezeRecoveryCountedDates),
+--- /dev/null
++++ b/artifacts/chain/domain/gateStats.ts
+@@ -0,0 +1,106 @@
++export const GATE_RETENTION_DAYS = 90;
++export const GATE_DAY_MS = 86_400_000;
++export type GatePeriod = 7 | 28 | 90;
++export type GateChoice = 'leave' | 'continue';
++
++// Only this app's interactive preview is instrumented. Route parameters and
++// AppState cannot promote a preview to a verified cross-app observation.
++export type GateEvent =
++  | { id: string; kind: 'attempt'; attemptId: string; at: number; appId: string; source: 'preview'; windowId?: string }
++  | { id: string; kind: 'decision'; attemptId: string; at: number; choice: GateChoice; source: 'preview' }
++  | { id: string; kind: 'legacy'; at: number; appId: string; source: 'unverified'; reportedSource?: 'native' | 'preview'; reportedOutcome?: 'saved' | 'opened'; windowId?: string };
++
++export interface GateEventStore { legacyImported: boolean; events: GateEvent[] }
++export const emptyGateEventStore = (): GateEventStore => ({ legacyImported: false, events: [] });
++const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
++const id = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 240;
++const timestamp = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
++
++function decodeEvent(value: unknown): GateEvent | null {
++  if (!record(value) || !id(value.id) || !timestamp(value.at)) return null;
++  if (value.kind === 'attempt' && value.source === 'preview' && id(value.attemptId) && id(value.appId) && (value.windowId === undefined || id(value.windowId))) {
++    return { id: value.id, kind: 'attempt', attemptId: value.attemptId, at: value.at, appId: value.appId, source: 'preview', ...(value.windowId ? { windowId: value.windowId as string } : {}) };
++  }
++  if (value.kind === 'decision' && value.source === 'preview' && id(value.attemptId) && (value.choice === 'leave' || value.choice === 'continue')) {
++    return { id: value.id, kind: 'decision', attemptId: value.attemptId, at: value.at, choice: value.choice, source: 'preview' };
++  }
++  if (value.kind === 'legacy' && value.source === 'unverified' && id(value.appId) && (value.windowId === undefined || id(value.windowId)) && (value.reportedSource === undefined || value.reportedSource === 'native' || value.reportedSource === 'preview') && (value.reportedOutcome === undefined || value.reportedOutcome === 'saved' || value.reportedOutcome === 'opened')) {
++    return { id: value.id, kind: 'legacy', at: value.at, appId: value.appId, source: 'unverified', ...(value.reportedSource ? { reportedSource: value.reportedSource } : {}), ...(value.reportedOutcome ? { reportedOutcome: value.reportedOutcome } : {}), ...(value.windowId ? { windowId: value.windowId as string } : {}) };
++  }
++  return null;
++}
++
++export function decodeGateEventStore(value: unknown): GateEventStore | null {
++  if (!record(value) || typeof value.legacyImported !== 'boolean' || !Array.isArray(value.events)) return null;
++  const events: GateEvent[] = [];
++  const eventIds = new Set<string>();
++  const attempts = new Map<string, Extract<GateEvent, { kind: 'attempt' }>>();
++  for (const candidate of value.events) {
++    const event = decodeEvent(candidate);
++    if (!event || eventIds.has(event.id)) return null;
++    eventIds.add(event.id);
++    if (event.kind === 'attempt') {
++      if (attempts.has(event.attemptId)) return null;
++      attempts.set(event.attemptId, event);
++    }
++    events.push(event);
++  }
++  const decided = new Set<string>();
++  for (const event of events) {
++    if (event.kind !== 'decision') continue;
++    const attempt = attempts.get(event.attemptId);
++    if (!attempt || event.at < attempt.at || decided.has(event.attemptId)) return null;
++    decided.add(event.attemptId);
++  }
++  return { legacyImported: value.legacyImported, events };
++}
++
++export function migrateLegacyGateEvents(value: unknown): GateEvent[] | null {
++  if (!Array.isArray(value)) return null;
++  const events: GateEvent[] = [];
++  for (const [index, item] of value.entries()) {
++    if (!record(item) || !id(item.appId) || !timestamp(item.at) || (item.outcome !== undefined && item.outcome !== 'saved' && item.outcome !== 'opened') || (item.source !== undefined && item.source !== 'native' && item.source !== 'preview') || (item.windowId !== undefined && !id(item.windowId))) return null;
++    events.push({ id: `legacy-${index}-${item.at}`, kind: 'legacy', at: item.at, appId: item.appId, source: 'unverified', ...(item.source ? { reportedSource: item.source } : {}), ...(item.outcome ? { reportedOutcome: item.outcome } : {}), ...(item.windowId ? { windowId: item.windowId as string } : {}) });
++  }
++  return events;
++}
++
++/** Retention is enforced on new writes. A read never erases old history. */
++export function retainGateEvents(events: GateEvent[], now: number): GateEvent[] {
++  const cutoff = now - GATE_RETENTION_DAYS * GATE_DAY_MS;
++  const retainedAttempts = new Set(events.filter((event) => event.kind === 'attempt' && event.at >= cutoff).map((event) => event.kind === 'attempt' ? event.attemptId : ''));
++  return events.filter((event) => event.kind === 'decision' ? retainedAttempts.has(event.attemptId) : event.at >= cutoff);
++}
++
++export interface GateSummary {
++  attempts: number; leave: number; continued: number; pending: number;
++  knownDecisions: number; leaveRate: number | null; unverified: number;
++  observedOutcomes: number; outcomeStatus: 'unavailable';
++  byApp: { appId: string; attempts: number; leave: number; continued: number; pending: number }[];
++}
++
++export function summarizeGateEvents(events: GateEvent[], period: GatePeriod, now = Date.now()): GateSummary {
++  const cutoff = now - period * GATE_DAY_MS;
++  const attempts = events.filter((event): event is Extract<GateEvent, { kind: 'attempt' }> => event.kind === 'attempt' && event.at >= cutoff && event.at <= now);
++  const decisions = new Map(events.filter((event): event is Extract<GateEvent, { kind: 'decision' }> => event.kind === 'decision' && event.at <= now).map((event) => [event.attemptId, event]));
++  const byApp = new Map<string, GateSummary['byApp'][number]>();
++  let leave = 0;
++  let continued = 0;
++  for (const attempt of attempts) {
++    const app = byApp.get(attempt.appId) ?? { appId: attempt.appId, attempts: 0, leave: 0, continued: 0, pending: 0 };
++    app.attempts += 1;
++    const choice = decisions.get(attempt.attemptId)?.choice;
++    if (choice === 'leave') { leave += 1; app.leave += 1; }
++    else if (choice === 'continue') { continued += 1; app.continued += 1; }
++    else app.pending += 1;
++    byApp.set(attempt.appId, app);
++  }
++  const knownDecisions = leave + continued;
++  return {
++    attempts: attempts.length, leave, continued, pending: attempts.length - knownDecisions,
++    knownDecisions, leaveRate: knownDecisions ? leave / knownDecisions : null,
++    unverified: events.filter((event) => event.kind === 'legacy' && event.at >= cutoff && event.at <= now).length,
++    observedOutcomes: 0, outcomeStatus: 'unavailable',
++    byApp: [...byApp.values()].sort((a, b) => b.attempts - a.attempts || a.appId.localeCompare(b.appId)),
++  };
++}
+--- a/artifacts/chain/domain/plan.ts
++++ b/artifacts/chain/domain/plan.ts
+@@ -35,8 +35,36 @@
+   itemId: string;
+   chainId: string;
+   date: string;
++  /** Original task date when the measured session finishes on another day. */
++  planDate?: string;
+   minutes: number;
+   completedAt: string;
++  /** Legacy entries cannot certify whether their minutes were timed or planned. */
++  source?: 'timer' | 'legacy-unknown';
++}
++
++export function focusLogOccurrenceKey(entry: Pick<FocusLogEntry, 'itemId' | 'date' | 'planDate'>): string {
++  return `${entry.itemId}\u0000${entry.planDate ?? entry.date}`;
++}
++
++export function decodeFocusLog(value: unknown): FocusLogEntry[] | null {
++  if (!Array.isArray(value)) return null;
++  const entries: FocusLogEntry[] = [];
++  const seen = new Set<string>();
++  for (const entry of value) {
++    if (!entry || typeof entry !== 'object' || typeof entry.itemId !== 'string' || !entry.itemId
++      || typeof entry.chainId !== 'string' || typeof entry.date !== 'string' || !isPlanDateKey(entry.date)
++      || typeof entry.minutes !== 'number' || !Number.isFinite(entry.minutes) || entry.minutes <= 0
++      || typeof entry.completedAt !== 'string' || !Number.isFinite(Date.parse(entry.completedAt))
++      || (entry.planDate !== undefined && (typeof entry.planDate !== 'string' || !isPlanDateKey(entry.planDate)))
++      || (entry.source !== undefined && entry.source !== 'timer' && entry.source !== 'legacy-unknown')) return null;
++    const key = focusLogOccurrenceKey(entry);
++    if (seen.has(key)) return null;
++    seen.add(key);
++    entries.push({ itemId: entry.itemId, chainId: entry.chainId, date: entry.date, minutes: entry.minutes,
++      completedAt: entry.completedAt, ...(entry.planDate ? { planDate: entry.planDate } : {}), ...(entry.source ? { source: entry.source } : {}) });
++  }
++  return entries;
+ }
+ 
+ export interface MorningBriefingTime {
+@@ -246,6 +274,8 @@
+   migrated: boolean;
+   days: Record<string, PlanItem[]>;
+   repeatRules: Record<string, PlanRepeatRule>;
++  /** Immutable measured focus history, saved atomically with task completion. */
++  focusLog?: FocusLogEntry[];
+ }
+ 
+ export const emptyPlanStorage = (): PlanStorageState => ({ migrated: false, days: {}, repeatRules: {} });
+@@ -305,7 +335,9 @@
+       excludedDates: [...new Set(raw.excludedDates)],
+     };
+   }
+-  return { migrated: state.migrated, days, repeatRules };
++  const focusLog = state.focusLog === undefined ? undefined : decodeFocusLog(state.focusLog);
++  if (focusLog === null) return null;
++  return { migrated: state.migrated, days, repeatRules, ...(focusLog ? { focusLog } : {}) };
+ }
+ 
+ /** Adds a missing occurrence once; a deleted occurrence is remembered independently of the day list. */
+--- /dev/null
++++ b/artifacts/chain/domain/rhythm.ts
+@@ -0,0 +1,185 @@
++import { getTodayStr, isDateKey, type Chain, type ChainScheduleRevision } from './chains.ts';
++import { focusLogOccurrenceKey, type FocusLogEntry } from './plan.ts';
++
++export type RhythmPeriod = 7 | 28 | 90;
++export type RhythmDayStatus = 'done' | 'minimum' | 'frozen' | 'rest' | 'missed' | 'open' | 'unlogged';
++export interface RhythmReport {
++  periodDays: RhythmPeriod;
++  startDate: string;
++  endDate: string;
++  counts: Record<'done' | 'minimum' | 'frozen' | 'rest' | 'missed' | 'open', number>;
++  days: { date: string; status: RhythmDayStatus }[];
++  adherence: { unit: 'days' | 'weeks'; numerator: number; denominator: number; rate: number | null };
++  comparison: { previousRate: number; changePoints: number } | null;
++  weekly: { currentProgress: number; currentTarget: number; closedWeeks: number; metWeeks: number } | null;
++  scheduleAssumption: boolean;
++  scheduleChanged: boolean;
++  checkIns: {
++    sampleCount: number;
++    missingCount: number;
++    retrospectiveCount: number;
++    buckets: { key: string; label: string; count: number }[];
++    mostCommonLabel: string | null;
++  };
++  focus: { minutes: number; sessions: number; legacySessions: number };
++}
++
++function shift(date: string, days: number): string {
++  const value = new Date(`${date}T12:00:00Z`);
++  value.setUTCDate(value.getUTCDate() + days);
++  return value.toISOString().slice(0, 10);
++}
++function weekday(date: string): number { return new Date(`${date}T12:00:00Z`).getUTCDay(); }
++function monday(date: string): string { return shift(date, -((weekday(date) + 6) % 7)); }
++function datesBetween(start: string, end: string): string[] {
++  const result: string[] = [];
++  for (let date = start; date <= end && result.length < 400; date = shift(date, 1)) result.push(date);
++  return result;
++}
++function rate(numerator: number, denominator: number): number | null {
++  return denominator ? Math.round(1000 * numerator / denominator) / 10 : null;
++}
++function signature(rule: Pick<ChainScheduleRevision, 'cadence' | 'weeklyTarget' | 'restDays'>): string {
++  return rule.cadence === 'weekly' ? `weekly:${rule.weeklyTarget}` : `daily:${[...rule.restDays].sort().join(',')}`;
++}
++function schedule(chain: Chain, date: string): { rule: ChainScheduleRevision; known: boolean } {
++  const revisions = [...(chain.scheduleHistory ?? [])].sort((a, b) => a.fromDate.localeCompare(b.fromDate));
++  const revision = revisions.filter((candidate) => candidate.fromDate <= date).at(-1);
++  return { rule: revision ?? { fromDate: chain.createdAt, cadence: chain.cadence, weeklyTarget: chain.weeklyTarget, restDays: chain.restDays }, known: !!revision };
++}
++function logged(chain: Chain, date: string): boolean {
++  return chain.completedDates.includes(date) || chain.minimumDates.includes(date);
++}
++function closedWeeks(chain: Chain, start: string, end: string, today: string): { start: string; met: boolean }[] {
++  const weeks: { start: string; met: boolean }[] = [];
++  let first = monday(start);
++  if (first < start) first = shift(first, 7);
++  for (let week = first; shift(week, 6) <= end && shift(week, 6) < today; week = shift(week, 7)) {
++    if (week < chain.createdAt) continue;
++    const days = datesBetween(week, shift(week, 6));
++    const rule = schedule(chain, week).rule;
++    // A changed target/cadence partway through a week has no single fair target.
++    if (rule.cadence !== 'weekly' || days.some((date) => signature(schedule(chain, date).rule) !== signature(rule))) continue;
++    weeks.push({ start: week, met: days.filter((date) => logged(chain, date)).length >= rule.weeklyTarget });
++  }
++  return weeks;
++}
++
++/** Pure, calendar-key based selector: never derives measured activity from plans. */
++export function buildChainRhythm(chain: Chain, {
++  periodDays = 28,
++  referenceDate = getTodayStr(),
++  focusLog = [],
++}: { periodDays?: RhythmPeriod; referenceDate?: string; focusLog?: readonly FocusLogEntry[] } = {}): RhythmReport {
++  if (![7, 28, 90].includes(periodDays) || !isDateKey(referenceDate)) throw new Error('Invalid Rhythm period');
++  const startDate = shift(referenceDate, 1 - periodDays);
++  const start = chain.createdAt > startDate ? chain.createdAt : startDate;
++  const activeDates = datesBetween(start, referenceDate);
++  const counts: RhythmReport['counts'] = { done: 0, minimum: 0, frozen: 0, rest: 0, missed: 0, open: 0 };
++  const scheduleAssumption = activeDates.some((date) => !schedule(chain, date).known);
++  const scheduleChanged = new Set(activeDates.map((date) => signature(schedule(chain, date).rule))).size > 1;
++  const days: RhythmReport['days'] = activeDates.map((date) => {
++    const rule = schedule(chain, date).rule;
++    let status: RhythmDayStatus;
++    // Logged activity remains real even if it was done on a scheduled rest day.
++    if (chain.completedDates.includes(date)) status = 'done';
++    else if (chain.minimumDates.includes(date)) status = 'minimum';
++    else if (chain.frozenDates.includes(date)) status = 'frozen';
++    else if (rule.cadence === 'daily' && rule.restDays.includes(weekday(date))) status = 'rest';
++    else if (date === referenceDate) status = 'open';
++    else status = rule.cadence === 'weekly' ? 'unlogged' : 'missed';
++    if (status !== 'unlogged') counts[status] += 1;
++    return { date, status };
++  });
++
++  const closed = activeDates.filter((date) => date < referenceDate);
++  const due = closed.filter((date) => {
++    const rule = schedule(chain, date).rule;
++    return rule.cadence === 'daily' && !rule.restDays.includes(weekday(date));
++  });
++  const weeks = closedWeeks(chain, start, referenceDate, referenceDate);
++  const numerator = chain.cadence === 'weekly' ? weeks.filter((week) => week.met).length : due.filter((date) => logged(chain, date)).length;
++  const denominator = chain.cadence === 'weekly' ? weeks.length : due.length;
++  const currentRate = scheduleChanged ? null : rate(numerator, denominator);
++  const adherence: RhythmReport['adherence'] = { unit: chain.cadence === 'weekly' ? 'weeks' : 'days', numerator, denominator, rate: currentRate };
++  let comparison: RhythmReport['comparison'] = null;
++  if (currentRate !== null && !scheduleAssumption && !scheduleChanged) {
++    let previousNumerator = 0;
++    let previousDenominator = 0;
++    let previousDates: string[] = [];
++    if (chain.cadence === 'weekly' && weeks.length >= 2) {
++      const previousStart = shift(weeks[0].start, -7 * weeks.length);
++      const previousEnd = shift(weeks[0].start, -1);
++      const priorWeeks = closedWeeks(chain, previousStart, previousEnd, referenceDate);
++      if (priorWeeks.length === weeks.length) {
++        previousNumerator = priorWeeks.filter((week) => week.met).length;
++        previousDenominator = priorWeeks.length;
++        previousDates = datesBetween(previousStart, previousEnd);
++      }
++    } else if (chain.cadence === 'daily' && due.length >= 5 && closed.length >= 5) {
++      const previousEnd = shift(closed[0], -1);
++      const previousStart = shift(previousEnd, 1 - closed.length);
++      if (previousStart >= chain.createdAt) {
++        previousDates = datesBetween(previousStart, previousEnd);
++        const priorDue = previousDates.filter((date) => !schedule(chain, date).rule.restDays.includes(weekday(date)));
++        if (priorDue.length >= 5) {
++          previousNumerator = priorDue.filter((date) => logged(chain, date)).length;
++          previousDenominator = priorDue.length;
++        }
++      }
++    }
++    const comparable = previousDates.length > 0 && previousDates.every((date) => {
++      const entry = schedule(chain, date);
++      return entry.known && signature(entry.rule) === signature(schedule(chain, referenceDate).rule);
++    });
++    const previousRate = comparable ? rate(previousNumerator, previousDenominator) : null;
++    if (previousRate !== null) comparison = { previousRate, changePoints: Math.round((currentRate - previousRate) * 10) / 10 };
++  }
++
++  const buckets = [
++    { key: 'morning', label: 'Morning · 6–12', count: 0 },
++    { key: 'afternoon', label: 'Afternoon · 12–18', count: 0 },
++    { key: 'evening', label: 'Evening · 18–24', count: 0 },
++    { key: 'night', label: 'Night · 0–6', count: 0 },
++  ];
++  let sampleCount = 0;
++  let missingCount = 0;
++  let retrospectiveCount = 0;
++  for (const date of activeDates.filter((value) => logged(chain, value))) {
++    const entry = chain.checkIns?.[date];
++    if (!entry || !Number.isFinite(Date.parse(entry.recordedAt)) || !Number.isInteger(entry.timezoneOffsetMinutes)
++      || Math.abs(entry.timezoneOffsetMinutes) > 840 || entry.status !== (chain.completedDates.includes(date) ? 'done' : 'minimum')) {
++      missingCount += 1;
++      continue;
++    }
++    const local = new Date(Date.parse(entry.recordedAt) - entry.timezoneOffsetMinutes * 60_000);
++    if (entry.retrospective || local.toISOString().slice(0, 10) !== date) { retrospectiveCount += 1; continue; }
++    const hour = local.getUTCHours();
++    const key = hour < 6 ? 'night' : hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
++    buckets.find((bucket) => bucket.key === key)!.count += 1;
++    sampleCount += 1;
++  }
++  const max = Math.max(...buckets.map((bucket) => bucket.count));
++  const winners = buckets.filter((bucket) => bucket.count === max);
++  const mostCommonLabel = sampleCount >= 5 && winners.length === 1 ? winners[0].label : null;
++
++  const seen = new Set<string>();
++  const focus: RhythmReport['focus'] = { minutes: 0, sessions: 0, legacySessions: 0 };
++  for (const entry of [...focusLog].sort((a, b) => Number(b.source === 'timer') - Number(a.source === 'timer'))) {
++    if (entry.chainId !== chain.id || entry.date < start || entry.date > referenceDate
++      || !Number.isFinite(entry.minutes) || entry.minutes <= 0) continue;
++    const key = focusLogOccurrenceKey(entry);
++    if (seen.has(key)) continue;
++    seen.add(key);
++    if (entry.source === 'timer') { focus.minutes += entry.minutes; focus.sessions += 1; }
++    else focus.legacySessions += 1;
++  }
++  const currentWeekStart = monday(referenceDate);
++  const currentProgress = datesBetween(currentWeekStart > chain.createdAt ? currentWeekStart : chain.createdAt, referenceDate).filter((date) => logged(chain, date)).length;
++  return {
++    periodDays, startDate, endDate: referenceDate, counts, days, adherence, comparison,
++    weekly: chain.cadence === 'weekly' ? { currentProgress, currentTarget: chain.weeklyTarget, closedWeeks: weeks.length, metWeeks: weeks.filter((week) => week.met).length } : null,
++    scheduleAssumption, scheduleChanged,
++    checkIns: { sampleCount, missingCount, retrospectiveCount, buckets, mostCommonLabel }, focus,
++  };
++}
+--- /dev/null
++++ b/artifacts/chain/hooks/useLocalClock.ts
+@@ -0,0 +1,23 @@
++import { useEffect, useState } from 'react';
++import { AppState } from 'react-native';
++
++/** Local wall clock: refresh on minute boundaries and after returning from the background. */
++export function useLocalClock() {
++  const [now, setNow] = useState(() => new Date());
++  useEffect(() => {
++    let timer: ReturnType<typeof setTimeout>;
++    const refresh = () => {
++      clearTimeout(timer);
++      const current = new Date();
++      setNow(current);
++      timer = setTimeout(refresh, 60_000 - (current.getTime() % 60_000) + 25);
++    };
++    refresh();
++    const subscription = AppState.addEventListener('change', (state) => {
++      if (state === 'active') refresh();
++      else clearTimeout(timer);
++    });
++    return () => { clearTimeout(timer); subscription.remove(); };
++  }, []);
++  return now;
++}
+--- /dev/null
++++ b/artifacts/chain/lib/gateEventsRepository.ts
+@@ -0,0 +1,58 @@
++import { decodeGateEventStore, emptyGateEventStore, migrateLegacyGateEvents, retainGateEvents, type GateChoice, type GateEvent, type GateEventStore } from '../domain/gateStats.ts';
++import { createVersionedRepository, type KeyValueStorage } from './versionedRepository.ts';
++
++export const GATE_EVENTS_KEY = '@chain_gate_events_v4';
++export const LEGACY_GATE_EVENTS_KEY = '@chain_gate_save_events';
++
++export function createGateEventsRepository(storage: KeyValueStorage, now = Date.now) {
++  const repository = createVersionedRepository({ storage, key: GATE_EVENTS_KEY, version: 1, decode: decodeGateEventStore, empty: emptyGateEventStore });
++  let queue: Promise<void> = Promise.resolve();
++  function enqueue<T>(operation: () => Promise<T>): Promise<T> {
++    const result = queue.catch(() => undefined).then(operation);
++    queue = result.then(() => undefined, () => undefined);
++    return result;
++  }
++  async function load(): Promise<GateEventStore> {
++    const result = await repository.readWithMetadata();
++    if (result.source === 'unsupported' || result.source === 'invalid') throw new Error(`Gate history is ${result.source}; it was not overwritten.`);
++    if (result.value.legacyImported) return result.value;
++    const raw = await storage.getItem(LEGACY_GATE_EVENTS_KEY);
++    let legacy: GateEvent[] = [];
++    if (raw !== null) {
++      let parsed: unknown;
++      try { parsed = JSON.parse(raw); } catch { throw new Error('Previous Gate history could not be read; it was not overwritten.'); }
++      const decoded = migrateLegacyGateEvents(parsed);
++      if (decoded === null) throw new Error('Previous Gate history has an unsupported format; it was not overwritten.');
++      legacy = decoded;
++    }
++    const next = { legacyImported: true, events: [...legacy, ...result.value.events] };
++    await repository.write(next);
++    // Keep the old key byte-for-byte. Old "saved" markers are not verified use.
++    return next;
++  }
++  async function append(event: GateEvent): Promise<void> {
++    const current = await load();
++    const existing = current.events.find((item) => item.id === event.id);
++    if (existing) {
++      if (JSON.stringify(existing) !== JSON.stringify(event)) throw new Error('Conflicting Gate event ID.');
++      return;
++    }
++    if (event.at > now() + 60_000) throw new Error('Gate event time is in the future.');
++    const candidate = { ...current, events: [...current.events, event] };
++    if (!decodeGateEventStore(candidate)) throw new Error('Invalid Gate event sequence.');
++    await repository.write({ ...candidate, events: retainGateEvents(candidate.events, now()) });
++  }
++  return {
++    read: () => enqueue(load),
++    beginPreview: (attemptId: string, appId: string, at: number, windowId?: string) => enqueue(() => append({ id: `${attemptId}:shown`, kind: 'attempt', attemptId, at, appId, source: 'preview', ...(windowId ? { windowId } : {}) })),
++    decidePreview: (attemptId: string, choice: GateChoice, at: number) => enqueue(async () => {
++      const current = await load();
++      const existing = current.events.find((event) => event.kind === 'decision' && event.attemptId === attemptId);
++      if (existing?.kind === 'decision') {
++        if (existing.choice !== choice) throw new Error('This Gate already has a decision.');
++        return;
++      }
++      await append({ id: `${attemptId}:decision`, kind: 'decision', attemptId, at, choice, source: 'preview' });
++    }),
++  };
++}
+--- a/artifacts/chain/lib/gateStats.ts
++++ b/artifacts/chain/lib/gateStats.ts
+@@ -1,60 +1,34 @@
+ import AsyncStorage from '@react-native-async-storage/async-storage';
+-import { getGateWindowStatus, getGateWindows } from './gateWindows';
+-import { reportDiagnostic } from './diagnostics';
++import { createGateEventsRepository } from './gateEventsRepository';
++import { summarizeGateEvents, type GateChoice, type GatePeriod } from '../domain/gateStats';
+ 
+-const GATE_SAVE_EVENTS_KEY = '@chain_gate_save_events';
+-const DAY_MS = 24 * 60 * 60 * 1000;
++const repository = createGateEventsRepository(AsyncStorage);
++export type { GateSummary, GatePeriod } from '../domain/gateStats';
+ 
+-export type GateSaveEvent = {
+-  appId: string;
+-  at: number;
+-  windowId?: string;
+-  outcome?: 'saved' | 'opened';
+-  source?: 'native' | 'preview';
+-};
+-
+-function isNativeEvent(event: GateSaveEvent): boolean {
+-  // Events written before sources were introduced came from the interactive
+-  // preview. Excluding them prevents demo taps from becoming product metrics.
+-  return event.source === 'native';
++export const createGateAttemptId = () => `preview-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
++export const beginGatePreview = (attemptId: string, appId: string, at: number) => repository.beginPreview(attemptId, appId, at);
++export const recordGatePreviewDecision = (attemptId: string, choice: GateChoice, at = Date.now()) => repository.decidePreview(attemptId, choice, at);
++export async function getGateInsights(period: GatePeriod) {
++  return summarizeGateEvents((await repository.read()).events, period);
+ }
+ 
+-async function readRecentEvents(): Promise<GateSaveEvent[]> {
+-  try {
+-    const raw = await AsyncStorage.getItem(GATE_SAVE_EVENTS_KEY);
+-    const parsed: unknown = raw ? JSON.parse(raw) : [];
+-    const cutoff = Date.now() - DAY_MS;
+-    return Array.isArray(parsed)
+-      ? parsed.filter((entry): entry is GateSaveEvent => Boolean(entry) && typeof entry.appId === 'string' && typeof entry.at === 'number' && entry.at >= cutoff)
+-      : [];
+-  } catch (error) {
+-    reportDiagnostic({ area: 'gate', operation: 'stats.read', severity: 'error', error });
+-    return [];
+-  }
++// Compatibility: real outcomes are unavailable. Previews and legacy markers
++// cannot become verified saves merely by reading this API.
++export type GateSaveEvent = { appId: string; at: number; windowId?: string; outcome?: 'saved' | 'opened'; source?: 'native' | 'preview' };
++export async function getGateSaves24h(): Promise<GateSaveEvent[]> { await repository.read(); return []; }
++export async function getGateAttempts24h(): Promise<GateSaveEvent[]> { await repository.read(); return []; }
++
++/** Legacy demo entry points; always preview provenance. */
++export async function recordGateSave(appId: string): Promise<GateSaveEvent[]> {
++  const attemptId = createGateAttemptId();
++  const at = Date.now();
++  await beginGatePreview(attemptId, appId, at);
++  await recordGatePreviewDecision(attemptId, 'leave', at);
++  return [];
+ }
+-
+-export async function getGateSaves24h(): Promise<GateSaveEvent[]> {
+-  const events = await readRecentEvents();
+-  await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
+-  return events.filter((event) => isNativeEvent(event) && event.outcome !== 'opened');
++export async function recordGateOpenAnyway(appId: string): Promise<void> {
++  const attemptId = createGateAttemptId();
++  const at = Date.now();
++  await beginGatePreview(attemptId, appId, at);
++  await recordGatePreviewDecision(attemptId, 'continue', at);
+ }
+-
+-export async function getGateAttempts24h(): Promise<GateSaveEvent[]> {
+-  const events = await readRecentEvents();
+-  await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
+-  return events.filter(isNativeEvent);
+-}
+-
+-export async function recordGateSave(appId: string): Promise<GateSaveEvent[]> {
+-  const now = new Date();
+-  const windows = await getGateWindows();
+-  const activeWindow = windows.find((window) => window.appIds.includes(appId) && getGateWindowStatus(window, now).active);
+-  const events = [...await readRecentEvents(), { appId, at: now.getTime(), outcome: 'saved' as const, source: 'preview' as const, ...(activeWindow ? { windowId: activeWindow.id } : {}) }];
+-  await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
+-  return events.filter((event) => isNativeEvent(event) && event.outcome !== 'opened');
+-}
+-
+-export async function recordGateOpenAnyway(appId: string): Promise<void> {
+-  const events = [...await readRecentEvents(), { appId, at: Date.now(), outcome: 'opened' as const, source: 'preview' as const }];
+-  await AsyncStorage.setItem(GATE_SAVE_EVENTS_KEY, JSON.stringify(events));
+-}
+--- a/artifacts/chain/lib/planRepository.ts
++++ b/artifacts/chain/lib/planRepository.ts
+@@ -3,14 +3,17 @@
+   decodePlanStorage,
+   emptyPlanStorage,
+   getPlanTodayKey,
++  focusLogOccurrenceKey,
+   isPlanDateKey,
+   migratePlanRepeatRules,
+   resolveRecurringPlanForDate,
+   updatePlanRepeatRule,
++  type FocusLogEntry,
+   type PlanItem,
+   type PlanStorageState,
+ } from '../domain/plan.ts';
+ import { createVersionedRepository, type KeyValueStorage, type VersionedRepository } from './versionedRepository.ts';
++import { decodeFocusSession, getFocusElapsedSeconds, type FocusSessionSnapshot } from '../domain/focus.ts';
+ 
+ export const PLAN_STORAGE_KEY = '@chain_plan_store';
+ const LEGACY_PREFIX = '@chain_plan_';
+@@ -32,7 +35,7 @@
+   const repository = createVersionedRepository<PlanStorageState>({
+     storage,
+     key: PLAN_STORAGE_KEY,
+-    version: 1,
++    version: 2,
+     decode: decodePlanStorage,
+     empty: emptyPlanStorage,
+   });
+@@ -140,6 +143,45 @@
+     });
+   }
+ 
++  /** Does not materialize dates or Repeat occurrences merely to inspect history. */
++  function readSnapshot(): Promise<PlanStorageState> {
++    return enqueue(load);
++  }
++
++  /** One measured session per task occurrence. Retry and undo cannot duplicate it. */
++  function completeFocus(date: string, id: string, minutes: number, completedAt = new Date().toISOString(), savedSession?: FocusSessionSnapshot | null): Promise<PlanItem[]> {
++    return enqueue(async () => {
++      const finishedDate = today();
++      const yesterday = new Date(`${finishedDate}T12:00:00Z`);
++      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
++      const verified = decodeFocusSession(savedSession);
++      const resumedPreviousDay = date === yesterday.toISOString().slice(0, 10)
++        && verified?.itemId === id && verified.planDate === date
++        && minutes <= getFocusElapsedSeconds(verified, Date.parse(completedAt)) / 60 + 1e-8;
++      if (!isPlanDateKey(date) || (date !== finishedDate && !resumedPreviousDay) || !Number.isFinite(minutes) || minutes <= 0
++        || !Number.isFinite(Date.parse(completedAt))) throw new Error('Invalid measured focus completion');
++      const previous = await load();
++      const current = previous.days[date] ?? [];
++      const item = current.find((candidate) => candidate.id === id);
++      if (!item || !item.durationMinutes) return current;
++      // A repeated Finish callback must not rewrite the completion timestamp or
++      // manufacture a session after the task was completed through another path.
++      if (item.completed) return current;
++      const focusLog = [...(previous.focusLog ?? [])];
++      if (!focusLog.some((entry) => focusLogOccurrenceKey(entry) === focusLogOccurrenceKey({ itemId: id, date }))) {
++        const entry: FocusLogEntry = { itemId: id, chainId: item.chainId ?? '', date: finishedDate,
++          ...(date !== finishedDate ? { planDate: date } : {}),
++          minutes, completedAt, source: 'timer' };
++        focusLog.push(entry);
++      }
++      const items = current.map((candidate) => candidate.id === id ? {
++        ...candidate, completed: true, completedAt, reminderMinutes: undefined, notificationId: undefined,
++      } : candidate);
++      await commit(previous, { ...previous, days: { ...previous.days, [date]: items }, focusLog });
++      return items;
++    });
++  }
++
+   async function updateDate(date: string, mutator: PlanMutation, options: MutationOptions = {}): Promise<PlanItem[]> {
+     return enqueue(async () => {
+       const previous = await load();
+@@ -175,7 +217,7 @@
+     if (!facade) {
+       facade = {
+         read: () => readDate(date),
+-        readWithMetadata: async () => ({ value: await readDate(date), source: 'primary', storedVersion: 1, migrated: false }),
++        readWithMetadata: async () => ({ value: await readDate(date), source: 'primary', storedVersion: 2, migrated: false }),
+         write: async (items) => { await updateDate(date, () => items); },
+         update: (mutator, options) => updateDate(date, mutator, options),
+       };
+@@ -184,5 +226,5 @@
+     return facade;
+   }
+ 
+-  return { forDate };
++  return { forDate, readSnapshot, completeFocus };
+ }
+--- /dev/null
++++ b/artifacts/chain/lib/rhythmRepository.ts
+@@ -0,0 +1,31 @@
++import { decodeFocusLog, focusLogOccurrenceKey, type FocusLogEntry, type PlanStorageState } from '../domain/plan.ts';
++import type { KeyValueStorage } from './versionedRepository.ts';
++
++export const LEGACY_FOCUS_LOG_KEY = '@chain_focus_log';
++
++/** Preserves legacy bytes and fails visibly rather than silently reporting zero. */
++export async function readRhythmHistory(
++  storage: KeyValueStorage,
++  readSnapshot: () => Promise<PlanStorageState>,
++): Promise<FocusLogEntry[]> {
++  const [snapshot, primary, backup] = await Promise.all([
++    readSnapshot(), storage.getItem(LEGACY_FOCUS_LOG_KEY), storage.getItem(LEGACY_FOCUS_LOG_KEY + ':backup'),
++  ]);
++  const parsed = [primary, backup].map((raw): unknown => {
++    try { return raw === null ? null : JSON.parse(raw); } catch { return null; }
++  });
++  // No released Chain version wrote an envelope to this legacy key. Do not
++  // reinterpret a payload belonging to another/future schema as an empty log.
++  if (parsed.some((value) => value && typeof value === 'object' && !Array.isArray(value) && 'data' in value)) {
++    throw new Error('Focus history uses an unsupported format');
++  }
++  let legacy: FocusLogEntry[] = [];
++  if (primary !== null || backup !== null) {
++    const decoded = parsed.map(decodeFocusLog).find((value) => value !== null);
++    if (!decoded) throw new Error('Saved focus history could not be read');
++    legacy = decoded.map((entry) => ({ ...entry, source: 'legacy-unknown' as const }));
++  }
++  const measured = snapshot.focusLog ?? [];
++  const keys = new Set(measured.map(focusLogOccurrenceKey));
++  return [...legacy.filter((entry) => !keys.has(focusLogOccurrenceKey(entry))), ...measured];
++}
+--- /dev/null
++++ b/artifacts/chain/lib/rhythmStorage.ts
+@@ -0,0 +1,13 @@
++import AsyncStorage from '@react-native-async-storage/async-storage';
++import { createPlanStore } from './planRepository.ts';
++import { cancelPlanReminder } from './planNotifications';
++import { readRhythmHistory } from './rhythmRepository.ts';
++
++/** Shared queue: Plan writes and Rhythm reads observe one durable snapshot. */
++export const planDataStore = createPlanStore({
++  storage: AsyncStorage,
++  createId: () => `${Date.now()}${Math.random().toString(36).substring(2, 9)}`,
++  cancelReminder: cancelPlanReminder,
++});
++
++export const readRhythmFocusLog = () => readRhythmHistory(AsyncStorage, planDataStore.readSnapshot);
+--- /dev/null
++++ b/artifacts/chain/tests/gate-stats-regressions.test.mjs
+@@ -0,0 +1,191 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { createGateEventsRepository, GATE_EVENTS_KEY, LEGACY_GATE_EVENTS_KEY } from '../lib/gateEventsRepository.ts';
++import { decodeGateEventStore, GATE_DAY_MS, summarizeGateEvents } from '../domain/gateStats.ts';
++
++const today = Date.parse('2026-09-06T17:00:00Z');
++const envelope = (data, version = 1) => JSON.stringify({ version, data });
++function setup(initial = {}) {
++  const values = new Map(Object.entries(initial));
++  let clock = today;
++  let fail = false;
++  let writes = 0;
++  const storage = {
++    async getItem(key) { return values.get(key) ?? null; },
++    async setItem(key, value) {
++      if (fail && key === GATE_EVENTS_KEY) { fail = false; throw new Error('disk full'); }
++      writes += 1;
++      values.set(key, value);
++    },
++  };
++  const open = () => createGateEventsRepository(storage, () => clock);
++  return { values, open, repository: open(), setNow: (value) => { clock = value; }, failNextWrite: () => { fail = true; }, writes: () => writes };
++}
++
++test('Gate history persists an attempt and its preview decision across restart', async () => {
++  const env = setup();
++  await env.repository.beginPreview('first', 'instagram', today - 5000);
++  await env.repository.decidePreview('first', 'leave', today);
++  const state = await env.open().read();
++  const summary = summarizeGateEvents(state.events, 7, today);
++  assert.equal(summary.attempts, 1);
++  assert.equal(summary.leave, 1);
++  assert.equal(summary.leaveRate, 1);
++  assert.equal(summary.observedOutcomes, 0);
++  assert.equal(summary.outcomeStatus, 'unavailable');
++});
++
++test('An opened preview without a decision stays undecided, never saved', async () => {
++  const env = setup();
++  await env.repository.beginPreview('dismissed', 'youtube', today);
++  const summary = summarizeGateEvents((await env.open().read()).events, 7, today);
++  assert.equal(summary.pending, 1);
++  assert.equal(summary.leave, 0);
++  assert.equal(summary.continued, 0);
++  assert.equal(summary.leaveRate, null);
++});
++
++test('Repeated attempt effects and simultaneous repeated choices are idempotent', async () => {
++  const env = setup();
++  await Promise.all(Array.from({ length: 8 }, () => env.repository.beginPreview('one', 'instagram', today - 20)));
++  await Promise.all(Array.from({ length: 8 }, (_, n) => env.repository.decidePreview('one', 'leave', today - 10 + n)));
++  assert.equal((await env.repository.read()).events.length, 2);
++});
++
++test('Concurrent distinct previews do not lose one another', async () => {
++  const env = setup();
++  await Promise.all(Array.from({ length: 20 }, (_, n) => env.repository.beginPreview(`a${n}`, 'instagram', today)));
++  await Promise.all(Array.from({ length: 20 }, (_, n) => env.repository.decidePreview(`a${n}`, n % 2 ? 'leave' : 'continue', today)));
++  const summary = summarizeGateEvents((await env.repository.read()).events, 7, today);
++  assert.equal(summary.attempts, 20);
++  assert.equal(summary.leave, 10);
++  assert.equal(summary.continued, 10);
++});
++
++test('Conflicting IDs and opposite second choices refuse to rewrite history', async () => {
++  const env = setup();
++  await env.repository.beginPreview('one', 'instagram', today);
++  await assert.rejects(env.repository.beginPreview('one', 'youtube', today), /Conflicting/);
++  await env.repository.decidePreview('one', 'leave', today);
++  await assert.rejects(env.repository.decidePreview('one', 'continue', today), /already has/);
++  assert.equal((await env.repository.read()).events.length, 2);
++});
++
++test('A decision without a known attempt is rejected', async () => {
++  const env = setup();
++  await assert.rejects(env.repository.decidePreview('missing', 'leave', today), /Invalid Gate/);
++  assert.deepEqual((await env.repository.read()).events, []);
++});
++
++test('Native provenance and fabricated observed outcomes are not accepted by preview storage', () => {
++  const event = { id: 'a', kind: 'attempt', attemptId: 'a', at: today, appId: 'instagram', source: 'native' };
++  assert.equal(decodeGateEventStore({ legacyImported: true, events: [event] }), null);
++  assert.equal(decodeGateEventStore({ legacyImported: true, events: [{ ...event, kind: 'observation', outcome: 'saved' }] }), null);
++});
++
++test('Old saved, opened and unknown markers remain unverified and untouched', async () => {
++  const legacy = JSON.stringify([{ appId: 'instagram', at: today, outcome: 'saved', source: 'native' }, { appId: 'youtube', at: today, outcome: 'opened', source: 'preview' }, { appId: 'reddit', at: today }]);
++  const env = setup({ [LEGACY_GATE_EVENTS_KEY]: legacy });
++  const state = await env.repository.read();
++  assert.equal(env.values.get(LEGACY_GATE_EVENTS_KEY), legacy);
++  assert.equal(state.events.length, 3);
++  assert.deepEqual(state.events.map((event) => event.source), ['unverified', 'unverified', 'unverified']);
++  const summary = summarizeGateEvents(state.events, 90, today);
++  assert.equal(summary.unverified, 3);
++  assert.equal(summary.attempts, 0);
++  assert.equal(summary.leaveRate, null);
++  assert.equal((await env.open().read()).events.length, 3);
++});
++
++test('Corrupt legacy history is an error rather than a misleading empty success', async () => {
++  const env = setup({ [LEGACY_GATE_EVENTS_KEY]: '{broken' });
++  await assert.rejects(env.repository.read(), /could not be read/);
++  assert.equal(env.values.has(GATE_EVENTS_KEY), false);
++  assert.equal(env.values.get(LEGACY_GATE_EVENTS_KEY), '{broken');
++});
++
++test('Read does not purge history when events pass the 24h or 90d boundary', async () => {
++  const env = setup();
++  await env.repository.beginPreview('a', 'instagram', today);
++  await env.repository.decidePreview('a', 'leave', today);
++  const before = env.values.get(GATE_EVENTS_KEY);
++  const writes = env.writes();
++  env.setNow(today + 91 * GATE_DAY_MS);
++  assert.equal((await env.repository.read()).events.length, 2);
++  assert.equal(env.values.get(GATE_EVENTS_KEY), before);
++  assert.equal(env.writes(), writes);
++});
++
++test('Retention on a new write removes expired attempts and their decision together', async () => {
++  const env = setup();
++  await env.repository.beginPreview('old', 'instagram', today);
++  await env.repository.decidePreview('old', 'leave', today);
++  env.setNow(today + 91 * GATE_DAY_MS);
++  await env.repository.beginPreview('new', 'youtube', today + 91 * GATE_DAY_MS);
++  const state = await env.repository.read();
++  assert.equal(state.events.length, 1);
++  assert.equal(state.events[0].attemptId, 'new');
++  assert.ok(decodeGateEventStore(state));
++});
++
++test('Storage failure preserves the saved attempt and allows a decision retry', async () => {
++  const env = setup();
++  await env.repository.beginPreview('a', 'instagram', today);
++  env.failNextWrite();
++  await assert.rejects(env.repository.decidePreview('a', 'leave', today), /disk full/);
++  assert.equal(summarizeGateEvents((await env.repository.read()).events, 7, today).pending, 1);
++  await env.repository.decidePreview('a', 'leave', today);
++  assert.equal(summarizeGateEvents((await env.open().read()).events, 7, today).leave, 1);
++});
++
++test('A valid backup repairs corrupt primary history', async () => {
++  const env = setup();
++  await env.repository.beginPreview('a', 'instagram', today);
++  await env.repository.decidePreview('a', 'leave', today);
++  env.values.set(GATE_EVENTS_KEY, '{broken');
++  const state = await env.open().read();
++  assert.equal(state.events.length, 1); // Last known-good backup: attempt only.
++  assert.equal(state.events[0].kind, 'attempt');
++  assert.ok(JSON.parse(env.values.get(GATE_EVENTS_KEY)).data);
++});
++
++test('Two corrupt copies raise a visible error and are not overwritten', async () => {
++  const env = setup({ [GATE_EVENTS_KEY]: '{primary', [`${GATE_EVENTS_KEY}:backup`]: '{backup' });
++  await assert.rejects(env.repository.read(), /invalid/);
++  await assert.rejects(env.repository.beginPreview('a', 'instagram', today), /invalid/);
++  assert.equal(env.values.get(GATE_EVENTS_KEY), '{primary');
++});
++
++test('Future primary or backup versions block reads and writes without downgrade', async () => {
++  for (const key of [GATE_EVENTS_KEY, `${GATE_EVENTS_KEY}:backup`]) {
++    const future = envelope({ future: 'schema' }, 100);
++    const env = setup({ [key]: future });
++    await assert.rejects(env.repository.read(), /unsupported/);
++    await assert.rejects(env.repository.beginPreview('a', 'instagram', today), /unsupported/);
++    assert.equal(env.values.get(key), future);
++  }
++});
++
++test('7/28/90-day summaries use a matching cohort and exclude undecided pauses from rate', async () => {
++  const env = setup();
++  for (const [key, age] of [['a', 1], ['b', 8], ['c', 40]]) {
++    await env.repository.beginPreview(key, 'instagram', today - age * GATE_DAY_MS);
++    await env.repository.decidePreview(key, key === 'b' ? 'continue' : 'leave', today - age * GATE_DAY_MS);
++  }
++  await env.repository.beginPreview('pending', 'youtube', today);
++  const events = (await env.repository.read()).events;
++  assert.deepEqual([7, 28, 90].map((days) => summarizeGateEvents(events, days, today).attempts), [2, 3, 4]);
++  const summary = summarizeGateEvents(events, 28, today);
++  assert.equal(summary.leaveRate, 0.5);
++  assert.equal(summary.knownDecisions, 2);
++  assert.equal(summary.pending, 1);
++  assert.equal(summary.byApp[0].attempts, 2);
++});
++
++test('Future-dated events and decisions before the attempt cannot contaminate statistics', async () => {
++  const env = setup();
++  await assert.rejects(env.repository.beginPreview('future', 'instagram', today + GATE_DAY_MS), /future/);
++  await env.repository.beginPreview('a', 'instagram', today);
++  await assert.rejects(env.repository.decidePreview('a', 'leave', today - 1), /Invalid Gate/);
++  assert.equal(summarizeGateEvents((await env.repository.read()).events, 7, today).leaveRate, null);
++});
+--- /dev/null
++++ b/artifacts/chain/tests/rhythm-data.test.mjs
+@@ -0,0 +1,289 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { applyDayStatus, normalizeChain, withChainScheduleRevision } from '../domain/chains.ts';
++import { buildChainRhythm } from '../domain/rhythm.ts';
++import { decodePlanStorage, decodeFocusLog } from '../domain/plan.ts';
++import { createPlanStore, PLAN_STORAGE_KEY } from '../lib/planRepository.ts';
++import { readRhythmHistory, LEGACY_FOCUS_LOG_KEY } from '../lib/rhythmRepository.ts';
++
++const today = '2026-09-06';
++const instant = '2026-09-06T17:30:00.000Z';
++function chain(options = {}) {
++  return withChainScheduleRevision(normalizeChain({
++    id: 'chain', name: 'Read', color: '#00BF9B', createdAt: '2026-01-01', completedDates: [], minimumDates: [],
++    frozenDates: [], restDays: [], cadence: 'daily', weeklyTarget: 3, completionTimes: {}, ...options,
++  }), '2026-01-01');
++}
++function report(value, options = {}) { return buildChainRhythm(value, { periodDays: 7, referenceDate: today, ...options }); }
++function storage(initial = {}) {
++  const values = new Map(Object.entries(initial));
++  let fail = false;
++  return {
++    values,
++    failNextSave() { fail = true; },
++    async getItem(key) { return values.get(key) ?? null; },
++    async setItem(key, value) {
++      if (fail && key === PLAN_STORAGE_KEY) { fail = false; throw new Error('disk full'); }
++      values.set(key, value);
++    },
++    async getAllKeys() { return [...values.keys()]; },
++  };
++}
++function plan(store, options = {}) { return createPlanStore({ storage: store, today: () => today, createId: () => 'generated', ...options }); }
++const item = { id: 'focus-task', text: 'Read', planDate: today, timeSlot: '', completed: false, durationMinutes: 25, chainId: 'chain' };
++
++test('check-in metadata keeps the local offset and ignores the device zone when reading', () => {
++  const saved = applyDayStatus(chain(), today, 'done', '2026-09-07T00:30:00.000Z', 300).chain;
++  assert.equal(saved.checkIns[today].retrospective, false);
++  const result = report(saved);
++  assert.equal(result.checkIns.sampleCount, 1);
++  assert.equal(result.checkIns.buckets.find((bucket) => bucket.key === 'evening').count, 1);
++});
++
++test('Minimum upgrade is one check-in and undo removes both the status and metadata', () => {
++  const minimum = applyDayStatus(chain(), today, 'minimum', instant, 0).chain;
++  const done = applyDayStatus(minimum, today, 'done', '2026-09-06T19:00:00Z', 0).chain;
++  assert.equal(report(done).counts.minimum, 0);
++  assert.equal(report(done).counts.done, 1);
++  assert.equal(report(done).checkIns.sampleCount, 1);
++  const undone = applyDayStatus(done, today, 'missed', instant, 0).chain;
++  assert.equal(undone.checkIns[today], undefined);
++  assert.equal(report(undone).checkIns.sampleCount, 0);
++  assert.equal(applyDayStatus(done, today, 'done', instant, 0).changed, false);
++});
++
++test('retrospective corrections improve counts but never contaminate check-in hour patterns', () => {
++  const saved = applyDayStatus(chain(), '2026-09-05', 'minimum', instant, 0).chain;
++  const result = report(saved);
++  assert.equal(result.counts.minimum, 1);
++  assert.equal(result.checkIns.retrospectiveCount, 1);
++  assert.equal(result.checkIns.sampleCount, 0);
++  assert.equal(result.checkIns.missingCount, 0);
++});
++
++test('legacy timestamps do not become invented local check-in samples', () => {
++  const old = normalizeChain({ ...chain(), checkIns: undefined, completedDates: [today], completionTimes: { [today]: instant } });
++  assert.equal(old.checkIns, undefined);
++  assert.equal(report(old).checkIns.missingCount, 1);
++  assert.equal(report(old).checkIns.sampleCount, 0);
++});
++
++test('invalid metadata cannot erase a valid completion or create a spurious sample', () => {
++  const value = normalizeChain({ ...chain(), completedDates: [today], checkIns: { [today]: { status: 'done', recordedAt: 'broken', timezoneOffsetMinutes: 0, retrospective: false } } });
++  assert.deepEqual(value.completedDates, [today]);
++  assert.equal(report(value).checkIns.missingCount, 1);
++});
++
++test('daily adherence separates activity, Freeze, rest and the unfinished current day', () => {
++  const value = chain({ completedDates: ['2026-08-31', '2026-09-05'], minimumDates: ['2026-09-01'], frozenDates: ['2026-09-02'], restDays: [6] });
++  const result = report(value);
++  assert.deepEqual(result.counts, { done: 2, minimum: 1, frozen: 1, rest: 0, missed: 2, open: 1 });
++  assert.deepEqual(result.adherence, { unit: 'days', numerator: 2, denominator: 5, rate: 40 });
++  assert.equal(report(applyDayStatus(value, today, 'done', instant, 0).chain).adherence.rate, 40);
++});
++
++test('new and not-yet-started Chains have no invented missed days or completion rate', () => {
++  assert.equal(report(chain({ createdAt: today })).adherence.rate, null);
++  const future = report(chain({ createdAt: '2026-09-10' }));
++  assert.equal(future.days.length, 0);
++  assert.equal(future.counts.missed, 0);
++});
++
++test('weekly adherence counts only full closed weeks and separates a partial starting week', () => {
++  const value = chain({ cadence: 'weekly', createdAt: '2026-08-12', completedDates: [
++    '2026-08-17', '2026-08-18', '2026-08-19', '2026-08-24', '2026-09-01', '2026-09-02', '2026-09-03',
++  ], frozenDates: ['2026-08-25'] });
++  const result = report(value, { periodDays: 28 });
++  assert.deepEqual(result.adherence, { unit: 'weeks', numerator: 1, denominator: 2, rate: 50 });
++  assert.equal(result.weekly.currentProgress, 3);
++  assert.equal(result.counts.missed, 0);
++  assert.ok(result.days.some((day) => day.status === 'unlogged'));
++});
++
++test('weekly current progress never counts a future check-in', () => {
++  const value = chain({ cadence: 'weekly', completedDates: ['2026-09-01', '2026-09-06'] });
++  assert.equal(report(value, { referenceDate: '2026-09-02' }).weekly.currentProgress, 1);
++});
++
++test('changed schedules suppress an unfair overall rate and historical trends', () => {
++  let value = chain({ completedDates: ['2026-08-31'] });
++  value = withChainScheduleRevision({ ...value, restDays: [1] }, '2026-09-02');
++  const result = report(value);
++  assert.equal(result.scheduleChanged, true);
++  assert.equal(result.adherence.rate, null);
++  assert.equal(result.comparison, null);
++});
++
++test('unknown historical schedules are labelled and cannot produce a confident trend', () => {
++  const value = { ...chain(), scheduleHistory: undefined };
++  assert.equal(report(value).scheduleAssumption, true);
++  assert.equal(report(value).comparison, null);
++});
++
++test('comparable daily windows require five due days in each and use equal calendar lengths', () => {
++  const value = chain({ completedDates: ['2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'] });
++  assert.deepEqual(report(value).comparison, { previousRate: 0, changePoints: 100 });
++  assert.equal(report(chain({ createdAt: '2026-09-02' })).comparison, null);
++  assert.equal(report(chain({ restDays: [0, 1, 2, 3, 4, 5] })).comparison, null);
++});
++
++test('hour labels need five valid observations and no tied peak', () => {
++  let value = chain();
++  for (const date of ['2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03']) value = applyDayStatus(value, date, 'done', `${date}T10:00:00Z`, 0).chain;
++  assert.equal(report(value).checkIns.mostCommonLabel, null);
++  value = applyDayStatus(value, '2026-09-04', 'done', '2026-09-04T10:00:00Z', 0).chain;
++  assert.match(report(value).checkIns.mostCommonLabel, /Morning/);
++});
++
++test('Focus totals use timer measurements only, keep subminute precision and deduplicate occurrences', () => {
++  const measured = { itemId: 'x', chainId: 'chain', date: today, minutes: 5 / 60, completedAt: instant, source: 'timer' };
++  const legacy = { ...measured, itemId: 'old', minutes: 25, source: undefined };
++  const result = report(chain(), { focusLog: [legacy, measured, measured] });
++  assert.equal(result.focus.minutes, 5 / 60);
++  assert.equal(result.focus.sessions, 1);
++  assert.equal(result.focus.legacySessions, 1);
++});
++
++test('focus history and task completion commit together, including failure and retry', async () => {
++  const saved = storage();
++  const store = plan(saved);
++  await store.forDate(today).write([item]);
++  saved.failNextSave();
++  await assert.rejects(store.completeFocus(today, item.id, 12, instant), /disk full/);
++  let snapshot = await store.readSnapshot();
++  assert.equal(snapshot.days[today][0].completed, false);
++  assert.equal(snapshot.focusLog?.length ?? 0, 0);
++  await store.completeFocus(today, item.id, 12, instant);
++  await store.completeFocus(today, item.id, 999, '2026-09-06T18:00:00Z');
++  snapshot = await store.readSnapshot();
++  assert.equal(snapshot.days[today][0].completed, true);
++  assert.equal(snapshot.focusLog.length, 1);
++  assert.equal(snapshot.focusLog[0].minutes, 12);
++  assert.equal(snapshot.focusLog[0].completedAt, instant);
++});
++
++test('reminder cancellation failure leaves neither a completion nor measured minutes', async () => {
++  const store = plan(storage(), { cancelReminder: async () => { throw new Error('cancel failed'); } });
++  await store.forDate(today).write([{ ...item, notificationId: 'reminder' }]);
++  await assert.rejects(store.completeFocus(today, item.id, 5, instant), /cancel failed/);
++  const snapshot = await store.readSnapshot();
++  assert.equal(snapshot.days[today][0].completed, false);
++  assert.equal(snapshot.focusLog?.length ?? 0, 0);
++});
++
++test('undo, task edits, removal and a new copied occurrence preserve measured focus history', async () => {
++  const store = plan(storage());
++  await store.forDate(today).write([item]);
++  await store.completeFocus(today, item.id, 10, instant);
++  await store.forDate(today).update((items) => items.map((entry) => ({ ...entry, completed: false, completedAt: undefined, chainId: 'new-chain' })));
++  await store.completeFocus(today, item.id, 20, instant);
++  await store.forDate(today).write([]);
++  await store.forDate('2026-09-07').write([{ ...item, id: 'copy', planDate: '2026-09-07' }]);
++  const snapshot = await store.readSnapshot();
++  assert.equal(snapshot.focusLog.length, 1);
++  assert.equal(snapshot.focusLog[0].chainId, 'chain');
++  assert.equal(snapshot.focusLog[0].minutes, 10);
++});
++
++test('manually completed tasks cannot be reinterpreted as timed focus', async () => {
++  const store = plan(storage());
++  await store.forDate(today).write([{ ...item, completed: true, completedAt: instant }]);
++  await store.completeFocus(today, item.id, 25, instant);
++  assert.equal((await store.readSnapshot()).focusLog?.length ?? 0, 0);
++});
++
++test('concurrent Rhythm reads and Plan saves share one queue and cannot lose measured sessions', async () => {
++  const saved = storage();
++  const store = plan(saved);
++  await store.forDate(today).write([item]);
++  await Promise.all([store.completeFocus(today, item.id, 3, instant), readRhythmHistory(saved, store.readSnapshot), store.forDate('2026-09-07').write([{ ...item, id: 'next', planDate: '2026-09-07' }])]);
++  const snapshot = await store.readSnapshot();
++  assert.equal(snapshot.focusLog.length, 1);
++  assert.equal(snapshot.days['2026-09-07'].length, 1);
++});
++
++test('history reads never materialize a missing recurring occurrence', async () => {
++  const saved = storage();
++  const store = plan(saved);
++  await store.forDate(today).update(() => [{ ...item, repeatDays: [1] }], { editSeriesItemIds: [item.id] });
++  const before = saved.values.get(PLAN_STORAGE_KEY);
++  await readRhythmHistory(saved, store.readSnapshot);
++  assert.equal(saved.values.get(PLAN_STORAGE_KEY), before);
++  assert.equal((await store.readSnapshot()).days['2026-09-07'], undefined);
++});
++
++test('v1 Plan migrates without losing days or legacy focus bytes; future payloads block writes', async () => {
++  const legacy = JSON.stringify([{ itemId: 'old', chainId: 'chain', date: today, minutes: 20, completedAt: instant }]);
++  const saved = storage({ [PLAN_STORAGE_KEY]: JSON.stringify({ version: 1, data: { migrated: true, days: { [today]: [item] }, repeatRules: {} } }), [LEGACY_FOCUS_LOG_KEY]: legacy });
++  const store = plan(saved);
++  const history = await readRhythmHistory(saved, store.readSnapshot);
++  assert.equal(history[0].source, 'legacy-unknown');
++  assert.equal(saved.values.get(LEGACY_FOCUS_LOG_KEY), legacy);
++  assert.equal(JSON.parse(saved.values.get(PLAN_STORAGE_KEY)).version, 2);
++  const future = JSON.stringify({ version: 10, data: {} });
++  saved.values.set(PLAN_STORAGE_KEY + ':backup', future);
++  await assert.rejects(store.completeFocus(today, item.id, 10, instant), /newer/);
++  assert.equal(saved.values.get(PLAN_STORAGE_KEY + ':backup'), future);
++});
++
++test('corrupt aggregate restores its backup while malformed focus children are refused', async () => {
++  assert.equal(decodeFocusLog([{ itemId: 'x', chainId: 'c', date: today, minutes: Infinity, completedAt: instant }]), null);
++  assert.equal(decodePlanStorage({ migrated: true, days: {}, repeatRules: {}, focusLog: [{ bad: true }] }), null);
++  const good = JSON.stringify({ version: 2, data: { migrated: true, days: { [today]: [item] }, repeatRules: {}, focusLog: [] } });
++  const saved = storage({ [PLAN_STORAGE_KEY]: '{broken', [PLAN_STORAGE_KEY + ':backup']: good });
++  assert.equal((await plan(saved).readSnapshot()).days[today][0].id, item.id);
++  assert.equal(saved.values.get(PLAN_STORAGE_KEY + ':backup'), good);
++});
++
++test('unreadable or future legacy focus history raises an error without rewriting the log', async () => {
++  for (const raw of ['{broken', JSON.stringify({ version: 20, data: [] })]) {
++    const saved = storage({ [LEGACY_FOCUS_LOG_KEY]: raw });
++    await assert.rejects(readRhythmHistory(saved, plan(saved).readSnapshot), /history/);
++    assert.equal(saved.values.get(LEGACY_FOCUS_LOG_KEY), raw);
++  }
++});
++
++test('new history retains more than 500 measurements without trimming on read or write', async () => {
++  const focusLog = Array.from({ length: 501 }, (_, i) => ({ itemId: `old-${i}`, chainId: 'chain', date: today, minutes: 1, completedAt: instant, source: 'timer' }));
++  const saved = storage({ [PLAN_STORAGE_KEY]: JSON.stringify({ version: 2, data: { migrated: true, days: { [today]: [item] }, repeatRules: {}, focusLog } }) });
++  const store = plan(saved);
++  await store.completeFocus(today, item.id, 2, instant);
++  assert.equal((await readRhythmHistory(saved, store.readSnapshot)).length, 502);
++});
++
++test('Rhythm date ranges are stable across daylight saving boundaries', () => {
++  const value = chain({ createdAt: '2026-01-01', completedDates: ['2026-03-28', '2026-03-29', '2026-03-30'] });
++  const result = report(value, { referenceDate: '2026-03-31' });
++  assert.equal(result.startDate, '2026-03-25');
++  assert.equal(result.days.length, 7);
++  assert.equal(result.counts.done, 3);
++});
++
++test('a saved focus session may finish across midnight, with separate occurrence and recording dates', async () => {
++  const store = plan(storage());
++  const yesterday = '2026-09-05';
++  await store.forDate(yesterday).write([{ ...item, planDate: yesterday }]);
++  const savedSession = {
++    version: 1, itemId: item.id, planDate: yesterday, targetSeconds: 25 * 60,
++    accumulatedSeconds: 0, runningSince: Date.parse('2026-09-05T23:50:00Z'), updatedAt: Date.parse('2026-09-05T23:50:00Z'),
++  };
++  await store.completeFocus(yesterday, item.id, 20, '2026-09-06T00:10:00Z', savedSession);
++  await store.completeFocus(yesterday, item.id, 20, '2026-09-06T00:10:00Z', savedSession);
++  const snapshot = await store.readSnapshot();
++  assert.equal(snapshot.days[yesterday][0].completed, true);
++  assert.equal(snapshot.focusLog.length, 1);
++  assert.equal(snapshot.focusLog[0].planDate, yesterday);
++  assert.equal(snapshot.focusLog[0].date, today);
++  assert.equal(snapshot.focusLog[0].minutes, 20);
++});
++
++test('a prior-day task cannot claim focus without a matching saved session or beyond its timer', async () => {
++  const store = plan(storage());
++  const yesterday = '2026-09-05';
++  await store.forDate(yesterday).write([{ ...item, planDate: yesterday }]);
++  await assert.rejects(store.completeFocus(yesterday, item.id, 10, instant), /Invalid/);
++  const savedSession = { version: 1, itemId: item.id, planDate: yesterday, targetSeconds: 25 * 60, accumulatedSeconds: 120, updatedAt: Date.parse(instant) };
++  await assert.rejects(store.completeFocus(yesterday, item.id, 10, instant, savedSession), /Invalid/);
++  await assert.rejects(store.completeFocus('2026-09-04', item.id, 1, instant, { ...savedSession, planDate: '2026-09-04' }), /Invalid/);
++  assert.equal((await store.readSnapshot()).focusLog?.length ?? 0, 0);
++});

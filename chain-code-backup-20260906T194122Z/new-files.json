@@ -1,0 +1,12 @@
+[
+  "artifacts/chain/app/gate-insights.tsx",
+  "artifacts/chain/app/rhythm/[id].tsx",
+  "artifacts/chain/domain/gateStats.ts",
+  "artifacts/chain/domain/rhythm.ts",
+  "artifacts/chain/hooks/useLocalClock.ts",
+  "artifacts/chain/lib/gateEventsRepository.ts",
+  "artifacts/chain/lib/rhythmRepository.ts",
+  "artifacts/chain/lib/rhythmStorage.ts",
+  "artifacts/chain/tests/gate-stats-regressions.test.mjs",
+  "artifacts/chain/tests/rhythm-data.test.mjs"
+]
