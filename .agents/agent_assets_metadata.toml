@@ -14,3 +14,17 @@ mtime_ms = 1788630890800
 storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:9a034122-fa4a-474b-841f-26c342877fac/6d47387e-e4dd-449c-8343-5b2937ba130c/50112372-0db4-4761-a3b5-565979ea8cfd"
 storage_version_token = "1788630896086377"
 content_type = "application/octet-stream"
+
+[[outputs]]
+id = "KTQLeXf7vkernqZuiq8qN"
+uri = "file://downloads/chain-app-complete.zip"
+type = "unspecified"
+title = "Chain — ZIP completo de la app"
+description = "Incluye código fuente, pantallas, componentes, dominio, assets, documentación, tests, configuración y el build exportado. Se excluyeron únicamente node_modules, .expo y cachés temporales."
+logical_id = "39a8edb9-5928-4098-969e-52434ce1fa0f"
+content_hash = "sha256:bd766c98ac0cbe8c82af87c1d6e8b6f43c503be069417778f446a187cad68ae3"
+size = 9739940
+mtime_ms = 1788695161922
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:9a034122-fa4a-474b-841f-26c342877fac/39a8edb9-5928-4098-969e-52434ce1fa0f/69212d61-d479-496d-9214-6f1424ae4af2"
+storage_version_token = "1788695168837683"
+content_type = "application/octet-stream"

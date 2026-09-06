@@ -376,3 +376,2649 @@ index 0000000..3bc8ef1
 +    />
 +  );
 +}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
+diff --git a/artifacts/chain/app/(tabs)/index.tsx b/artifacts/chain/app/(tabs)/index.tsx
+index b37066d..81c539c 100644
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -178,7 +178,8 @@ export default function ChainsScreen() {
+             onPress={handleAdd}
+             accentColor={colors.primary}
+             filled
+-            iconSize={22}
++            iconSize={24}
++            symbol="add"
+           />
+         </View>
+       </View>
+@@ -201,7 +202,7 @@ export default function ChainsScreen() {
+           <Text style={[styles.emptyTitle, { color: colors.foreground }]}>Start with one promise.</Text>
+           <Text style={[styles.emptyBody, { color: colors.mutedForeground }]}>Choose something worth returning to. Chain will help you keep it visible.</Text>
+           <View style={styles.emptyAction}>
+-            <AppButton label="Create your first Chain" icon="add" onPress={handleAdd} />
++            <AppButton label="Create your first Chain" icon="add" symbol="add" onPress={handleAdd} />
+           </View>
+         </ScrollView>
+       ) : (
+@@ -262,6 +263,7 @@ function ChainIntervention({
+       <AppButton
+         label="Log minimum"
+         icon="leaf-outline"
++        symbol="minimum"
+         onPress={onMinimum}
+         accentColor={chain.color}
+         busy={minimumBusy}
+diff --git a/artifacts/chain/app/chain/[id].tsx b/artifacts/chain/app/chain/[id].tsx
+index bf96aa5..cb1b50f 100644
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -37,6 +37,7 @@ import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { SevenChoiceSelector, type SevenChoiceOption } from '@/components/ui/SevenChoiceSelector';
+ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+@@ -615,7 +616,7 @@ export default function ChainDetailScreen() {
+             style={styles.minimumCard}
+           >
+             <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <Ionicons name="leaf-outline" size={20} color={accentText} />
++              <ChainSymbol name="minimum" size={20} color={accentText} />
+             </View>
+             <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+             <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+diff --git a/artifacts/chain/components/ChainCard.tsx b/artifacts/chain/components/ChainCard.tsx
+index 891d0fb..926cfe2 100644
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -20,6 +20,7 @@ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+ import { AppButton, Surface } from './ui/AppUI';
++import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+   chain: Chain;
+@@ -198,10 +199,10 @@ export default function ChainCard({ chain }: Props) {
+                     }],
+                   }}
+                 >
+-                  <Ionicons name="checkmark" size={22} color={statusForeground} />
++                  <ChainSymbol name="check" size={22} color={statusForeground} />
+                 </Animated.View>
+               ) : (
+-                <Ionicons name="leaf-outline" size={20} color={statusForeground} />
++                <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+               <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
+diff --git a/artifacts/chain/components/ui/AppUI.tsx b/artifacts/chain/components/ui/AppUI.tsx
+index f0e2fff..38ca66d 100644
+--- a/artifacts/chain/components/ui/AppUI.tsx
++++ b/artifacts/chain/components/ui/AppUI.tsx
+@@ -15,6 +15,7 @@ import { GlassSurface } from '@/components/AmbientSurface';
+ import { CONTROL, OPACITY, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { useColors } from '@/hooks/useColors';
++import { ChainSymbol, type ChainSymbolName } from './ChainSymbol';
+ 
+ type IconName = ComponentProps<typeof Ionicons>['name'];
+ 
+@@ -41,6 +42,7 @@ export function IconButton({
+   accentColor,
+   filled = false,
+   iconSize = 20,
++  symbol,
+   disabled = false,
+ }: {
+   icon: IconName;
+@@ -49,6 +51,7 @@ export function IconButton({
+   accentColor?: string;
+   filled?: boolean;
+   iconSize?: number;
++  symbol?: ChainSymbolName;
+   disabled?: boolean;
+ }) {
+   const colors = useColors();
+@@ -70,7 +73,9 @@ export function IconButton({
+       },
+     ]}
+   >
+-    <Ionicons name={icon} size={iconSize} color={foreground} />
++    {symbol
++      ? <ChainSymbol name={symbol} size={iconSize} color={foreground} />
++      : <Ionicons name={icon} size={iconSize} color={foreground} />}
+   </AnimatedPressable>;
+ }
+ 
+@@ -78,6 +83,7 @@ export function AppButton({
+   label,
+   onPress,
+   icon,
++  symbol,
+   variant = 'primary',
+   accentColor,
+   disabled = false,
+@@ -87,6 +93,7 @@ export function AppButton({
+   label: string;
+   onPress: () => void;
+   icon?: IconName;
++  symbol?: ChainSymbolName;
+   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+   accentColor?: string;
+   disabled?: boolean;
+@@ -109,7 +116,13 @@ export function AppButton({
+     containerStyle={styles.buttonContainer}
+     style={[styles.button, { backgroundColor, borderColor, opacity: isDisabled ? OPACITY.disabled : 1 }, style]}
+   >
+-    {busy ? <ActivityIndicator size="small" color={foreground} /> : icon ? <Ionicons name={icon} size={18} color={foreground} /> : null}
++    {busy
++      ? <ActivityIndicator size="small" color={foreground} />
++      : symbol
++        ? <ChainSymbol name={symbol} size={18} color={foreground} />
++        : icon
++          ? <Ionicons name={icon} size={18} color={foreground} />
++          : null}
+     <Text style={[TYPE.bodyStrong, { color: foreground }]}>{label}</Text>
+   </AnimatedPressable>;
+ }
+diff --git b/artifacts/chain/components/ui/ChainSymbol.tsx b/artifacts/chain/components/ui/ChainSymbol.tsx
+new file mode 100644
+index 0000000..3bc8ef1
+--- /dev/null
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -0,0 +1,36 @@
++import React, { type ComponentProps } from 'react';
++import { Ionicons } from '@expo/vector-icons';
++import { SymbolView, type SFSymbol } from 'expo-symbols';
++
++type IoniconName = ComponentProps<typeof Ionicons>['name'];
++
++export type ChainSymbolName = 'add' | 'check' | 'minimum';
++
++const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
++  add: { ios: 'plus', fallback: 'add' },
++  check: { ios: 'checkmark', fallback: 'checkmark' },
++  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++};
++
++export function ChainSymbol({
++  name,
++  size,
++  color,
++}: {
++  name: ChainSymbolName;
++  size: number;
++  color: string;
++}) {
++  const symbol = SYMBOLS[name];
++
++  return (
++    <SymbolView
++      accessible={false}
++      name={symbol.ios}
++      size={size}
++      tintColor={color}
++      weight="semibold"
++      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
++    />
++  );
++}
