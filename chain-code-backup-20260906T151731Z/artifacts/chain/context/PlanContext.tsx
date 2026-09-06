@@ -2,15 +2,17 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  decodePlanItems,
   getPlanTodayKey,
   getPlanTomorrowKey,
   normalizeClosedDates,
   normalizeFocusLog,
+  resolvePlanForDate,
   type FocusLogEntry,
   type PlanItem,
   type PlanItemOptions,
 } from '@/domain/plan';
-import { createPlanStore } from '@/lib/planRepository';
+import { createVersionedRepository, type VersionedRepository } from '@/lib/versionedRepository';
 import { reportDiagnostic } from '@/lib/diagnostics';
 import { removeFocusSession } from '@/lib/focusSession';
 import { cancelPlanReminder } from '@/lib/planNotifications';
@@ -34,9 +36,6 @@ export type PendingPlanItem = PlanItem & {
 
 interface PlanContextValue {
   items: PlanItem[];
-  isLoading: boolean;
-  loadError: string | null;
-  retryLoad: () => void;
   activeDate: string;
   isToday: boolean;
   isActiveDayClosed: boolean;
@@ -59,15 +58,26 @@ interface PlanContextValue {
   toggleItem: (id: string) => Promise<PlanPersistenceResult>;
 }
 
+const KEY_PREFIX = '@chain_plan_';
 const CLOSED_DATES_KEY = '@chain_plan_closed_dates';
 export const FOCUS_LOG_KEY = '@chain_focus_log';
 
-const planStore = createPlanStore({
-  storage: AsyncStorage,
-  createId: () => `${Date.now()}${Math.random().toString(36).substring(2, 9)}`,
-  cancelReminder: cancelPlanReminder,
-});
-const getPlanRepository = planStore.forDate;
+const planRepositories = new Map<string, VersionedRepository<PlanItem[]>>();
+
+function getPlanRepository(date: string) {
+  let repository = planRepositories.get(date);
+  if (!repository) {
+    repository = createVersionedRepository<PlanItem[]>({
+      storage: AsyncStorage,
+      key: KEY_PREFIX + date,
+      version: 2,
+      decode: (value) => decodePlanItems(value, date),
+      empty: () => [],
+    });
+    planRepositories.set(date, repository);
+  }
+  return repository;
+}
 
 const readPlan = (date: string) => getPlanRepository(date).read();
 type PlanMutation = (current: PlanItem[]) => PlanItem[];
@@ -76,13 +86,6 @@ const PlanContext = createContext<PlanContextValue | null>(null);
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<PlanItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loadAttempt, setLoadAttempt] = useState(0);
-  const retryLoad = useCallback(() => {
-    setIsLoading(true);
-    setLoadAttempt((attempt) => attempt + 1);
-  }, []);
   const [activeDate, setActiveDate] = useState(getPlanTodayKey());
   const [tomorrowItemCount, setTomorrowItemCount] = useState(0);
   const [closedDateKeys, setClosedDateKeys] = useState<string[]>([]);
@@ -108,8 +111,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     itemsRef.current = nextItems;
     setActiveDate(date);
     setItems(nextItems);
-    setLoadError(null);
-    setIsLoading(false);
   }
 
   function applyVisibleMutation(date: string, mutator: PlanMutation) {
@@ -121,11 +122,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     if (date === getPlanTomorrowKey()) setTomorrowItemCount(next.length);
   }
 
-  function persistMutation(date: string, mutator: PlanMutation, operationName = 'plan.persist', editSeriesItemIds?: string[]) {
+  function persistMutation(date: string, mutator: PlanMutation, operationName = 'plan.persist') {
     const visibleBefore = activeDateRef.current === date ? itemsRef.current : undefined;
     applyVisibleMutation(date, mutator);
     const optimisticRevision = visibleRevisionRef.current;
-    const operation = getPlanRepository(date).update(mutator, { editSeriesItemIds });
+    const operation = getPlanRepository(date).update(mutator);
     void operation
       .then((persisted) => {
         if (activeDateRef.current !== date || visibleRevisionRef.current !== optimisticRevision) return;
@@ -164,7 +165,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
             if (date === getPlanTomorrowKey()) setTomorrowItemCount(persisted.length);
           })
           .catch((reconciliationError) => {
-            setLoadError('Your saved plan could not be loaded. Retry before making changes.');
             reportDiagnostic({
               area: 'storage',
               operation: `${operationName}.reconcile`,
@@ -232,15 +232,9 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           replaceVisiblePlan(date, raw);
           setTomorrowItemCount(tomorrowRaw.length);
           setClosedDateKeys(normalizeClosedDates(closedRaw));
-          setLoadError(null);
-          setIsLoading(false);
           return true;
         }
       } catch (error) {
-        if (!cancelled && requestId === navigationRequestRef.current) {
-          setLoadError('Your saved plan could not be loaded. Retry before making changes.');
-          setIsLoading(false);
-        }
         reportDiagnostic({ area: 'storage', operation: 'plan.hydrate', severity: 'error', error });
       }
       return false;
@@ -275,7 +269,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(dayTimer);
       appStateSubscription.remove();
     };
-  }, [loadAttempt]);
+  }, []);
 
   const isToday = activeDate === getPlanTodayKey();
   const isActiveDayClosed = isToday && closedDateKeys.includes(activeDate);
@@ -305,12 +299,22 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   async function showTomorrow(): Promise<PlanItem[]> {
     const date = getPlanTomorrowKey();
     const requestId = ++navigationRequestRef.current;
+    let shouldResolveRecurring = true;
     let latest: PlanItem[] = [];
     while (requestId === navigationRequestRef.current) {
       const revisionAtStart = visibleRevisionRef.current;
-      latest = await readPlan(date);
+      if (shouldResolveRecurring) {
+        const todayItems = await readPlan(getPlanTodayKey());
+        latest = await getPlanRepository(date).update((current) => (
+          resolvePlanForDate(current, todayItems, date, () => `${Date.now()}${Math.random().toString(36).substring(2, 8)}`)
+        ));
+        shouldResolveRecurring = false;
+      } else {
+        latest = await readPlan(date);
+      }
       if (requestId !== navigationRequestRef.current) return latest;
       if (revisionAtStart !== visibleRevisionRef.current) {
+        shouldResolveRecurring = true;
         continue;
       }
       replaceVisiblePlan(date, latest);
@@ -386,7 +390,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       ...current.map((entry) => options.isPriority ? { ...entry, isPriority: false } : entry),
       item,
     ];
-    return attachPersistence(item, persistMutation(date, mutation, 'plan.addItem', [item.id]));
+    return attachPersistence(item, persistMutation(date, mutation, 'plan.addItem'));
   }
 
   function updateItem(id: string, options: PlanItemOptions) {
@@ -405,7 +409,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         : options.isPriority ? { ...item, isPriority: false } : item
     ));
     const updated: PlanItem = { ...existing, ...normalizedOptions };
-    return attachPersistence(updated, persistMutation(date, mutation, 'plan.updateItem', [id]));
+    return attachPersistence(updated, persistMutation(date, mutation, 'plan.updateItem'));
   }
 
   async function updateReminderMetadata(id: string, reminderMinutes?: number, notificationId?: string): Promise<boolean> {
@@ -537,17 +541,14 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       notificationId: undefined,
       completedAt: undefined,
     };
-    const nextTomorrow = await getPlanRepository(tomorrow).update((current) => [
-      ...current.filter((entry) => !(moved.repeatSourceId && entry.repeatSourceId === moved.repeatSourceId && entry.repeatGenerated && !entry.completed)),
-      { ...moved, repeatGenerated: false },
-    ]);
+    const nextTomorrow = await getPlanRepository(tomorrow).update((current) => [...current, moved]);
     if (activeDateRef.current === tomorrow) {
       applyVisibleMutation(tomorrow, (current) => (
         current.some((entry) => entry.id === moved.id) ? current : [...current, moved]
       ));
     }
-    // This operation uses two serialized saves. Updating the destination
-    // first guarantees the task cannot disappear from both days.
+    // A cross-key transaction is not available in AsyncStorage. Updating the
+    // destination first guarantees the task cannot disappear from both days.
     // If the source update fails, a recoverable duplicate may remain.
     const remaining = await getPlanRepository(sourceDate).update((current) => (
       current.filter((entry) => entry.id !== id)
@@ -574,10 +575,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       completedAt: undefined,
       isPriority: false,
     };
-    const nextTomorrow = await getPlanRepository(tomorrow).update((current) => [
-      ...current.filter((entry) => !(copied.repeatSourceId && entry.repeatSourceId === copied.repeatSourceId && entry.repeatGenerated && !entry.completed)),
-      { ...copied, repeatGenerated: false },
-    ]);
+    const nextTomorrow = await getPlanRepository(tomorrow).update((current) => [...current, copied]);
     if (activeDateRef.current === tomorrow) {
       applyVisibleMutation(tomorrow, (current) => (
         current.some((entry) => entry.id === copied.id) ? current : [...current, copied]
@@ -625,7 +623,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     return result;
   }
 
-  const value = useMemo(() => ({ items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, readItemsForDate, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, completeFocusItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys, readItemsForDate]);
+  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, readItemsForDate, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, completeFocusItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys, readItemsForDate]);
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 

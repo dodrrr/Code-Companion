@@ -1,0 +1,6 @@
+[
+  "artifacts/chain/lib/planRepository.ts",
+  "artifacts/chain/tests/chains-commitment-regressions.test.mjs",
+  "artifacts/chain/tests/plan-repeat-regressions.test.mjs",
+  "artifacts/chain/tests/progression.test.mjs"
+]

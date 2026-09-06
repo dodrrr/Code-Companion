@@ -1,0 +1,3038 @@
+--- a/artifacts/chain/app/(tabs)/index.tsx
++++ b/artifacts/chain/app/(tabs)/index.tsx
+@@ -16,6 +16,7 @@
+ import {
+   Chain,
+   getTodayStr,
++  getChainCommitmentStatus,
+   isRestDay,
+   toLocalDateString,
+   useChains,
+@@ -41,7 +42,7 @@
+ export default function ChainsScreen() {
+   const colors = useColors();
+   const insets = useSafeAreaInsets();
+-  const { chains, isReady, setDayStatus, isProtectedToday, isFrozenToday } = useChains();
++  const { chains, isReady, setDayStatus } = useChains();
+   const { items, activeDate, readItemsForDate } = usePlan();
+   const [localDay, setLocalDay] = useState(getTodayStr());
+   const [todayItems, setTodayItems] = useState<PlanItem[]>([]);
+@@ -92,16 +93,19 @@
+   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+   const bottomSafe = Platform.OS === 'web' ? 0 : insets.bottom;
+   const focusTask = todayItems.find((item) => item.isPriority && !item.completed);
+-  const dueChains = chains.filter((chain) => !isRestDay(chain, localDay));
++  const dueChains = chains.filter((chain) => getChainCommitmentStatus(chain, localDay).isDue);
+   const eligibleChains = dueChains.filter(
+-    (chain) => !isProtectedToday(chain) && !isFrozenToday(chain),
++    (chain) => !getChainCommitmentStatus(chain, localDay).isKept,
+   );
+   const taskChain = focusTask
+     ? eligibleChains.find((chain) => chain.id === focusTask.chainId)
+     : undefined;
+   const focusChain = taskChain ?? eligibleChains[0];
+-  const frozenChains = dueChains.filter((chain) => isFrozenToday(chain));
+-  const keptCount = dueChains.filter((chain) => isProtectedToday(chain) && !isFrozenToday(chain)).length;
++  const frozenChains = dueChains.filter((chain) => getChainCommitmentStatus(chain, localDay).status === 'frozen');
++  const keptCount = dueChains.filter((chain) => {
++    const commitment = getChainCommitmentStatus(chain, localDay);
++    return commitment.isKept && commitment.status !== 'frozen';
++  }).length;
+   const allProtected = chains.length > 0 && eligibleChains.length === 0;
+   const allResting = chains.length > 0 && dueChains.length === 0;
+ 
+@@ -110,6 +114,7 @@
+   const yesterdayKey = toLocalDateString(yesterday);
+   const recoveryChain = eligibleChains.find(
+     (chain) => chain.createdAt < localDay
++      && chain.cadence === 'daily'
+       && !isRestDay(chain, yesterdayKey)
+       && !chain.completedDates.includes(yesterdayKey)
+       && !chain.minimumDates.includes(yesterdayKey)
+--- a/artifacts/chain/app/(tabs)/plan.tsx
++++ b/artifacts/chain/app/(tabs)/plan.tsx
+@@ -23,7 +23,7 @@
+ import { useColors } from '@/hooks/useColors';
+ import { EXTRA_CHAIN_COLORS } from '@/constants/colors';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+-import { Chain, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
++import { Chain, getTodayStr, getChainCommitmentStatus, isRestDay, useChains } from '@/context/ChainsContext';
+ import { PlanItem, usePlan } from '@/context/PlanContext';
+ import { decodeMorningBriefingTime, parsePlanTimeSlot } from '@/domain/plan';
+ import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+@@ -33,6 +33,7 @@
+ import { CLOCK_MINUTE_OPTIONS, isClockMinuteOption } from '@/constants/time';
+ import { playFeedback } from '@/lib/feedback';
+ import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ 
+ const QUICK_TIMES = ['7 AM', '9 AM', '12 PM', '3 PM', '6 PM', '8 PM'];
+ const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
+@@ -81,7 +82,7 @@
+   const insets = useSafeAreaInsets();
+   const { fontScale } = useWindowDimensions();
+   const { chains, setDayStatus, isProtectedToday } = useChains();
+-  const { items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem } = usePlan();
++  const { items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem } = usePlan();
+   const { taskId, planDate } = useLocalSearchParams<{ taskId?: string; planDate?: string }>();
+   const [inputText, setInputText] = useState('');
+   const [selectedTime, setSelectedTime] = useState('');
+@@ -101,10 +102,9 @@
+   const [briefingReady, setBriefingReady] = useState(false);
+   const [showBriefingPicker, setShowBriefingPicker] = useState(false);
+   const [editingItem, setEditingItem] = useState<PlanItem | null>(null);
+-  const [showCompletion, setShowCompletion] = useState(false);
+   const [showReminderPermission, setShowReminderPermission] = useState(false);
+   const [showDayReview, setShowDayReview] = useState(false);
+-  const [chainCompletion, setChainCompletion] = useState<{ item: PlanItem; chain: Chain; finishesAgenda: boolean } | null>(null);
++  const [chainCompletion, setChainCompletion] = useState<{ item: PlanItem; chain: Chain } | null>(null);
+   const [chainCompletionBusy, setChainCompletionBusy] = useState(false);
+   const [highlightedItemId, setHighlightedItemId] = useState<string | undefined>();
+   const [newlyAddedItemId, setNewlyAddedItemId] = useState<string | undefined>();
+@@ -477,9 +477,7 @@
+       const linkedChain = item.chainId ? chains.find((chain) => chain.id === item.chainId) : undefined;
+       const needsChainConfirmation = completing && linkedChain && !linkedChain.completedDates.includes(today);
+       if (needsChainConfirmation && linkedChain) {
+-        setChainCompletion({ item, chain: linkedChain, finishesAgenda: isLastTask });
+-      } else if (isLastTask) {
+-        setShowCompletion(true);
++        setChainCompletion({ item, chain: linkedChain });
+       }
+     } finally {
+       reminderActionIdsRef.current.delete(item.id);
+@@ -605,10 +603,6 @@
+     chainCompletionBusyRef.current = true;
+     setChainCompletionBusy(true);
+     const completion = chainCompletion;
+-    const remainingChainsAreDone = chains
+-      .filter((chain) => chain.id !== completion.chain.id)
+-      .every((chain) => isRestDay(chain, today) || isProtectedToday(chain));
+-    const shouldCelebrate = completion.finishesAgenda && remainingChainsAreDone;
+     const result = await setDayStatus(completion.chain.id, today, 'done');
+     chainCompletionBusyRef.current = false;
+     setChainCompletionBusy(false);
+@@ -619,7 +613,6 @@
+     }
+     playFeedback('success');
+     setChainCompletion(null);
+-    if (shouldCelebrate) setShowCompletion(true);
+   }
+ 
+   function chooseCustomTime() {
+@@ -658,9 +651,20 @@
+     void closeToday().then(showTomorrow);
+   }
+ 
+-  function prepareTomorrowWithClosure() {
+-    setShowCompletion(false);
+-    void closeToday().then(showTomorrow);
++  if (isLoading || loadError) {
++    return (
++      <AmbientScreen tone="plan" style={styles.root}>
++        <View style={[styles.header, { paddingTop: topPad + 12 }]}>
++          <Text style={[styles.headerTitle, { color: colors.foreground }]}>Plan</Text>
++          <Text accessibilityLiveRegion="polite" style={[styles.headerSub, { color: colors.mutedForeground }]}>
++            {isLoading ? 'Loading your plan…' : loadError}
++          </Text>
++          {!isLoading && <Pressable accessibilityRole="button" accessibilityLabel="Retry loading your saved plan" onPress={retryLoad} style={[styles.addConfirmBtn, { backgroundColor: colors.primary, marginTop: 16 }]}>
++            <Text style={[styles.addConfirmText, { color: colors.primaryForeground }]}>Retry</Text>
++          </Pressable>}
++        </View>
++      </AmbientScreen>
++    );
+   }
+ 
+   return (
+@@ -687,18 +691,15 @@
+         ) : (
+           <View style={[styles.reflectCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+             <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
+-            {chains.map((chain, index) => {
+-              const done = chain.completedDates.includes(today);
+-              const minimum = chain.minimumDates.includes(today);
+-              const frozen = chain.frozenDates.includes(today);
+-              return <ChainReflection key={chain.id} chain={chain} done={done} minimum={minimum} frozen={frozen} resting={isRestDay(chain, today)} isLast={index === chains.length - 1} />;
+-            })}
++            {chains.map((chain, index) => (
++              <ChainReflection key={chain.id} chain={chain} date={today} isLast={index === chains.length - 1} />
++            ))}
+           </View>
+         )}</>}
+ 
+         {!isToday && items.length > 0 && (
+           <View style={[styles.tomorrowSet, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '55' }]}>
+-            <View style={[styles.tomorrowSetIcon, { backgroundColor: colors.primary + '22' }]}><Ionicons name="moon" size={20} color={colors.primary} /></View>
++            <View style={[styles.tomorrowSetIcon, { backgroundColor: colors.primary + '22' }]}><ChainSymbol name="rest" size={20} color={colors.primary} /></View>
+             <View style={styles.tomorrowSetCopy}><Text style={[styles.tomorrowSetTitle, { color: colors.foreground }]}>Tomorrow is set</Text><Text style={[styles.tomorrowSetBody, { color: colors.mutedForeground }]}>{items.length} tasks{plannedFocusMinutes ? ` · ${formatDurationLabel(plannedFocusMinutes)} of focus` : ''}{reminderCount ? ` · ${reminderCount === 1 ? 'reminder' : 'reminders'} ready` : ''} · {priorityItem ? `One thing: ${priorityItem.text}` : 'Choose one thing that matters most.'}</Text></View>
+           </View>
+         )}
+@@ -739,10 +740,20 @@
+           />
+         ))}
+ 
++        {isToday && items.length > 0 && !hasPendingItems && (
++          <View accessible accessibilityLiveRegion="polite" style={[styles.planComplete, { backgroundColor: colors.card, borderColor: colors.border }]}>
++            <ChainSymbol name="check" size={20} color={colors.primary} />
++            <View style={{ flex: 1 }}>
++              <Text style={[styles.briefingTitle, { color: colors.foreground }]}>All tasks complete</Text>
++              <Text style={[styles.briefingBody, { color: colors.mutedForeground }]}>You followed through on your plan.</Text>
++            </View>
++          </View>
++        )}
++
+         {items.length === 0 && (
+           <View style={[styles.emptyFocus, { backgroundColor: colors.card, borderColor: colors.border }]}>
+             <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
+-            <View style={[styles.moonCircle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="moon" size={22} color={colors.primary} /></View>
++            <View style={[styles.moonCircle, { backgroundColor: colors.primary + '18' }]}><ChainSymbol name="rest" size={22} color={colors.primary} /></View>
+             <Text style={[styles.emptyFocusTitle, { color: colors.foreground }]}>{isToday ? 'Your day is clear.' : 'A calm start begins tonight.'}</Text>
+             <Text style={[styles.emptyFocusBody, { color: colors.mutedForeground }]}>{isToday ? 'There are no unfinished tasks waiting for you.' : 'Choose what deserves space tomorrow, then let the plan hold the rest.'}</Text>
+           </View>
+@@ -785,7 +796,7 @@
+ 
+         {isToday && !isActiveDayClosed && hasPendingItems && (
+           <Pressable accessibilityRole="button" accessibilityLabel="Start nightly reset" onPress={() => setShowDayReview(true)} style={({ pressed }) => [styles.reviewTrigger, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? OPACITY.pressed : 1 }]}>
+-            <View style={[styles.reviewIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="moon-outline" size={18} color={colors.primary} /></View>
++            <View style={[styles.reviewIcon, { backgroundColor: colors.primary + '18' }]}><ChainSymbol name="rest" size={18} color={colors.primary} /></View>
+             <View style={styles.reviewCopy}><Text style={[styles.reviewTitle, { color: colors.foreground }]}>Nightly reset</Text><Text style={[styles.reviewSubtitle, { color: colors.mutedForeground }]}>Close today, then prepare tomorrow.</Text></View>
+             <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
+           </Pressable>
+@@ -806,6 +817,7 @@
+                   onSubmitEditing={handleAdd}
+                   autoFocus
+                 />
++                {editingItem?.repeatSourceId && <Text style={[styles.chainHelper, { color: colors.mutedForeground }]}>Changes apply from this date onward. Clear all Repeat days to stop future repeats.</Text>}
+                 <ComposerMeta
+                   colors={colors}
+                   chains={chains}
+@@ -872,7 +884,6 @@
+           if (briefingHour === null || await disableMorningBriefing()) setShowBriefingPicker(false);
+         }}
+       />
+-      <CompletionMoment visible={showCompletion} onClose={() => setShowCompletion(false)} onPrepareTomorrow={prepareTomorrowWithClosure} />
+       <ReminderPermissionMoment visible={showReminderPermission} minutes={selectedReminder} onSkip={() => { setShowReminderPermission(false); void savePlanItem(false); }} onAllow={() => { void enableRemindersAndSave(); }} />
+       <DayReviewMoment visible={showDayReview} completedCount={completedCount} totalCount={items.length} protectedChains={protectedChains} chainCount={chains.length} pendingItems={items.filter((item) => !item.completed)} onMove={(item) => { void moveToTomorrow(item); }} onLetGo={(item) => { void letGo(item); }} onClose={() => setShowDayReview(false)} onPrepareTomorrow={finishDayAndPrepareTomorrow} />
+       <ChainCompletionMoment visible={!!chainCompletion} item={chainCompletion?.item} chain={chainCompletion?.chain} busy={chainCompletionBusy} onConfirm={() => { void completeLinkedChain(); }} onClose={() => { if (!chainCompletionBusy) setChainCompletion(null); }} />
+@@ -890,14 +901,40 @@
+   );
+ }
+ 
+-function ChainReflection({ chain, done, minimum, frozen, resting, isLast }: { chain: Chain; done: boolean; minimum: boolean; frozen: boolean; resting: boolean; isLast: boolean }) {
++function ChainReflection({ chain, date, isLast }: { chain: Chain; date: string; isLast: boolean }) {
+   const colors = useColors();
+   const chainTextAccent = readableAccentColor(chain.color, colors.cardSolid);
++  const commitment = getChainCommitmentStatus(chain, date);
++  const labels = {
++    done: 'done today',
++    minimum: 'minimum kept',
++    frozen: 'frozen today',
++    rest: 'rest day',
++    'weekly-target-met': 'weekly goal met',
++    pending: 'pending',
++    'not-started': 'not started',
++  };
++  const label = labels[commitment.status];
++  const symbol = commitment.status === 'minimum' ? 'minimum'
++    : commitment.status === 'frozen' ? 'freeze'
++      : commitment.status === 'rest' ? 'rest'
++        : commitment.isKept ? 'check' : null;
++  const accent = commitment.status === 'frozen' ? '#4488ff'
++    : commitment.status === 'rest' ? colors.mutedForeground : chainTextAccent;
+   return <View>
+-    <View style={styles.reflectRow}>
++    <View
++      accessible
++      accessibilityLabel={`${chain.name}. ${chain.cadence === 'weekly' ? `${commitment.weeklyProgress} of ${chain.weeklyTarget} days this week. ` : ''}${label}.`}
++      style={styles.reflectRow}
++    >
+       <View style={[styles.reflectDot, { backgroundColor: chain.color }]} />
+       <Text style={[styles.reflectName, { color: colors.foreground }]} numberOfLines={1}>{chain.name}</Text>
+-      {done ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '20' }]}><Ionicons name="checkmark" size={12} color={chainTextAccent} /><Text style={[styles.doneBadgeText, { color: chainTextAccent }]}>done today</Text></View> : minimum ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '14' }]}><Ionicons name="leaf-outline" size={12} color={chainTextAccent} /><Text style={[styles.doneBadgeText, { color: chainTextAccent }]}>minimum kept</Text></View> : frozen ? <View style={[styles.doneBadge, { backgroundColor: '#4488ff20' }]}><Ionicons name="snow" size={12} color="#4488ff" /><Text style={[styles.doneBadgeText, { color: '#4488ff' }]}>frozen today</Text></View> : resting ? <View style={[styles.doneBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="moon-outline" size={12} color={colors.mutedForeground} /><Text style={[styles.doneBadgeText, { color: colors.mutedForeground }]}>rest day</Text></View> : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>pending</Text>}
++      {symbol ? (
++        <View style={[styles.doneBadge, { backgroundColor: accent + '18' }]}>
++          <ChainSymbol name={symbol} size={12} color={accent} />
++          <Text style={[styles.doneBadgeText, { color: accent }]}>{label}</Text>
++        </View>
++      ) : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>{label}</Text>}
+     </View>
+     {!isLast && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
+   </View>;
+@@ -923,11 +960,11 @@
+     <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>TIME</Text>
+     <ScrollView ref={timeScrollRef} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeSlots}>
+       <Pressable accessibilityRole="button" accessibilityLabel={selectedTime && !QUICK_TIMES.includes(selectedTime) ? `Custom time ${selectedTime}` : 'Choose a custom time'} accessibilityState={{ selected: Boolean(selectedTime && !QUICK_TIMES.includes(selectedTime)) }} onPress={openTimePicker} style={[styles.timeChip, { backgroundColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.background, borderColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.border }]}><Ionicons name="time-outline" size={14} color={selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primaryForeground : colors.mutedForeground} /><Text style={[styles.timeChipText, { color: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primaryForeground : colors.mutedForeground }]}>{selectedTime && !QUICK_TIMES.includes(selectedTime) ? selectedTime : 'Custom'}</Text></Pressable>
+-      {QUICK_TIMES.map((time) => <Pressable key={time} accessibilityRole="radio" accessibilityLabel={`Task time ${time}`} accessibilityState={{ selected: time === selectedTime }} onPress={() => setSelectedTime(time === selectedTime ? '' : time)} style={[styles.timeChip, { backgroundColor: time === selectedTime ? colors.primary : colors.background, borderColor: time === selectedTime ? colors.primary : colors.border }]}><Text style={[styles.timeChipText, { color: time === selectedTime ? colors.primaryForeground : colors.mutedForeground }]}>{time}</Text></Pressable>)}
++      {QUICK_TIMES.map((time) => <Pressable key={time} accessibilityRole="button" accessibilityLabel={`Task time ${time}`} accessibilityState={{ selected: time === selectedTime }} onPress={() => setSelectedTime(time === selectedTime ? '' : time)} style={[styles.timeChip, { backgroundColor: time === selectedTime ? colors.primary : colors.background, borderColor: time === selectedTime ? colors.primary : colors.border }]}><Text style={[styles.timeChipText, { color: time === selectedTime ? colors.primaryForeground : colors.mutedForeground }]}>{time}</Text></Pressable>)}
+     </ScrollView>
+     <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>ADD TO A CHAIN · OPTIONAL</Text>
+     <Text style={[styles.chainHelper, { color: colors.mutedForeground }]}>Only link tasks that move that chain forward. Unlinked tasks stay neutral.</Text>
+-    <FlatList data={[{ id: '', name: 'No chain', color: colors.mutedForeground }, ...chains]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(chain) => chain.id} contentContainerStyle={styles.chainChoices} renderItem={({ item: chain }) => { const selected = (chain.id || undefined) === selectedChainId; return <Pressable accessibilityRole="radio" accessibilityLabel={chain.id ? `Link to ${chain.name}` : 'Do not link a chain'} accessibilityState={{ selected }} onPress={() => setSelectedChainId(chain.id || undefined)} style={[styles.chainChip, { borderColor: selected ? chain.color : colors.border, backgroundColor: selected ? chain.color + '1F' : colors.background }]}><View style={[styles.chainChipDot, { backgroundColor: chain.color }]} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{chain.name}</Text></Pressable>; }} />
++    <FlatList data={[{ id: '', name: 'No chain', color: colors.mutedForeground }, ...chains]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(chain) => chain.id} contentContainerStyle={styles.chainChoices} renderItem={({ item: chain }) => { const selected = (chain.id || undefined) === selectedChainId; return <Pressable accessibilityRole="radio" accessibilityLabel={chain.id ? `Link to ${chain.name}` : 'Do not link a chain'} accessibilityState={{ checked: selected }} onPress={() => setSelectedChainId(chain.id || undefined)} style={[styles.chainChip, { borderColor: selected ? chain.color : colors.border, backgroundColor: selected ? chain.color + '1F' : colors.background }]}><View style={[styles.chainChipDot, { backgroundColor: chain.color }]} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{chain.name}</Text></Pressable>; }} />
+     {allowPriority && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>{priorityForToday ? 'TODAY\'S ONE THING · OPTIONAL' : 'TOMORROW\'S ONE THING · OPTIONAL'}</Text><Pressable accessibilityRole="switch" accessibilityLabel="Make this your one thing" accessibilityState={{ checked: isPriority }} onPress={() => setIsPriority(!isPriority)} style={[styles.priorityPick, { borderColor: isPriority ? colors.primary : colors.border, backgroundColor: isPriority ? colors.primary + '1A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sparkles-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Make this your one thing</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>The task that matters most {priorityForToday ? 'today' : 'tomorrow'}.</Text></View>{isPriority && <Ionicons name="checkmark-circle" size={19} color={colors.primary} />}</Pressable></>}
+     <Pressable accessibilityRole="button" accessibilityLabel="Task details" accessibilityHint="Opens color, repeat, focus and reminder options" accessibilityState={{ expanded: showAdvancedOptions }} onPress={() => { Keyboard.dismiss(); setShowAdvancedOptions(true); }} style={[styles.detailsToggle, { borderColor: detailsCount ? colors.primary + '70' : colors.border, backgroundColor: detailsCount ? colors.primary + '0A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="options-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Task details</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{detailsCount ? `${detailsCount} ${detailsCount === 1 ? 'detail' : 'details'} set` : 'Color, repeat, focus and reminders.'}</Text></View><Ionicons name="chevron-forward" size={18} color={detailsCount ? colors.primary : colors.mutedForeground} /></Pressable>
+     <TaskDetailsSheet
+@@ -1006,7 +1043,7 @@
+           {openSection === 'accent' && !accentLocked && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.taskDetailChips}>
+             {[undefined, ...TASK_ACCENTS].map((color, index) => {
+               const selected = color === selectedTaskColor;
+-              return <Pressable key={color ?? 'neutral'} accessibilityRole="radio" accessibilityLabel={color ? `Accent color ${index}` : 'Neutral accent'} accessibilityState={{ selected }} onPress={() => setSelectedTaskColor(color)} style={[styles.colorChoice, { borderColor: selected ? (color || colors.primary) : colors.border, backgroundColor: selected ? (color || colors.mutedForeground) + '20' : colors.background }]}>{color ? <View style={[styles.colorChoiceDot, { backgroundColor: color }]} /> : <Ionicons name="remove-outline" size={17} color={colors.mutedForeground} />}{!color && <Text style={[styles.colorChoiceText, { color: colors.mutedForeground }]}>Neutral</Text>}</Pressable>;
++              return <Pressable key={color ?? 'neutral'} accessibilityRole="radio" accessibilityLabel={color ? `Accent color ${index}` : 'Neutral accent'} accessibilityState={{ checked: selected }} onPress={() => setSelectedTaskColor(color)} style={[styles.colorChoice, { borderColor: selected ? (color || colors.primary) : colors.border, backgroundColor: selected ? (color || colors.mutedForeground) + '20' : colors.background }]}>{color ? <View style={[styles.colorChoiceDot, { backgroundColor: color }]} /> : <Ionicons name="remove-outline" size={17} color={colors.mutedForeground} />}{!color && <Text style={[styles.colorChoiceText, { color: colors.mutedForeground }]}>Neutral</Text>}</Pressable>;
+             })}
+           </ScrollView>}
+ 
+@@ -1019,7 +1056,7 @@
+             onPress={() => toggleSection('repeat')}
+             colors={colors}
+           />
+-          {openSection === 'repeat' && <View style={styles.sevenChoiceWrap}><SevenChoiceSelector options={WEEKDAY_OPTIONS} selectionMode="multiple" selectedValues={repeatDays} onSelectionChange={setRepeatDays} accentColor={colors.primary} selectedTextColor={colors.primaryForeground} textColor={colors.mutedForeground} borderColor={colors.border} backgroundColor={colors.background} accessibilityLabel="Repeat days" /></View>}
++          {openSection === 'repeat' && <View style={styles.sevenChoiceWrap}><SevenChoiceSelector options={WEEKDAY_OPTIONS} selectionMode="multiple" selectedValues={repeatDays} onSelectionChange={setRepeatDays} accentColor={colors.primary} selectedTextColor={colors.primaryForeground} textColor={colors.mutedForeground} borderColor={colors.border} backgroundColor={colors.background} accessibilityLabel="Repeat days" /><Text style={[styles.chainHelper, { color: colors.mutedForeground }]}>Returns on these days. Clear every day to stop future repeats. Reminders are set per task.</Text></View>}
+ 
+           <TaskDetailSectionRow
+             icon="hourglass-outline"
+@@ -1031,8 +1068,8 @@
+             colors={colors}
+           />
+           {openSection === 'focus' && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.taskDetailChips}>
+-            <Pressable accessibilityRole="radio" accessibilityLabel="No focus duration" accessibilityState={{ selected: selectedDuration === undefined }} onPress={() => setSelectedDuration(undefined)} style={[styles.detailChip, { borderColor: selectedDuration === undefined ? colors.primary : colors.border, backgroundColor: selectedDuration === undefined ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selectedDuration === undefined ? colors.primary : colors.mutedForeground }]}>None</Text></Pressable>
+-            {DURATION_OPTIONS.map((minutes) => { const selected = selectedDuration === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={`Focus for ${formatDurationLabel(minutes)}`} accessibilityState={{ selected }} onPress={() => setSelectedDuration(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{formatDurationLabel(minutes)}</Text></Pressable>; })}
++            <Pressable accessibilityRole="radio" accessibilityLabel="No focus duration" accessibilityState={{ checked: selectedDuration === undefined }} onPress={() => setSelectedDuration(undefined)} style={[styles.detailChip, { borderColor: selectedDuration === undefined ? colors.primary : colors.border, backgroundColor: selectedDuration === undefined ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selectedDuration === undefined ? colors.primary : colors.mutedForeground }]}>None</Text></Pressable>
++            {DURATION_OPTIONS.map((minutes) => { const selected = selectedDuration === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={`Focus for ${formatDurationLabel(minutes)}`} accessibilityState={{ checked: selected }} onPress={() => setSelectedDuration(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{formatDurationLabel(minutes)}</Text></Pressable>; })}
+           </ScrollView>}
+ 
+           <TaskDetailSectionRow
+@@ -1046,8 +1083,8 @@
+             colors={colors}
+           />
+           {openSection === 'reminder' && selectedTime && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.taskDetailChips}>
+-            <Pressable accessibilityRole="radio" accessibilityLabel="No reminder" accessibilityState={{ selected: selectedReminder === undefined }} onPress={() => setSelectedReminder(undefined)} style={[styles.detailChip, { borderColor: selectedReminder === undefined ? colors.primary : colors.border, backgroundColor: selectedReminder === undefined ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selectedReminder === undefined ? colors.primary : colors.mutedForeground }]}>None</Text></Pressable>
+-            {REMINDER_OPTIONS.map((minutes) => { const selected = selectedReminder === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={minutes === 0 ? 'Remind at start' : `Remind ${minutes} minutes before`} accessibilityState={{ selected }} onPress={() => setSelectedReminder(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{minutes === 0 ? 'At start' : `${minutes} min`}</Text></Pressable>; })}
++            <Pressable accessibilityRole="radio" accessibilityLabel="No reminder" accessibilityState={{ checked: selectedReminder === undefined }} onPress={() => setSelectedReminder(undefined)} style={[styles.detailChip, { borderColor: selectedReminder === undefined ? colors.primary : colors.border, backgroundColor: selectedReminder === undefined ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selectedReminder === undefined ? colors.primary : colors.mutedForeground }]}>None</Text></Pressable>
++            {REMINDER_OPTIONS.map((minutes) => { const selected = selectedReminder === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={minutes === 0 ? 'Remind at start' : `Remind ${minutes} minutes before`} accessibilityState={{ checked: selected }} onPress={() => setSelectedReminder(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{minutes === 0 ? 'At start' : `${minutes} min`}</Text></Pressable>; })}
+           </ScrollView>}
+         </ScrollView>
+         <Pressable accessibilityRole="button" accessibilityLabel="Done editing task details" onPress={onClose} style={[styles.taskDetailsDone, { backgroundColor: colors.primary }]}><Text style={[styles.taskDetailsDoneText, { color: colors.primaryForeground }]}>Done</Text></Pressable>
+@@ -1065,6 +1102,17 @@
+   const chainTextAccent = readableAccentColor(accentColor, colors.cardSolid);
+   const borderColor = highlighted ? displayAccent : item.isPriority ? colors.primary : item.completed ? displayAccent + '48' : colors.border;
+   const backgroundColor = highlighted ? accentColor + '14' : item.isPriority ? colors.primary + '0D' : item.completed ? accentColor + '12' : colors.card;
++  const taskSummary = [
++    item.text,
++    item.timeSlot || 'Anytime',
++    item.durationMinutes ? `${formatDurationLabel(item.durationMinutes)} focus` : undefined,
++    item.isPriority ? 'Your one thing' : undefined,
++    chainName ? `Linked to ${chainName}` : undefined,
++    item.completed ? 'Completed' : 'Not completed',
++    item.reminderMinutes !== undefined
++      ? item.reminderMinutes === 0 ? 'Reminder at start' : `Reminder ${item.reminderMinutes} minutes before`
++      : undefined,
++  ].filter(Boolean).join('. ');
+   const arrival = useRef(new Animated.Value(1)).current;
+   useEffect(() => {
+     if (!newlyAdded || reduceMotion) {
+@@ -1079,8 +1127,8 @@
+   return <Animated.View style={[styles.planItem, { backgroundColor, borderColor, marginBottom: isLast ? 20 : 8, opacity: arrival, transform: [{ translateY: arrival.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }, { scale: arrival.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }]}>
+     <GlassSurface pointerEvents="none" accentColor={displayAccent} style={StyleSheet.absoluteFill} />
+     <View style={[styles.planBar, { backgroundColor: item.completed ? displayAccent + 'A8' : displayAccent }]} />
+-    <Pressable accessibilityRole="checkbox" accessibilityLabel={reminderSyncing ? `Saving reminder for ${item.text}` : item.completed ? `Mark ${item.text} incomplete` : `Complete ${item.text}`} accessibilityState={{ checked: item.completed, disabled: completionLocked, busy: reminderSyncing }} hitSlop={8} disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? displayAccent : completionLocked ? 'transparent' : displayAccent + '14', borderColor: item.completed ? displayAccent : completionLocked ? colors.mutedForeground : displayAccent, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <Ionicons name="checkmark" size={13} color={readableTextColor(displayAccent)} /> : reminderSyncing ? <Ionicons name="hourglass-outline" size={12} color={colors.mutedForeground} /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
+-    <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${item.text}`} accessibilityState={{ disabled: locked }} disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
++    <Pressable accessibilityRole="checkbox" accessibilityLabel={reminderSyncing ? `Saving reminder for ${item.text}` : item.completed ? `Mark ${item.text} incomplete` : `Complete ${item.text}`} accessibilityState={{ checked: item.completed, disabled: completionLocked, busy: reminderSyncing }} hitSlop={8} disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? displayAccent : completionLocked ? 'transparent' : displayAccent + '14', borderColor: item.completed ? displayAccent : completionLocked ? colors.mutedForeground : displayAccent, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <ChainSymbol name="check" size={13} color={readableTextColor(displayAccent)} /> : reminderSyncing ? <Ionicons name="hourglass-outline" size={12} color={colors.mutedForeground} /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
++    <Pressable accessibilityRole="button" accessibilityLabel={taskSummary} accessibilityHint={locked ? undefined : 'Opens task editing'} accessibilityState={{ disabled: locked }} disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
+       <View style={styles.planMeta}>{item.isPriority && <View style={[styles.priorityBadge, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="sparkles" size={10} color={colors.primary} /><Text style={[styles.priorityBadgeText, { color: colors.primary }]}>ONE THING</Text></View>}{completionLocked && !locked && <View style={[styles.tomorrowBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /><Text style={[styles.tomorrowBadgeText, { color: colors.mutedForeground }]}>TOMORROW</Text></View>}{item.timeSlot ? <Text style={[styles.planTime, { color: textAccent }]}>{item.timeSlot}{item.durationMinutes ? `  ·  ${formatDurationLabel(item.durationMinutes)}` : ''}{item.reminderMinutes !== undefined ? `  ·  ${item.reminderMinutes === 0 ? 'AT START' : `${item.reminderMinutes} MIN REMINDER`}` : ''}</Text> : <Text style={[styles.planTime, { color: item.isPriority ? colors.primary : colors.mutedForeground }]}>{item.durationMinutes ? `${formatDurationLabel(item.durationMinutes)} BLOCK` : 'ANYTIME'}</Text>}{chainName && <View style={[styles.linkBadge, { backgroundColor: accentColor + '1A' }]}><Ionicons name="link-outline" size={10} color={chainTextAccent} /><Text style={[styles.linkBadgeText, { color: chainTextAccent }]}>{chainName}</Text></View>}</View>
+       <Text style={[styles.planText, { color: item.completed ? colors.foreground + 'A6' : colors.foreground, textDecorationLine: item.completed ? 'line-through' : 'none', textDecorationColor: item.completed ? colors.primary : undefined, textDecorationStyle: 'solid' }]} numberOfLines={2}>{item.text}</Text>
+     </Pressable>
+@@ -1095,32 +1143,9 @@
+   const titleStyle = { ...TYPE.sectionTitle, color: colors.foreground, marginBottom: SPACE.md } as const;
+   const actionStyle = { minHeight: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, paddingHorizontal: SPACE.md, marginBottom: SPACE.xs } as const;
+   const actionTextStyle = { ...TYPE.bodyStrong } as const;
+-  return <Modal transparent visible animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={onClose}><View style={completionStyles.shade}><View accessibilityViewIsModal style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch' }]}><Text style={titleStyle} numberOfLines={1}>{item.text}</Text>{showFocus && <Pressable accessibilityRole="button" accessibilityLabel={`Start focus for ${formatDurationLabel(item.durationMinutes || 0)}`} onPress={onFocus} style={[actionStyle, { backgroundColor: colors.primary }]}><Ionicons name="play" size={16} color={colors.primaryForeground} /><Text style={[actionTextStyle, { color: colors.primaryForeground }]}>Start focus · {formatDurationLabel(item.durationMinutes || 0)}</Text></Pressable>}{showCopy && <Pressable accessibilityRole="button" accessibilityLabel="Copy task to tomorrow" onPress={onCopy} style={[actionStyle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="copy-outline" size={18} color={colors.primary} /><Text style={[actionTextStyle, { color: colors.primary }]}>Copy to tomorrow</Text></Pressable>}<Pressable accessibilityRole="button" accessibilityLabel="Edit task" onPress={onEdit} style={[actionStyle, { backgroundColor: colors.background }]}><Ionicons name="create-outline" size={18} color={colors.foreground} /><Text style={[actionTextStyle, { color: colors.foreground }]}>Edit task</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Delete task" onPress={onDelete} style={[actionStyle, { backgroundColor: colors.destructive + '16' }]}><Ionicons name="trash-outline" size={18} color={colors.destructive} /><Text style={[actionTextStyle, { color: colors.destructive }]}>Delete task</Text></Pressable><Pressable accessibilityRole="button" onPress={onClose} style={completionStyles.secondaryButton}><Text style={[completionStyles.secondaryText, { color: colors.mutedForeground }]}>Cancel</Text></Pressable></View></View></Modal>;
+-}
+-
+-function CompletionMoment({ visible, onClose, onPrepareTomorrow }: { visible: boolean; onClose: () => void; onPrepareTomorrow: () => void }) {
+-  const colors = useColors();
+-  const reduceMotion = useReducedMotion();
+-  const scale = useRef(new Animated.Value(1)).current;
+-  const iconScale = useRef(new Animated.Value(1)).current;
+-  useEffect(() => {
+-    if (!visible) return;
+-    if (reduceMotion) {
+-      scale.setValue(1);
+-      iconScale.setValue(1);
+-      return;
+-    }
+-    scale.setValue(0.97);
+-    iconScale.setValue(0.96);
+-    const animation = Animated.parallel([
+-      Animated.timing(scale, { toValue: 1, duration: MOTION.standard, useNativeDriver: true }),
+-      Animated.timing(iconScale, { toValue: 1, duration: MOTION.standard, useNativeDriver: true }),
+-    ]);
+-    animation.start();
+-    return () => animation.stop();
+-  }, [visible, scale, iconScale, reduceMotion]);
+-  return <Modal transparent visible={visible} animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={onClose}><View style={completionStyles.shade}><Animated.View accessibilityViewIsModal style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border, transform: [{ scale }] }]}><Animated.View style={[completionStyles.icon, { backgroundColor: colors.primary + '20', transform: [{ scale: iconScale }] }]}><Ionicons name="checkmark" size={30} color={colors.primary} /></Animated.View><Text style={[completionStyles.title, { color: colors.foreground }]}>Day complete</Text><Text style={[completionStyles.body, { color: colors.mutedForeground, textAlign: 'center', lineHeight: 20 }]}>You followed through today. Let that count.</Text><Pressable accessibilityRole="button" onPress={onPrepareTomorrow} style={[completionStyles.primaryButton, { backgroundColor: colors.primary }]}><Text style={[completionStyles.primaryText, { color: colors.primaryForeground }]}>Prepare tomorrow</Text></Pressable><Pressable accessibilityRole="button" onPress={onClose} style={completionStyles.secondaryButton}><Text style={[completionStyles.secondaryText, { color: colors.mutedForeground }]}>Done</Text></Pressable></Animated.View></View></Modal>;
+-}
++  return <Modal transparent visible animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={onClose}><View style={completionStyles.shade}><View accessibilityViewIsModal style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch' }]}><Text style={titleStyle} numberOfLines={1}>{item.text}</Text>{showFocus && <Pressable accessibilityRole="button" accessibilityLabel={`Start focus for ${formatDurationLabel(item.durationMinutes || 0)}`} onPress={onFocus} style={[actionStyle, { backgroundColor: colors.primary }]}><Ionicons name="play" size={16} color={colors.primaryForeground} /><Text style={[actionTextStyle, { color: colors.primaryForeground }]}>Start focus · {formatDurationLabel(item.durationMinutes || 0)}</Text></Pressable>}{showCopy && <Pressable accessibilityRole="button" accessibilityLabel="Copy task to tomorrow" onPress={onCopy} style={[actionStyle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="copy-outline" size={18} color={colors.primary} /><Text style={[actionTextStyle, { color: colors.primary }]}>Copy to tomorrow</Text></Pressable>}<Pressable accessibilityRole="button" accessibilityLabel="Edit task" onPress={onEdit} style={[actionStyle, { backgroundColor: colors.background }]}><Ionicons name="create-outline" size={18} color={colors.foreground} /><Text style={[actionTextStyle, { color: colors.foreground }]}>Edit task</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={item.repeatSourceId ? "Delete this occurrence" : "Delete task"} onPress={onDelete} style={[actionStyle, { backgroundColor: colors.destructive + '16' }]}><Ionicons name="trash-outline" size={18} color={colors.destructive} /><Text style={[actionTextStyle, { color: colors.destructive }]}>{item.repeatSourceId ? "Delete this occurrence" : "Delete task"}</Text></Pressable><Pressable accessibilityRole="button" onPress={onClose} style={completionStyles.secondaryButton}><Text style={[completionStyles.secondaryText, { color: colors.mutedForeground }]}>Cancel</Text></Pressable></View></View></Modal>;
++}
++
+ 
+ function ReminderPermissionMoment({ visible, minutes, onSkip, onAllow }: { visible: boolean; minutes?: number; onSkip: () => void; onAllow: () => void }) {
+   const colors = useColors();
+@@ -1144,7 +1169,7 @@
+     <View style={styles.modalShade}>
+       <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={onClose} />
+       <View accessibilityViewIsModal style={[styles.reviewModal, { backgroundColor: colors.card, borderColor: colors.border, maxHeight: '86%', minHeight: 0, paddingBottom: Math.max(insets.bottom, SPACE.xxl) }]}>
+-        <View style={[styles.reviewModalIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="moon" size={21} color={colors.primary} /></View>
++        <View style={[styles.reviewModalIcon, { backgroundColor: colors.primary + '18' }]}><ChainSymbol name="rest" size={21} color={colors.primary} /></View>
+         <Text style={[styles.reviewModalTitle, { color: colors.foreground }]}>Close today gently</Text>
+         <Text style={[styles.reviewModalBody, { color: colors.mutedForeground }]}>{completedCount}/{totalCount} tasks complete{chainCount ? ` · ${protectedChains}/${chainCount} chains protected.` : '.'}</Text>
+         {pendingItems.length === 0
+@@ -1292,7 +1317,7 @@
+                   key={optionHour}
+                   accessibilityRole="radio"
+                   accessibilityLabel={formatBriefingTime(optionHour)}
+-                  accessibilityState={{ selected, disabled: busy }}
++                  accessibilityState={{ checked: selected, disabled: busy }}
+                   disabled={busy}
+                   onPress={() => { void onSelect(optionHour, 0); }}
+                   style={({ pressed }) => [styles.briefingOption, { backgroundColor: selected ? colors.primary + '16' : colors.background, borderColor: selected ? colors.primary : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
+@@ -1303,7 +1328,7 @@
+                 </Pressable>;
+               })}
+ 
+-              <Pressable accessibilityRole="radio" accessibilityLabel="Turn morning briefing off" accessibilityState={{ selected: hour === null, disabled: busy }} disabled={busy} onPress={() => { void onDisable(); }} style={({ pressed }) => [styles.briefingOption, { backgroundColor: hour === null ? colors.muted : colors.background, borderColor: hour === null ? colors.mutedForeground + '55' : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}>
++              <Pressable accessibilityRole="radio" accessibilityLabel="Turn morning briefing off" accessibilityState={{ checked: hour === null, disabled: busy }} disabled={busy} onPress={() => { void onDisable(); }} style={({ pressed }) => [styles.briefingOption, { backgroundColor: hour === null ? colors.muted : colors.background, borderColor: hour === null ? colors.mutedForeground + '55' : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}>
+                 <View style={[styles.briefingOptionIcon, { backgroundColor: colors.mutedForeground + '16' }]}><Ionicons name="notifications-off-outline" size={17} color={colors.mutedForeground} /></View>
+                 <Text style={[styles.briefingOptionText, { color: colors.foreground }]}>Off</Text>
+                 {hour === null && <Ionicons name="checkmark-circle" size={20} color={colors.mutedForeground} />}
+@@ -1321,7 +1346,7 @@
+                   key={item}
+                   accessibilityRole="radio"
+                   accessibilityLabel={`${item % 12 || 12} ${item >= 12 ? 'PM' : 'AM'}`}
+-                  accessibilityState={{ selected: item === draftHour, disabled: busy }}
++                  accessibilityState={{ checked: item === draftHour, disabled: busy }}
+                   disabled={busy}
+                   onLayout={item === draftHour ? ({ nativeEvent }) => revealSelectedValue(hourListRef.current, () => hourListHeightRef.current || pickerHeight, nativeEvent.layout.y, nativeEvent.layout.height) : undefined}
+                   onPress={() => setDraftHour(item)}
+@@ -1336,7 +1361,7 @@
+                   key={item}
+                   accessibilityRole="radio"
+                   accessibilityLabel={`${item} minutes`}
+-                  accessibilityState={{ selected: item === draftMinute, disabled: busy }}
++                  accessibilityState={{ checked: item === draftMinute, disabled: busy }}
+                   disabled={busy}
+                   onLayout={item === draftMinute ? ({ nativeEvent }) => revealSelectedValue(minuteListRef.current, () => minuteListHeightRef.current || pickerHeight, nativeEvent.layout.y, nativeEvent.layout.height) : undefined}
+                   onPress={() => setDraftMinute(item)}
+@@ -1374,7 +1399,7 @@
+     <View style={styles.modalShade}><Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={onClose} /><View accessibilityViewIsModal style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border, maxHeight: height - Math.max(insets.top, SPACE.sm), paddingBottom: Math.max(insets.bottom, SPACE.xxl) }]}>
+       <View style={styles.modalHeader}><Text style={[styles.modalTitle, { color: colors.foreground }]}>Choose a time</Text><Pressable accessibilityRole="button" accessibilityLabel="Close time picker" onPress={onClose} style={styles.modalClose}><Ionicons name="close" size={22} color={colors.mutedForeground} /></Pressable></View>
+       <Text style={[styles.timePreview, { color: colors.primary }]}>{formatTime(hour, minute)}</Text>
+-      <View style={[styles.pickerColumns, { height: pickerHeight }]}><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>HOUR</Text><FlatList data={HOURS} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item % 12 || 12} ${item >= 12 ? 'PM' : 'AM'}`} accessibilityState={{ selected: item === hour }} onPress={() => setHour(item)} style={[styles.pickerValue, { backgroundColor: item === hour ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === hour ? colors.primary : colors.foreground }]}>{item % 12 || 12} {item >= 12 ? 'PM' : 'AM'}</Text></Pressable>} /></View><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={MINUTES} keyExtractor={(value) => value} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item} minutes`} accessibilityState={{ selected: item === minute }} onPress={() => setMinute(item)} style={[styles.pickerValue, { backgroundColor: item === minute ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === minute ? colors.primary : colors.foreground }]}>{item}</Text></Pressable>} /></View></View>
++      <View style={[styles.pickerColumns, { height: pickerHeight }]}><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>HOUR</Text><FlatList data={HOURS} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item % 12 || 12} ${item >= 12 ? 'PM' : 'AM'}`} accessibilityState={{ checked: item === hour }} onPress={() => setHour(item)} style={[styles.pickerValue, { backgroundColor: item === hour ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === hour ? colors.primary : colors.foreground }]}>{item % 12 || 12} {item >= 12 ? 'PM' : 'AM'}</Text></Pressable>} /></View><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={MINUTES} keyExtractor={(value) => value} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item} minutes`} accessibilityState={{ checked: item === minute }} onPress={() => setMinute(item)} style={[styles.pickerValue, { backgroundColor: item === minute ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === minute ? colors.primary : colors.foreground }]}>{item}</Text></Pressable>} /></View></View>
+       {!minuteIsOnGrid && <Text accessibilityLiveRegion="polite" style={[styles.briefingLegacyTime, { color: colors.mutedForeground }]}>The saved exact time remains unchanged until you choose a 5-minute time.</Text>}
+       <Pressable accessibilityRole="button" accessibilityLabel={minuteIsOnGrid ? `Use ${formatTime(hour, minute)}` : 'Choose a five-minute value to change this time'} accessibilityState={{ disabled: !minuteIsOnGrid }} disabled={!minuteIsOnGrid} onPress={onConfirm} style={[styles.modalConfirm, { backgroundColor: colors.primary, opacity: minuteIsOnGrid ? 1 : OPACITY.disabled }]}><Text style={[styles.modalConfirmText, { color: colors.primaryForeground }]}>{minuteIsOnGrid ? 'Use this time' : 'Choose a 5-minute time'}</Text></Pressable>
+     </View></View>
+@@ -1433,6 +1458,7 @@
+   moonCircle: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.capsule, alignItems: 'center', justifyContent: 'center', marginBottom: SPACE.hairline },
+   emptyFocusTitle: { ...TYPE.sectionTitle, textAlign: 'center' },
+   emptyFocusBody: { ...TYPE.body, textAlign: 'center' },
++  planComplete: { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.card, borderWidth: StyleSheet.hairlineWidth, padding: SPACE.md, marginBottom: SPACE.md, gap: SPACE.md },
+   planItem: { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.card, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingRight: SPACE.sm, paddingVertical: SPACE.sm, marginBottom: SPACE.xs, gap: SPACE.xs, overflow: 'hidden' },
+   planBar: { width: SPACE.xxs, alignSelf: 'stretch' },
+   planCheck: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, alignItems: 'center', justifyContent: 'center' },
+--- a/artifacts/chain/app/chain/[id].tsx
++++ b/artifacts/chain/app/chain/[id].tsx
+@@ -33,7 +33,7 @@
+   useChains,
+ } from '@/context/ChainsContext';
+ import { FOCUS_LOG_KEY, type FocusLogEntry } from '@/context/PlanContext';
+-import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
++import { formatStreakCount, getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
+ import { AmbientScreen } from '@/components/AmbientSurface';
+ import AnimatedPressable from '@/components/AnimatedPressable';
+ import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
+@@ -43,6 +43,7 @@
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { playFeedback } from '@/lib/feedback';
+ import { normalizeFocusLog } from '@/domain/plan';
++import { getChainCommitmentStatus } from '@/domain/chains';
+ import { reportDiagnostic } from '@/lib/diagnostics';
+ 
+ const FROZEN_COLOR = '#5B8CFF';
+@@ -105,16 +106,14 @@
+   const hour = top(hourCounts);
+   const day = top(weekdayCounts);
+   const sessions = focusLog.filter((entry) => entry.chainId === chain.id);
+-  const focusDays = new Map<number, number>();
+-  sessions.forEach((entry) => { const weekday = new Date(`${entry.date}T12:00:00`).getDay(); focusDays.set(weekday, (focusDays.get(weekday) || 0) + entry.minutes); });
+   const minutes = sessions.reduce((total, entry) => total + entry.minutes, 0);
+-  return { hour, day: top(focusDays) ?? day, minutes, samples: stamps.length };
++  return { hour, day, minutes, samples: stamps.length };
+ }
+ 
+ function readableHour(hour?: number) {
+   if (hour === undefined) return 'still forming';
+   const start = new Date(2024, 0, 1, hour, 0);
+-  const end = new Date(2024, 0, 1, hour + 2, 0);
++  const end = new Date(2024, 0, 1, hour + 1, 0);
+   const options = { hour: 'numeric' } as const;
+   return `${start.toLocaleTimeString(undefined, options)}–${end.toLocaleTimeString(undefined, options)}`;
+ }
+@@ -179,7 +178,7 @@
+           : minimum
+             ? 'minimum version'
+             : frozen
+-              ? 'frozen'
++              ? chain.cadence === 'weekly' ? 'saved freeze, no weekly credit' : 'frozen'
+               : isBeforeChain
+                 ? 'before this chain started'
+                 : isFuture
+@@ -188,7 +187,7 @@
+                     ? 'rest day'
+                     : isToday
+                       ? 'pending'
+-                      : 'missed';
++                      : chain.cadence === 'weekly' ? 'not logged' : 'missed';
+         const localizedDate = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+           weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+         });
+@@ -200,7 +199,7 @@
+             ? { backgroundColor: FROZEN_COLOR + '33', borderColor: FROZEN_COLOR }
+             : status === 'rest day'
+               ? { backgroundColor: colors.secondary, borderColor: colors.border }
+-            : status === 'missed'
++            : status === 'missed' || status === 'not logged'
+               ? { backgroundColor: 'transparent', borderColor: colors.border }
+               : status === 'pending'
+                 ? { backgroundColor: 'transparent', borderColor: chain.color }
+@@ -222,7 +221,7 @@
+             ]}
+           >
+             <View style={[styles.monthDay, stateStyle, status === 'pending' && { borderColor: chain.color, borderWidth: 2 }]}>
+-              {frozen ? <Ionicons name="snow" size={13} color={FROZEN_COLOR} /> : minimum ? <Ionicons name="leaf-outline" size={13} color={accentText} /> : status === 'rest day' ? <Ionicons name="remove" size={15} color={colors.mutedForeground} /> : <Text maxFontSizeMultiplier={1.4} style={[styles.monthDayText, { color: done ? solidAccentText : date < today ? colors.mutedForeground : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
++              {frozen ? <ChainSymbol name="freeze" size={13} color={FROZEN_COLOR} /> : minimum ? <ChainSymbol name="minimum" size={13} color={accentText} /> : status === 'rest day' ? <ChainSymbol name="rest" size={13} color={colors.mutedForeground} /> : <Text maxFontSizeMultiplier={1.4} style={[styles.monthDayText, { color: done ? solidAccentText : date < today ? colors.mutedForeground : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
+             </View>
+           </Pressable>
+         );
+@@ -252,7 +251,8 @@
+     isReady,
+   } = useChains();
+   const [month, setMonth] = useState(() => startOfMonth(new Date()));
+-  const [scheduleOpen, setScheduleOpen] = useState(false);
++  const [settingsOpen, setSettingsOpen] = useState(false);
++  const [progressOpen, setProgressOpen] = useState(false);
+   const [showMoreColors, setShowMoreColors] = useState(false);
+   const [minimumEditorOpen, setMinimumEditorOpen] = useState(false);
+   const [minimumDraft, setMinimumDraft] = useState('');
+@@ -309,6 +309,8 @@
+   }
+ 
+   const streak = getStreak(chain);
++  const commitment = getChainCommitmentStatus(chain);
++  const isWeekly = chain.cadence === 'weekly';
+   const done = isCompletedToday(chain);
+   const frozen = isFrozenToday(chain);
+   const freezeTokens = getRemainingFreezeTokens(chain);
+@@ -317,7 +319,7 @@
+   const totalProtected = chain.completedDates.length + chain.minimumDates.length;
+   const dueDaysSinceStart = countDueDays(chain, getTodayStr());
+   const consistency = Math.min(100, Math.round((totalProtected / dueDaysSinceStart) * 100));
+-  const restingToday = isRestDay(chain, getTodayStr());
++  const restingToday = commitment.status === 'rest';
+   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
+   const rhythm = rhythmFrom(chain, focusLog);
+   const weekStart = new Date();
+@@ -387,7 +389,7 @@
+   }
+ 
+   async function handleFreeze() {
+-    if (!chain || freezeTokens === 0) return;
++    if (!chain || isWeekly || freezeTokens === 0) return;
+     const updated = await commitChainChange(() => useFreeze(chain.id));
+     if (!updated) return;
+     playFeedback('light');
+@@ -430,6 +432,10 @@
+ 
+   async function changeRestDays(restDays: number[]) {
+     if (!chain) return;
++    if (new Set(restDays).size >= 7) {
++      Alert.alert('Keep one active day', 'Choose up to six rest days so this Chain has a day to return to.');
++      return;
++    }
+     const updated = await commitChainChange(() => updateChainRestDays(chain.id, restDays));
+     if (!updated) return;
+     playFeedback('selection');
+@@ -441,6 +447,7 @@
+ 
+   async function applyDayStatus(date: string, status: DayStatus) {
+     if (!chain) return;
++    if (isWeekly && status === 'frozen') return;
+     if (mutationBusyRef.current) return;
+     mutationBusyRef.current = true;
+     const result = await setDayStatus(chain.id, date, status);
+@@ -459,14 +466,18 @@
+   }
+ 
+   function handleSelectDay(date: string) {
++    if (!chain) return;
+     const prettyDate = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+       weekday: 'long', month: 'long', day: 'numeric',
+     });
+-    Alert.alert('Update day', prettyDate, [
++    const note = isWeekly && chain.frozenDates.includes(date)
++      ? `${prettyDate}\nThis saved freeze does not count towards your weekly goal. Replacing or clearing it returns its credit, up to the two-credit limit.`
++      : prettyDate;
++    Alert.alert('Update day', note, [
+       { text: 'Done', onPress: () => { void applyDayStatus(date, 'done'); } },
+       { text: 'Minimum version', onPress: () => { void applyDayStatus(date, 'minimum'); } },
+-      { text: 'Freeze', onPress: () => { void applyDayStatus(date, 'frozen'); } },
+-      { text: 'Missed', style: 'destructive', onPress: () => { void applyDayStatus(date, 'missed'); } },
++      ...(!isWeekly ? [{ text: 'Freeze', onPress: () => { void applyDayStatus(date, 'frozen'); } }] : []),
++      { text: isWeekly ? 'Clear entry' : 'Missed', style: 'destructive', onPress: () => { void applyDayStatus(date, 'missed'); } },
+       { text: 'Cancel', style: 'cancel' },
+     ]);
+   }
+@@ -484,16 +495,6 @@
+         >
+           <Ionicons name="chevron-back" size={24} color={colors.foreground} />
+         </AnimatedPressable>
+-        <AnimatedPressable
+-          onPress={handleDelete}
+-          accessibilityRole="button"
+-          accessibilityLabel={`Delete ${chain.name}`}
+-          accessibilityHint="Asks for confirmation before permanently deleting this chain."
+-          style={styles.deleteBtn}
+-          scaleTo={0.94}
+-        >
+-          <Ionicons name="trash-outline" size={20} color={colors.destructive} />
+-        </AnimatedPressable>
+       </View>
+ 
+       <ScrollView
+@@ -503,182 +504,26 @@
+         {/* Chain name + color bar */}
+         <View style={[styles.titleRow]}>
+           <View style={[styles.colorDot, { backgroundColor: chain.color }]} />
+-          <Text style={[styles.chainName, { color: colors.foreground }]}>
++          <Text accessibilityRole="header" style={[styles.chainName, { color: colors.foreground }]}>
+             {chain.name}
+           </Text>
+         </View>
+ 
+-        <View style={styles.accentSection}>
+-          <SectionLabel>CHAIN ACCENT</SectionLabel>
+-          <View style={styles.colorRow}>
+-            {[...CHAIN_COLORS, ...(showMoreColors ? EXTRA_CHAIN_COLORS : [])].map((color) => {
+-              const selected = color === chain.color;
+-              return (
+-                <AnimatedPressable
+-                  key={color}
+-                  accessibilityRole="radio"
+-                  accessibilityLabel={`${COLOR_NAMES[color] ?? 'Custom'} chain color`}
+-                  accessibilityState={{ checked: selected }}
+-                  onPress={() => handleColorChange(color)}
+-                  style={[
+-                    styles.colorRing,
+-                    {
+-                      borderColor: selected ? color : 'transparent',
+-                    },
+-                  ]}
+-                  scaleTo={0.92}
+-                >
+-                  <View style={[styles.colorSwatch, { backgroundColor: color }]}>
+-                    {selected && <Ionicons name="checkmark" size={16} color={readableTextColor(color)} />}
+-                  </View>
+-                </AnimatedPressable>
+-              );
+-            })}
+-            <AnimatedPressable
+-              onPress={() => setShowMoreColors((open) => !open)}
+-              accessibilityRole="button"
+-              accessibilityLabel={showMoreColors ? 'Show fewer chain colors' : 'Show more chain colors'}
+-              accessibilityState={{ expanded: showMoreColors }}
+-              style={[styles.colorRing, { borderColor: colors.border }]}
+-              scaleTo={0.92}
+-            >
+-              <View style={[styles.colorSwatch, { backgroundColor: colors.card }]}>
+-                <Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={15} color={colors.mutedForeground} />
+-              </View>
+-            </AnimatedPressable>
+-          </View>
+-        </View>
+-
+-        <Surface style={styles.scheduleCard}>
+-          <AnimatedPressable
+-            onPress={() => setScheduleOpen((open) => !open)}
+-            accessibilityRole="button"
+-            accessibilityLabel={chain.cadence === 'weekly' ? 'Weekly goal' : 'Weekly schedule'}
+-            accessibilityState={{ expanded: scheduleOpen }}
+-            style={styles.scheduleHeader}
+-          >
+-            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}>
+-              <Ionicons name="calendar-outline" size={18} color={accentText} />
+-            </View>
+-            <View style={styles.scheduleCopy}>
+-              <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>
+-                {chain.cadence === 'weekly' ? 'Weekly goal' : 'Weekly schedule'}
+-              </Text>
+-              <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>
+-                {chain.cadence === 'weekly'
+-                  ? `${weeklyProgress}/${chain.weeklyTarget} days this week`
+-                  : chain.restDays.length
+-                    ? `${SCHEDULE_DAYS.filter(({ value }) => chain.restDays.includes(value)).map(({ label }) => label).join(', ')} off`
+-                    : 'Every day counts'}
+-              </Text>
+-            </View>
+-            <Ionicons name={scheduleOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
+-          </AnimatedPressable>
+-          {scheduleOpen && (
+-            <View style={styles.scheduleExpanded}>
+-              <Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>
+-                {chain.cadence === 'weekly'
+-                  ? 'Reach your target in a week to extend your week streak.'
+-                  : 'Choose rest days. They never break your streak.'}
+-              </Text>
+-              <View style={styles.scheduleSelector}>
+-                <SevenChoiceSelector
+-                  options={chain.cadence === 'weekly' ? WEEKLY_TARGET_OPTIONS : REST_DAY_OPTIONS}
+-                  selectionMode={chain.cadence === 'weekly' ? 'single' : 'multiple'}
+-                  selectedValues={chain.cadence === 'weekly' ? [chain.weeklyTarget] : chain.restDays}
+-                  onSelectionChange={(selectedValues) => {
+-                    if (chain.cadence === 'weekly') {
+-                      const target = selectedValues[0];
+-                      if (target !== undefined) void changeWeeklyTarget(target);
+-                    } else {
+-                      void changeRestDays(selectedValues);
+-                    }
+-                  }}
+-                  accentColor={chain.color}
+-                  selectedTextColor={solidAccentText}
+-                  textColor={colors.mutedForeground}
+-                  borderColor={colors.border}
+-                  backgroundColor={colors.background}
+-                  accessibilityLabel={chain.cadence === 'weekly' ? 'Weekly target' : 'Rest days'}
+-                />
+-              </View>
+-            </View>
+-          )}
+-        </Surface>
+-
+-        <View style={[styles.minimumPanel, { backgroundColor: chain.color + '12', borderColor: chain.color + '44' }]}>
+-          <AnimatedPressable
+-            onPress={editMinimum}
+-            accessibilityRole="button"
+-            accessibilityLabel="Edit minimum version"
+-            accessibilityValue={{ text: chain.minimumLabel }}
+-            accessibilityHint="Opens the minimum version editor."
+-            style={styles.minimumCard}
+-          >
+-            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+-              <ChainSymbol name="minimum" size={20} color={accentText} />
+-            </View>
+-            <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+-            <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+-            <Ionicons name="chevron-forward" size={17} color={accentText} />
+-          </AnimatedPressable>
+-        </View>
+-
+-        {/* Streak hero */}
+-        <View style={[styles.streakHero, { backgroundColor: chain.color + '14', borderColor: chain.color + '33' }]}>
+-          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={[styles.streakNumber, { color: accentText }]}>{streak}</Text>
+-          <Text style={[styles.streakWord, { color: colors.mutedForeground }]}>
+-            {chain.cadence === 'weekly' ? 'week streak' : 'day streak'}
++        <SectionLabel>TODAY</SectionLabel>
++        {!restingToday && (
++          <Text style={[styles.todayStatus, { color: colors.mutedForeground }]}>
++            {done ? 'Full version logged. Tap below to undo.'
++              : commitment.status === 'minimum' ? `Minimum logged: ${chain.minimumLabel}. You can still do the full version.`
++              : frozen ? 'Today is frozen. You can still log the full version.'
++              : isWeekly && commitment.weeklyTargetMet ? 'Weekly goal met. Another check-in is optional.'
++              : isWeekly ? `${Math.max(0, chain.weeklyTarget - weeklyProgress)} more day${chain.weeklyTarget - weeklyProgress === 1 ? '' : 's'} to reach your weekly goal.`
++              : 'Ready for today’s check-in.'}
+           </Text>
+-          <Text style={[styles.streakSub, { color: colors.mutedForeground }]}>
+-            {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : `${totalCompleted} total completed`}
+-          </Text>
+-          <View style={[styles.stagePill, { backgroundColor: chain.color + '22' }]}><Text style={[styles.stageText, { color: accentText }]}>{stage.label.toUpperCase()} · {stage.copy}</Text></View>
+-          {nextStage ? <View style={styles.nextStage}><View style={[styles.nextStageTrack, { backgroundColor: chain.color + '22' }]}><View style={[styles.nextStageFill, { backgroundColor: chain.color, width: `${Math.max(5, stageProgress * 100)}%` }]} /></View><Text style={[styles.nextStageText, { color: colors.mutedForeground }]}>{nextStage.at - streak} {stageUnit}{nextStage.at - streak === 1 ? '' : 's'} to {nextStage.label}</Text></View> : <Text style={[styles.nextStageText, { color: accentText }]}>Your long-term rhythm is built.</Text>}
+-        </View>
+-
+-        <Surface style={styles.milestoneCard}>
+-          <Text style={[styles.milestoneTitle, { color: colors.mutedForeground }]}>MILESTONES</Text>
+-          <View style={styles.milestoneRow}>
+-            {PROGRESSION_STAGES.filter((item) => [1, 7, 30, 100, 365].includes(item.at)).map((milestone) => {
+-              const unlocked = streak >= milestone.at;
+-              const milestoneLabel = milestone.at === 365 ? '1 year' : `${milestone.at} ${stageUnit}${milestone.at === 1 ? '' : 's'}`;
+-              return (
+-                <View
+-                  key={milestone.key}
+-                  accessible
+-                  accessibilityLabel={`${milestoneLabel}, ${unlocked ? 'unlocked' : 'locked'}`}
+-                  style={styles.milestoneItem}
+-                >
+-                  <View style={[styles.milestoneDot, { backgroundColor: unlocked ? chain.color : colors.background, borderColor: unlocked ? chain.color : colors.border }]}>
+-                    <Ionicons name={unlocked ? 'checkmark' : 'lock-closed'} size={13} color={unlocked ? solidAccentText : colors.mutedForeground} />
+-                  </View>
+-                  <Text style={[styles.milestoneLabel, { color: unlocked ? accentText : colors.mutedForeground }]}>
+-                    {milestone.at === 365 ? '1y' : milestone.at}
+-                  </Text>
+-                </View>
+-              );
+-            })}
+-          </View>
+-        </Surface>
+-
+-        <Surface style={styles.insightsCard}>
+-          <View style={styles.insight}><Text style={[styles.insightValue, { color: accentText }]}>{chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget}` : `${consistency}%`}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>{chain.cadence === 'weekly' ? 'THIS WEEK' : 'CONSISTENCY'}</Text></View>
+-          <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
+-          <View style={styles.insight}><Text style={[styles.insightValue, { color: colors.foreground }]}>{totalProtected}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>DAYS KEPT</Text></View>
+-          <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
+-          <View style={styles.insight}><Text style={[styles.insightValue, { color: '#5B8CFF' }]}>{chain.frozenDates.length}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>PROTECTED</Text></View>
+-        </Surface>
+-
+-        <View style={[styles.rhythmCard, { backgroundColor: chain.color + '10', borderColor: chain.color + '38' }]}>
+-          <View style={[styles.rhythmIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="pulse-outline" size={18} color={accentText} /></View>
+-          <View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: accentText }]}>RHYTHM</Text><Text style={[styles.rhythmTitle, { color: colors.foreground }]}>{rhythm.samples >= 3 ? `You usually protect this around ${readableHour(rhythm.hour)}.` : 'Your rhythm is still forming.'}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{rhythm.samples >= 3 ? `${weekdayLabel(rhythm.day ?? 1)} is your strongest day${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of planned focus logged` : ''}.` : `Complete it a few more times and Chain will spot your best window${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of focus logged so far` : ''}.`}</Text></View>
+-        </View>
+-        <Surface style={styles.weekReflection}><View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={accentText} /></View><View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: accentText }]}>THIS WEEK</Text><Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m focused on ${chain.name}` : weeklyKeptDays ? `${weeklyKeptDays} ${chain.cadence === 'weekly' ? 'check-in' : 'day'}${weeklyKeptDays === 1 ? '' : 's'} kept this week.` : `No ${chain.cadence === 'weekly' ? 'check-ins' : 'days'} kept yet this week.`}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{weeklyFocus.length ? `${weeklyFocus.length} focus block${weeklyFocus.length === 1 ? '' : 's'} logged · You showed up for yourself.` : stage.key === 'starting-line' ? 'Your reflection becomes meaningful with your next session.' : stage.copy}</Text></View></Surface>
++        )}
+         {/* Today's action */}
+         {restingToday ? (
+           <Surface style={styles.restBanner}>
+-            <Ionicons name="moon-outline" size={19} color={accentText} />
++            <ChainSymbol name="rest" size={19} color={accentText} />
+             <View style={styles.scheduleCopy}>
+               <Text style={[styles.restTitle, { color: colors.foreground }]}>Rest day</Text>
+               <Text style={[styles.restBody, { color: colors.mutedForeground }]}>Your streak is safe. Come back tomorrow.</Text>
+@@ -689,7 +534,7 @@
+             <AnimatedPressable
+               onPress={handleToggle}
+               accessibilityRole="button"
+-              accessibilityLabel={done ? `Remove today's completion for ${chain.name}` : `Mark ${chain.name} done today`}
++              accessibilityLabel={done ? `Remove today's completion for ${chain.name}` : commitment.status === 'minimum' ? `Upgrade today's minimum to a full completion for ${chain.name}` : isWeekly && commitment.weeklyTargetMet ? `Log an optional extra day for ${chain.name}` : `Mark ${chain.name} done today`}
+               accessibilityState={{ selected: done }}
+               containerStyle={styles.primaryActionContainer}
+               style={[
+@@ -700,17 +545,17 @@
+                 },
+               ]}
+             >
+-              <Ionicons
+-                name={done ? 'checkmark-circle' : 'ellipse-outline'}
++              <ChainSymbol
++                name={done ? 'check' : commitment.status === 'minimum' ? 'minimum' : 'empty'}
+                 size={21}
+-                color={done ? solidAccentText : colors.mutedForeground}
++                color={done ? solidAccentText : commitment.status === 'minimum' ? accentText : colors.mutedForeground}
+               />
+               <Text style={[styles.actionBtnText, { color: done ? solidAccentText : colors.foreground }]}>
+-                {done ? 'Logged today' : chain.cadence === 'weekly' ? 'Log today' : 'Mark done today'}
++                {done ? 'Logged today' : commitment.status === 'minimum' ? 'Mark full version' : isWeekly && commitment.weeklyTargetMet ? 'Log an extra day' : isWeekly ? 'Log today' : 'Mark done today'}
+               </Text>
+             </AnimatedPressable>
+ 
+-            <AnimatedPressable
++            {!isWeekly && <AnimatedPressable
+               onPress={handleFreeze}
+               disabled={freezeTokens === 0 || done || frozen}
+               accessibilityRole="button"
+@@ -726,23 +571,24 @@
+                 },
+               ]}
+             >
+-              <Ionicons name="snow-outline" size={19} color="#5B8CFF" />
++              <ChainSymbol name="freeze" size={19} color="#5B8CFF" />
+               <Text style={[styles.actionBtnText, { color: colors.foreground }]}>Freeze · {freezeTokens}</Text>
+-            </AnimatedPressable>
++            </AnimatedPressable>}
+           </View>
+         )}
+ 
+-        {freezeTokens < 2 && <View style={[styles.safetyNetCard, { backgroundColor: '#4488ff12', borderColor: '#4488ff44' }]}><View style={[styles.safetyNetIcon, { backgroundColor: '#4488ff22' }]}><Ionicons name="snow-outline" size={16} color="#4488ff" /></View><View style={styles.scheduleCopy}><Text style={[styles.safetyNetTitle, { color: '#4488ff' }]}>Safety net · {freezeTokens} available</Text><Text style={[styles.safetyNetBody, { color: colors.mutedForeground }]}>{freezeRecoveryRemaining} real completed day{freezeRecoveryRemaining === 1 ? '' : 's'} to restore one.</Text></View></View>}
+-
+-        {/* Frozen today indicator */}
+-        {frozen && !done && (
+-          <View style={[styles.frozenBanner, { backgroundColor: '#4488ff22', borderColor: '#4488ff44' }]}>
+-            <Ionicons name="snow" size={14} color="#4488ff" />
+-            <Text style={[styles.frozenText, { color: '#4488ff' }]}>
+-              Today is frozen — your streak is protected
++        <Surface style={styles.weekReflection}>
++          <View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={accentText} /></View>
++          <View style={styles.rhythmCopy}>
++            <Text style={[styles.rhythmEyebrow, { color: accentText }]}>THIS WEEK</Text>
++            <Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>
++              {isWeekly ? `${weeklyProgress}/${chain.weeklyTarget} days logged` : `${weeklyKeptDays} day${weeklyKeptDays === 1 ? '' : 's'} kept`}
++            </Text>
++            <Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>
++              {weeklyFocus.length ? `${weeklyFocusMinutes} focus minutes logged across ${weeklyFocus.length} block${weeklyFocus.length === 1 ? '' : 's'}.` : 'Full and minimum versions both count.'}
+             </Text>
+           </View>
+-        )}
++        </Surface>
+ 
+         {/* Calendar */}
+         <SectionLabel>MONTHLY HISTORY</SectionLabel>
+@@ -802,16 +648,239 @@
+               <View style={[styles.legendDot, { backgroundColor: chain.color + '38', borderColor: chain.color, borderWidth: 1 }]} />
+               <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Minimum</Text>
+             </View>
+-            <View style={styles.legendItem}>
++            {(!isWeekly || chain.frozenDates.length > 0) && <View style={styles.legendItem}>
+               <View style={[styles.legendDot, { backgroundColor: FROZEN_COLOR + '55', borderColor: FROZEN_COLOR, borderWidth: 1 }]} />
+-              <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Frozen</Text>
+-            </View>
++              <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>{isWeekly ? 'Saved freeze' : 'Frozen'}</Text>
++            </View>}
+             <View style={styles.legendItem}>
+               <View style={[styles.legendDot, { backgroundColor: 'transparent', borderColor: colors.border, borderWidth: 1 }]} />
+-              <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Missed</Text>
++              <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>{isWeekly ? 'Not logged' : 'Missed'}</Text>
+             </View>
+           </View>
++          {isWeekly && chain.frozenDates.length > 0 && <Text style={[styles.calendarHint, { color: colors.mutedForeground, paddingHorizontal: SPACE.md, paddingBottom: SPACE.md }]}>Saved freezes stay in your history. They do not count towards a weekly goal.</Text>}
+         </Surface>
++
++        <Surface style={styles.disclosureCard}>
++          <AnimatedPressable
++            onPress={() => setProgressOpen((open) => !open)}
++            accessibilityRole="button"
++            accessibilityLabel="Progress"
++            accessibilityState={{ expanded: progressOpen }}
++            style={styles.scheduleHeader}
++          >
++            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="stats-chart-outline" size={18} color={accentText} /></View>
++            <View style={styles.scheduleCopy}>
++              <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Progress</Text>
++              <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>Milestones and recorded patterns</Text>
++            </View>
++            <Ionicons name={progressOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
++          </AnimatedPressable>
++        </Surface>
++        {progressOpen && (
++          <View style={styles.disclosureContent}>
++            {/* Streak hero */}
++            <View style={[styles.streakHero, { backgroundColor: chain.color + '14', borderColor: chain.color + '33' }]}>
++              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={[styles.streakNumber, { color: accentText }]}>{streak}</Text>
++              <Text style={[styles.streakWord, { color: colors.mutedForeground }]}>
++                {chain.cadence === 'weekly' ? 'week streak' : 'day streak'}
++              </Text>
++              <Text style={[styles.streakSub, { color: colors.mutedForeground }]}>
++                {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : `${totalCompleted} total completed`}
++              </Text>
++              <View style={[styles.stagePill, { backgroundColor: chain.color + '22' }]}><Text style={[styles.stageText, { color: accentText }]}>{stage.label.toUpperCase()} · {stage.copy}</Text></View>
++              {nextStage ? <View style={styles.nextStage}><View style={[styles.nextStageTrack, { backgroundColor: chain.color + '22' }]}><View style={[styles.nextStageFill, { backgroundColor: chain.color, width: `${Math.max(5, stageProgress * 100)}%` }]} /></View><Text style={[styles.nextStageText, { color: colors.mutedForeground }]}>{nextStage.at - streak} {stageUnit}{nextStage.at - streak === 1 ? '' : 's'} to {nextStage.label}</Text></View> : <Text style={[styles.nextStageText, { color: accentText }]}>All current milestones reached.</Text>}
++            </View>
++
++            <Surface style={styles.milestoneCard}>
++              <Text style={[styles.milestoneTitle, { color: colors.mutedForeground }]}>MILESTONES · {isWeekly ? 'WEEKS' : 'DAYS'}</Text>
++              <View style={styles.milestoneRow}>
++                {PROGRESSION_STAGES.filter((item) => [1, 7, 30, 100, 365].includes(item.at)).map((milestone) => {
++                  const unlocked = streak >= milestone.at;
++                  const milestoneLabel = formatStreakCount(milestone.at, chain.cadence);
++                  return (
++                    <View
++                      key={milestone.key}
++                      accessible
++                      accessibilityLabel={`${milestoneLabel}, ${unlocked ? 'unlocked' : 'locked'}`}
++                      style={styles.milestoneItem}
++                    >
++                      <View style={[styles.milestoneDot, { backgroundColor: unlocked ? chain.color : colors.background, borderColor: unlocked ? chain.color : colors.border }]}>
++                        <Ionicons name={unlocked ? 'checkmark' : 'lock-closed'} size={13} color={unlocked ? solidAccentText : colors.mutedForeground} />
++                      </View>
++                      <Text style={[styles.milestoneLabel, { color: unlocked ? accentText : colors.mutedForeground }]}>
++                        {milestone.at}
++                      </Text>
++                    </View>
++                  );
++                })}
++              </View>
++            </Surface>
++
++            <Surface style={styles.insightsCard}>
++              <View style={styles.insight}><Text style={[styles.insightValue, { color: accentText }]}>{chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget}` : `${consistency}%`}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>{chain.cadence === 'weekly' ? 'THIS WEEK' : 'CONSISTENCY'}</Text></View>
++              <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
++              <View style={styles.insight}><Text style={[styles.insightValue, { color: colors.foreground }]}>{totalProtected}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>DAYS KEPT</Text></View>
++              {!isWeekly && <><View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
++              <View style={styles.insight}><Text style={[styles.insightValue, { color: '#5B8CFF' }]}>{chain.frozenDates.length}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>FROZEN</Text></View></>}
++            </Surface>
++
++            <View style={[styles.rhythmCard, { backgroundColor: chain.color + '10', borderColor: chain.color + '38' }]}>
++              <View style={[styles.rhythmIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="pulse-outline" size={18} color={accentText} /></View>
++              <View style={styles.rhythmCopy}>
++                <Text style={[styles.rhythmEyebrow, { color: accentText }]}>CHECK-IN RHYTHM</Text>
++                <Text style={[styles.rhythmTitle, { color: colors.foreground }]}>
++                  {rhythm.samples >= 3 ? `Most frequent check-in hour: ${readableHour(rhythm.hour)}.` : 'A few more full check-ins will help show a pattern.'}
++                </Text>
++                <Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>
++                  {rhythm.samples >= 3 && rhythm.day !== undefined ? `${weekdayLabel(rhythm.day)} has the most full check-ins. ` : ''}
++                  {rhythm.minutes > 0 ? `${rhythm.minutes} focus minutes logged. ` : ''}
++                  {`Based on ${rhythm.samples} full-version check-in${rhythm.samples === 1 ? '' : 's'}. Times may differ from when you did the activity.`}
++                </Text>
++              </View>
++            </View>
++          </View>
++        )}
++
++        <Surface style={styles.disclosureCard}>
++          <AnimatedPressable
++            onPress={() => setSettingsOpen((open) => !open)}
++            accessibilityRole="button"
++            accessibilityLabel="Chain settings"
++            accessibilityState={{ expanded: settingsOpen }}
++            style={styles.scheduleHeader}
++          >
++            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="settings-outline" size={18} color={accentText} /></View>
++            <View style={styles.scheduleCopy}>
++              <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Chain settings</Text>
++              <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>Schedule, minimum version and color</Text>
++            </View>
++            <Ionicons name={settingsOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
++          </AnimatedPressable>
++        </Surface>
++        {settingsOpen && (
++          <View style={styles.disclosureContent}>
++            <View style={styles.accentSection}>
++              <SectionLabel>CHAIN ACCENT</SectionLabel>
++              <View style={styles.colorRow}>
++                {[...CHAIN_COLORS, ...(showMoreColors ? EXTRA_CHAIN_COLORS : [])].map((color) => {
++                  const selected = color === chain.color;
++                  return (
++                    <AnimatedPressable
++                      key={color}
++                      accessibilityRole="radio"
++                      accessibilityLabel={`${COLOR_NAMES[color] ?? 'Custom'} chain color`}
++                      accessibilityState={{ checked: selected }}
++                      onPress={() => handleColorChange(color)}
++                      style={[
++                        styles.colorRing,
++                        {
++                          borderColor: selected ? color : 'transparent',
++                        },
++                      ]}
++                      scaleTo={0.92}
++                    >
++                      <View style={[styles.colorSwatch, { backgroundColor: color }]}>
++                        {selected && <ChainSymbol name="check" size={16} color={readableTextColor(color)} />}
++                      </View>
++                    </AnimatedPressable>
++                  );
++                })}
++                <AnimatedPressable
++                  onPress={() => setShowMoreColors((open) => !open)}
++                  accessibilityRole="button"
++                  accessibilityLabel={showMoreColors ? 'Show fewer chain colors' : 'Show more chain colors'}
++                  accessibilityState={{ expanded: showMoreColors }}
++                  style={[styles.colorRing, { borderColor: colors.border }]}
++                  scaleTo={0.92}
++                >
++                  <View style={[styles.colorSwatch, { backgroundColor: colors.card }]}>
++                    <Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={15} color={colors.mutedForeground} />
++                  </View>
++                </AnimatedPressable>
++              </View>
++            </View>
++
++            <Surface style={styles.scheduleCard}>
++              <View style={styles.scheduleHeader}>
++                <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}>
++                  <Ionicons name="calendar-outline" size={18} color={accentText} />
++                </View>
++                <View style={styles.scheduleCopy}>
++                  <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>
++                    {chain.cadence === 'weekly' ? 'Weekly goal' : 'Weekly schedule'}
++                  </Text>
++                  <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>
++                    {chain.cadence === 'weekly'
++                      ? `${weeklyProgress}/${chain.weeklyTarget} days this week`
++                      : chain.restDays.length
++                        ? `${SCHEDULE_DAYS.filter(({ value }) => chain.restDays.includes(value)).map(({ label }) => label).join(', ')} off`
++                        : 'Every day counts'}
++                  </Text>
++                </View>
++              </View>
++              <View style={styles.scheduleExpanded}>
++                  <Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>
++                    {chain.cadence === 'weekly'
++                      ? 'Reach your target in a week to extend your week streak.'
++                      : 'Choose rest days. They never break your streak.'}
++                  </Text>
++                  <View style={styles.scheduleSelector}>
++                    <SevenChoiceSelector
++                      options={chain.cadence === 'weekly' ? WEEKLY_TARGET_OPTIONS : REST_DAY_OPTIONS}
++                      selectionMode={chain.cadence === 'weekly' ? 'single' : 'multiple'}
++                      selectedValues={chain.cadence === 'weekly' ? [chain.weeklyTarget] : chain.restDays}
++                      onSelectionChange={(selectedValues) => {
++                        if (chain.cadence === 'weekly') {
++                          const target = selectedValues[0];
++                          if (target !== undefined) void changeWeeklyTarget(target);
++                        } else {
++                          void changeRestDays(selectedValues);
++                        }
++                      }}
++                      accentColor={chain.color}
++                      selectedTextColor={solidAccentText}
++                      textColor={colors.mutedForeground}
++                      borderColor={colors.border}
++                      backgroundColor={colors.background}
++                      accessibilityLabel={chain.cadence === 'weekly' ? 'Weekly target' : 'Rest days'}
++                    />
++                  </View>
++              </View>
++            </Surface>
++
++            <View style={[styles.minimumPanel, { backgroundColor: chain.color + '12', borderColor: chain.color + '44' }]}>
++              <AnimatedPressable
++                onPress={editMinimum}
++                accessibilityRole="button"
++                accessibilityLabel="Edit minimum version"
++                accessibilityValue={{ text: chain.minimumLabel }}
++                accessibilityHint="Opens the minimum version editor."
++                style={styles.minimumCard}
++              >
++                <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
++                  <ChainSymbol name="minimum" size={20} color={accentText} />
++                </View>
++                <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
++                <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
++                <Ionicons name="chevron-forward" size={17} color={accentText} />
++              </AnimatedPressable>
++            </View>
++
++            {!isWeekly && freezeTokens < 2 && <View style={[styles.safetyNetCard, { backgroundColor: '#4488ff12', borderColor: '#4488ff44' }]}><View style={[styles.safetyNetIcon, { backgroundColor: '#4488ff22' }]}><ChainSymbol name="freeze" size={16} color="#4488ff" /></View><View style={styles.scheduleCopy}><Text style={[styles.safetyNetTitle, { color: '#4488ff' }]}>Safety net · {freezeTokens} available</Text><Text style={[styles.safetyNetBody, { color: colors.mutedForeground }]}>{freezeRecoveryRemaining} real completed day{freezeRecoveryRemaining === 1 ? '' : 's'} to restore one.</Text></View></View>}
++
++              <AnimatedPressable
++                onPress={handleDelete}
++                accessibilityRole="button"
++                accessibilityLabel={`Delete ${chain.name}`}
++                accessibilityHint="Asks for confirmation before permanently deleting this chain."
++                style={[styles.deleteSetting, { borderColor: colors.border }]}
++                scaleTo={0.98}
++              >
++                <Ionicons name="trash-outline" size={20} color={colors.destructive} />
++                <Text style={[styles.actionBtnText, { color: colors.destructive }]}>Delete chain</Text>
++              </AnimatedPressable>
++          </View>
++        )}
+ 
+         {/* Started date */}
+         <Text style={[styles.startedText, { color: colors.mutedForeground }]}>
+@@ -960,13 +1029,10 @@
+     alignItems: 'center',
+     justifyContent: 'center',
+   },
+-  deleteBtn: {
+-    width: CONTROL.minimumTarget,
+-    height: CONTROL.minimumTarget,
+-    borderRadius: RADIUS.capsule,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-  },
++  deleteSetting: { minHeight: CONTROL.buttonHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xs, borderRadius: RADIUS.button, borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm },
++  disclosureCard: { borderRadius: RADIUS.card, overflow: 'hidden' },
++  disclosureContent: { gap: SPACE.md },
++  todayStatus: { ...TYPE.body, marginTop: -SPACE.xs },
+   notFound: {
+     flex: 1,
+     alignItems: 'center',
+@@ -1186,20 +1252,7 @@
+   actionBtnText: {
+     ...TYPE.bodyStrong,
+     textAlign: 'center',
+-  },
+-  frozenBanner: {
+-    flexDirection: 'row',
+-    alignItems: 'center',
+-    gap: SPACE.xs,
+-    minHeight: CONTROL.minimumTarget,
+-    paddingHorizontal: SPACE.md,
+-    paddingVertical: SPACE.xs,
+-    borderRadius: RADIUS.control,
+-    borderCurve: 'continuous',
+-    borderWidth: StyleSheet.hairlineWidth,
+-  },
+-  frozenText: {
+-    ...TYPE.caption,
++    flexShrink: 1,
+   },
+   safetyNetCard: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm },
+   safetyNetIcon: { width: 36, height: 36, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },
+--- a/artifacts/chain/app/chain/new.tsx
++++ b/artifacts/chain/app/chain/new.tsx
+@@ -10,6 +10,7 @@
+ } from 'react-native';
+ import { useSafeAreaInsets } from 'react-native-safe-area-context';
+ import { Ionicons } from '@expo/vector-icons';
++import { ChainSymbol } from '@/components/ui/ChainSymbol';
+ import { router } from 'expo-router';
+ import { useColors } from '@/hooks/useColors';
+ import { CHAIN_COLORS, EXTRA_CHAIN_COLORS } from '@/constants/colors';
+@@ -241,7 +242,7 @@
+                     isSelected && styles.colorSwatchSelected,
+                   ]}
+                 >
+-                  {isSelected && <Ionicons name="checkmark" size={17} color={readableTextColor(c)} />}
++                  {isSelected && <ChainSymbol name="check" size={17} color={readableTextColor(c)} />}
+                 </Pressable>
+               </View>
+             );
+--- a/artifacts/chain/components/ChainCard.tsx
++++ b/artifacts/chain/components/ChainCard.tsx
+@@ -1,7 +1,6 @@
+ import React, { useCallback, useEffect, useRef, useState } from 'react';
+-import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
++import { Alert, Animated, Easing, StyleSheet, Text, View } from 'react-native';
+ import { useReducedMotion } from 'react-native-reanimated';
+-import { Ionicons } from '@expo/vector-icons';
+ import { router } from 'expo-router';
+ import { useColors } from '@/hooks/useColors';
+ import {
+@@ -9,17 +8,18 @@
+   getStreak,
+   getTodayStr,
+   getWeeklyProgress,
++  getChainCommitmentStatus,
+   isRestDay,
+   useChains,
+ } from '@/context/ChainsContext';
+ import { getProgressionStage } from '@/constants/progression';
+-import { CONTROL, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
++import { CONTROL, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+ import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
+ import { playFeedback } from '@/lib/feedback';
+ import AnimatedPressable from './AnimatedPressable';
+ import WeekStrip from './WeekStrip';
+ import MilestoneModal from './MilestoneModal';
+-import { AppButton, Surface } from './ui/AppUI';
++import { Surface } from './ui/AppUI';
+ import { ChainSymbol } from './ui/ChainSymbol';
+ 
+ interface Props {
+@@ -33,11 +33,13 @@
+ export default function ChainCard({ chain }: Props) {
+   const colors = useColors();
+   const reducedMotion = useReducedMotion();
+-  const { toggleToday, isCompletedToday, isProtectedToday, isFrozenToday } = useChains();
++  const { toggleToday, isCompletedToday } = useChains();
++  const today = getTodayStr();
++  const commitment = getChainCommitmentStatus(chain, today);
+   const done = isCompletedToday(chain);
+-  const protectedToday = isProtectedToday(chain);
+-  const frozen = isFrozenToday(chain);
+-  const keptToday = done || chain.minimumDates.includes(getTodayStr());
++  const minimum = chain.minimumDates.includes(today);
++  const frozen = commitment.status === 'frozen';
++  const keptToday = done || minimum;
+   const streak = getStreak(chain);
+   const stage = getProgressionStage(streak);
+   const restingToday = isRestDay(chain, getTodayStr());
+@@ -52,37 +54,44 @@
+   const [mutationBusy, setMutationBusy] = useState(false);
+   const mutationBusyRef = useRef(false);
+   const prevDoneRef = useRef(keptToday);
+-  const prevWeeklyProgressRef = useRef(weeklyProgress);
++  const prevStreakRef = useRef(streak);
+   const previousCompletedRef = useRef(done);
+   const checkArrival = useRef(new Animated.Value(1)).current;
+ 
+   useEffect(() => {
+-    if (!prevDoneRef.current && keptToday && MILESTONES.has(streak)) {
++    if (
++      !prevDoneRef.current
++      && keptToday
++      && MILESTONES.has(streak)
++      && (chain.cadence !== 'weekly' || streak > prevStreakRef.current)
++    ) {
+       setCelebratingMilestone(streak);
+     }
+     prevDoneRef.current = keptToday;
+-  }, [keptToday, streak]);
+-
+-  useEffect(() => {
+-    if (
+-      chain.cadence === 'weekly'
+-      && weeklyProgress > chain.weeklyTarget
+-      && weeklyProgress > prevWeeklyProgressRef.current
+-    ) {
+-      setCelebratingExtra(weeklyProgress - chain.weeklyTarget);
+-    }
+-    prevWeeklyProgressRef.current = weeklyProgress;
++    prevStreakRef.current = streak;
++  }, [chain.cadence, keptToday, streak]);
++
++  useEffect(() => {
++    if (celebratingExtra === null) return;
++    const timer = setTimeout(() => setCelebratingExtra(null), 4000);
++    return () => clearTimeout(timer);
++  }, [celebratingExtra]);
++
++  useEffect(() => {
++    if (chain.cadence !== 'weekly' || weeklyProgress <= chain.weeklyTarget) {
++      setCelebratingExtra(null);
++    }
+   }, [chain.cadence, chain.weeklyTarget, weeklyProgress]);
+ 
+   useEffect(() => {
+     const becameComplete = done && !previousCompletedRef.current;
+     previousCompletedRef.current = done;
+-    if (!becameComplete) return;
+ 
+     if (reducedMotion) {
+       checkArrival.setValue(1);
+       return;
+     }
++    if (!becameComplete) return;
+ 
+     checkArrival.setValue(0);
+     const animation = Animated.timing(checkArrival, {
+@@ -103,12 +112,21 @@
+     mutationBusyRef.current = false;
+     setMutationBusy(false);
+     if (result.status !== 'persisted') {
++      setCelebratingExtra(null);
++      setCelebratingMilestone(null);
+       playFeedback('error');
+       Alert.alert('Chain not updated', 'Chain couldn’t save that change. Your previous status has been restored.');
+       return;
+     }
++    // Upgrading a minimum keeps the same logged day. Celebrate only a new day,
++    // after storage confirms it, without interrupting the next Chain.
++    if (chain.cadence === 'weekly' && !keptToday && weeklyProgress >= chain.weeklyTarget) {
++      setCelebratingExtra(weeklyProgress + 1 - chain.weeklyTarget);
++    } else {
++      setCelebratingExtra(null);
++    }
+     playFeedback(done ? 'selection' : 'light');
+-  }, [done, chain.id, restingToday, toggleToday]);
++  }, [done, chain.id, chain.cadence, chain.weeklyTarget, keptToday, restingToday, toggleToday, weeklyProgress]);
+ 
+   const handleCardPress = useCallback(() => {
+     router.push({ pathname: '/chain/[id]', params: { id: chain.id } });
+@@ -120,9 +138,11 @@
+       ? 'frozen today'
+       : done
+         ? 'completed today'
+-        : protectedToday
++        : minimum
+           ? 'minimum version logged today'
+-          : 'not yet logged today';
++          : commitment.weeklyTargetMet
++            ? 'weekly goal met, no entry today'
++            : 'not yet logged today';
+ 
+   return (
+     <>
+@@ -130,7 +150,7 @@
+         <View style={[styles.stripe, { backgroundColor: chain.color }]} />
+         <AnimatedPressable
+           accessibilityRole="button"
+-          accessibilityLabel={`${chain.name}, ${streak} ${chain.cadence === 'weekly' ? 'week' : 'day'} streak, ${statusLabel}`}
++          accessibilityLabel={`${chain.name}, ${chain.cadence === 'weekly' ? `${weeklyProgress} of ${chain.weeklyTarget} days this week, ` : ''}${streak} ${chain.cadence === 'weekly' ? 'week' : 'day'} streak, ${statusLabel}`}
+           accessibilityHint="Opens Chain details"
+           onPress={handleCardPress}
+           containerStyle={styles.detailsTarget}
+@@ -142,7 +162,11 @@
+                 {chain.name}
+               </Text>
+               <Text style={[styles.stageLabel, { color: readableAccent }]} numberOfLines={1}>
+-                {stage.label.toUpperCase()}
++                {chain.cadence === 'weekly'
++                  ? celebratingExtra !== null
++                    ? 'ANOTHER DAY KEPT'
++                    : `${streak}-WEEK STREAK`
++                  : stage.label.toUpperCase()}
+               </Text>
+             </View>
+             <View style={styles.streakBlock}>
+@@ -153,11 +177,11 @@
+                   { color: readableAccent },
+                 ]}
+               >
+-                {streak}
++                {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget}` : streak}
+               </Text>
+               <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}>
+                 {chain.cadence === 'weekly'
+-                  ? streak === 1 ? 'week' : 'weeks'
++                  ? 'this week'
+                   : streak === 1 ? 'day' : 'days'}
+               </Text>
+             </View>
+@@ -174,8 +198,12 @@
+               ? `${chain.name} is resting today`
+               : frozen
+                 ? `Replace today's freeze with a completion for ${chain.name}`
+-                : `${keptToday ? 'Unmark' : 'Mark'} ${chain.name} for today`}
+-            accessibilityState={{ checked: protectedToday, disabled: restingToday || mutationBusy, busy: mutationBusy }}
++                : minimum
++                  ? `Complete ${chain.name}, minimum already logged today`
++                  : commitment.weeklyTargetMet && !done
++                    ? `Log an extra day for ${chain.name}, weekly goal already met`
++                    : `${done ? 'Unmark' : 'Mark'} ${chain.name} for today`}
++            accessibilityState={{ checked: done ? true : minimum ? 'mixed' : false, disabled: restingToday || mutationBusy, busy: mutationBusy }}
+             disabled={restingToday || mutationBusy}
+             onPress={handleCheck}
+             scaleTo={0.94}
+@@ -188,7 +216,7 @@
+             ]}
+           >
+             {frozen ? (
+-              <Ionicons name="snow" size={18} color={statusForeground} />
++              <ChainSymbol name="freeze" size={20} color={statusForeground} />
+             ) : keptToday ? (
+               done ? (
+                 <Animated.View
+@@ -205,14 +233,14 @@
+                 <ChainSymbol name="minimum" size={20} color={statusForeground} />
+               )
+             ) : restingToday ? (
+-              <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
++              <ChainSymbol name="rest" size={20} color={colors.mutedForeground} />
+             ) : null}
+           </AnimatedPressable>
+-          {chain.cadence === 'weekly' ? (
++          {chain.cadence === 'weekly' && commitment.weeklyTargetMet ? (
+             <Text numberOfLines={1} style={[styles.weeklyProgress, { color: readableAccent }]}>
+               {weeklyProgress > chain.weeklyTarget
+                 ? `+${weeklyProgress - chain.weeklyTarget}`
+-                : `${weeklyProgress}/${chain.weeklyTarget}`}
++                : 'Goal met'}
+             </Text>
+           ) : null}
+         </View>
+@@ -227,67 +255,7 @@
+           onDismiss={() => setCelebratingMilestone(null)}
+         />
+       ) : null}
+-      <ExtraWorkMoment
+-        extra={celebratingExtra}
+-        chain={chain}
+-        onClose={() => setCelebratingExtra(null)}
+-      />
+     </>
+-  );
+-}
+-
+-function ExtraWorkMoment({
+-  extra,
+-  chain,
+-  onClose,
+-}: {
+-  extra: number | null;
+-  chain: Chain;
+-  onClose: () => void;
+-}) {
+-  const colors = useColors();
+-  const reducedMotion = useReducedMotion();
+-  const readableAccent = readableAccentColor(chain.color, GLASS_SURFACE_COLOR, 4.8);
+-  if (extra === null) return null;
+-  return (
+-    <Modal
+-      transparent
+-      visible
+-      statusBarTranslucent
+-      animationType={reducedMotion ? 'none' : 'fade'}
+-      onRequestClose={onClose}
+-    >
+-      <View style={styles.extraShade}>
+-        <Pressable
+-          accessible={false}
+-          accessibilityElementsHidden
+-          importantForAccessibility="no-hide-descendants"
+-          onPress={onClose}
+-          style={StyleSheet.absoluteFill}
+-        />
+-        <View accessibilityViewIsModal style={styles.extraFrame}>
+-          <Surface elevated accentColor={chain.color} style={styles.extraCard}>
+-            <ScrollView
+-              bounces={false}
+-              showsVerticalScrollIndicator={false}
+-              contentContainerStyle={styles.extraContent}
+-            >
+-              <View style={[styles.extraIcon, { backgroundColor: chain.color + '1C' }]}>
+-                <Ionicons name="add-circle-outline" size={24} color={readableAccent} />
+-              </View>
+-              <Text style={[TYPE.eyebrow, { color: readableAccent }]}>BEYOND THE TARGET</Text>
+-              <Text style={[styles.extraTitle, { color: colors.foreground }]}>Another day kept.</Text>
+-              <Text style={[styles.extraBody, { color: colors.mutedForeground }]}>
+-                {extra} {extra === 1 ? 'day' : 'days'} beyond this week’s target for {chain.name}.
+-              </Text>
+-              <View style={styles.extraAction}>
+-                <AppButton label="Continue" onPress={onClose} accentColor={chain.color} />
+-              </View>
+-            </ScrollView>
+-          </Surface>
+-        </View>
+-      </View>
+-    </Modal>
+   );
+ }
+ 
+@@ -318,25 +286,4 @@
+     justifyContent: 'center',
+   },
+   weeklyProgress: { ...TYPE.metadata, minHeight: 15, textAlign: 'center' },
+-  extraShade: {
+-    flex: 1,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    backgroundColor: SCRIM,
+-    padding: SPACE.xl,
+-  },
+-  extraFrame: { width: '100%', maxWidth: 340, maxHeight: '82%' },
+-  extraCard: { borderRadius: RADIUS.modal, maxHeight: '100%' },
+-  extraContent: { alignItems: 'center', padding: SPACE.xl },
+-  extraIcon: {
+-    width: 52,
+-    height: 52,
+-    borderRadius: RADIUS.control,
+-    alignItems: 'center',
+-    justifyContent: 'center',
+-    marginBottom: SPACE.md,
+-  },
+-  extraTitle: { ...TYPE.modalTitle, textAlign: 'center', marginTop: SPACE.xxs },
+-  extraBody: { ...TYPE.body, textAlign: 'center', marginTop: SPACE.xs },
+-  extraAction: { alignSelf: 'stretch', marginTop: SPACE.xl },
+ });
+--- a/artifacts/chain/components/WeekStrip.tsx
++++ b/artifacts/chain/components/WeekStrip.tsx
+@@ -1,9 +1,10 @@
+ import React from 'react';
+ import { StyleSheet, Text, View } from 'react-native';
+-import { Ionicons } from '@expo/vector-icons';
++import { ChainSymbol } from './ui/ChainSymbol';
+ import { useColors } from '@/hooks/useColors';
+ import { Chain, isRestDay, toLocalDateString } from '@/context/ChainsContext';
+ import { SPACE, TYPE } from '@/constants/designSystem';
++import { readableTextColor } from '@/constants/sectionTheme';
+ 
+ interface Props {
+   chain: Chain;
+@@ -66,11 +67,15 @@
+                   : { backgroundColor: 'transparent', borderColor: colors.border, borderWidth: 1 },
+               ]}
+             >
+-              {frozen && !completed && (
+-                <Ionicons name="snow-outline" size={9} color="#4488ff" />
+-              )}
+-              {minimum && !completed && <Ionicons name="leaf-outline" size={10} color={chain.color} />}
+-              {rest && !completed && !frozen && <Ionicons name="moon" size={13} color={colors.foreground} />}
++              {completed ? (
++                <ChainSymbol name="check" size={12} color={readableTextColor(chain.color)} />
++              ) : minimum ? (
++                <ChainSymbol name="minimum" size={13} color={chain.color} />
++              ) : frozen ? (
++                <ChainSymbol name="freeze" size={13} color="#4488ff" />
++              ) : rest ? (
++                <ChainSymbol name="rest" size={13} color={colors.foreground} />
++              ) : null}
+             </View>
+           </View>
+         );
+--- a/artifacts/chain/components/ui/ChainSymbol.tsx
++++ b/artifacts/chain/components/ui/ChainSymbol.tsx
+@@ -1,15 +1,33 @@
+-import React, { type ComponentProps } from 'react';
+-import { Ionicons } from '@expo/vector-icons';
+-import { SymbolView, type SFSymbol } from 'expo-symbols';
++import React from 'react';
++import Svg, { Path } from 'react-native-svg';
+ 
+-type IoniconName = ComponentProps<typeof Ionicons>['name'];
++export type ChainSymbolName = 'add' | 'check' | 'minimum' | 'rest' | 'freeze' | 'empty';
+ 
+-export type ChainSymbolName = 'add' | 'check' | 'minimum';
+-
+-const SYMBOLS: Record<ChainSymbolName, { ios: SFSymbol; fallback: IoniconName }> = {
+-  add: { ios: 'plus', fallback: 'add' },
+-  check: { ios: 'checkmark', fallback: 'checkmark' },
+-  minimum: { ios: 'leaf', fallback: 'leaf-outline' },
++/**
++ * A small, consistent family for Chain actions and day states.
++ * Shared 24-unit grid, round caps and round joins on every platform.
++ * These glyphs are decorative; the parent control owns its accessible label.
++ */
++const SYMBOL_PATHS: Record<ChainSymbolName, readonly string[]> = {
++  add: ['M12 5v14', 'M5 12h14'],
++  check: ['M5 12.5 9.5 17 19 7'],
++  minimum: [
++    'M19.5 4.5c-4.1.1-8.4-.2-11.2 2.6-2.6 2.6-2.5 6.5-.1 8.8 2.3 2.3 6.2 2.5 8.8-.1 2.8-2.8 2.5-7.1 2.5-11.3Z',
++    'M5 19 14.5 9.5',
++  ],
++  rest: ['M20 14.1A8.4 8.4 0 0 1 9.9 4a8.4 8.4 0 1 0 10.1 10.1Z'],
++  freeze: [
++    'M12 3v18',
++    'M4.2 7.5 19.8 16.5',
++    'M4.2 16.5 19.8 7.5',
++    'M9.7 4.5 12 6.8 14.3 4.5',
++    'M9.7 19.5 12 17.2 14.3 19.5',
++    'M4.4 10.2 7.6 9.5 7.1 6.3',
++    'M16.9 17.7 16.4 14.5 19.6 13.8',
++    'M4.4 13.8 7.6 14.5 7.1 17.7',
++    'M16.9 6.3 16.4 9.5 19.6 10.2',
++  ],
++  empty: ['M20.5 12a8.5 8.5 0 1 1-17 0 8.5 8.5 0 1 1 17 0'],
+ };
+ 
+ export function ChainSymbol({
+@@ -21,16 +39,31 @@
+   size: number;
+   color: string;
+ }) {
+-  const symbol = SYMBOLS[name];
++  // Tiny history markers keep a readable stroke without growing the control.
++  const strokeWidth = size <= 14 ? 2.2 : 1.9;
+ 
+   return (
+-    <SymbolView
++    <Svg
++      width={size}
++      height={size}
++      viewBox="0 0 24 24"
++      fill="none"
+       accessible={false}
+-      name={symbol.ios}
+-      size={size}
+-      tintColor={color}
+-      weight="semibold"
+-      fallback={<Ionicons accessible={false} name={symbol.fallback} size={size} color={color} />}
+-    />
++      accessibilityElementsHidden
++      importantForAccessibility="no-hide-descendants"
++      pointerEvents="none"
++    >
++      {SYMBOL_PATHS[name].map((d, index) => (
++        <Path
++          key={index}
++          d={d}
++          fill="none"
++          stroke={color}
++          strokeWidth={strokeWidth}
++          strokeLinecap="round"
++          strokeLinejoin="round"
++        />
++      ))}
++    </Svg>
+   );
+ }
+--- a/artifacts/chain/constants/progression.ts
++++ b/artifacts/chain/constants/progression.ts
+@@ -1,16 +1,16 @@
+ export const PROGRESSION_STAGES = [
+   { at: 0, key: 'starting-line', label: 'Starting line', copy: 'A small promise is enough to begin.' },
+   { at: 1, key: 'first-proof', label: 'First proof', copy: 'You showed up. Come back once more.' },
+-  { at: 2, key: 'early-pattern', label: 'Early pattern', copy: 'Two marks are the start of a pattern.' },
++  { at: 2, key: 'early-pattern', label: 'Early pattern', copy: 'Your progress is beginning to show.' },
+   { at: 3, key: 'taking-shape', label: 'Taking shape', copy: 'The habit is beginning to have a pulse.' },
+   { at: 5, key: 'making-room', label: 'Making room', copy: 'You are creating space for this in your day.' },
+-  { at: 7, key: 'full-week', label: 'A full week', copy: 'Seven deliberate returns to yourself.' },
++  { at: 7, key: 'full-week', label: 'Steady returns', copy: 'Your progress is becoming a pattern.' },
+   { at: 14, key: 'momentum', label: 'Momentum', copy: 'The pattern is beginning to carry you.' },
+-  { at: 21, key: 'part-of-week', label: 'Part of the week', copy: 'This now has a place in your life.' },
+-  { at: 30, key: 'real-habit', label: 'A real habit', copy: 'You built more than motivation.' },
++  { at: 21, key: 'part-of-week', label: 'Making progress', copy: 'You are making space for what matters.' },
++  { at: 30, key: 'real-habit', label: 'Finding rhythm', copy: 'You are building a record of returning.' },
+   { at: 60, key: 'rooted', label: 'Rooted', copy: 'You keep the promise on ordinary days.' },
+-  { at: 100, key: 'proven', label: 'Proven', copy: 'Consistency is no longer a question.' },
+-  { at: 365, key: 'year-one', label: 'Year one', copy: 'A year of becoming who you said you would be.' },
++  { at: 100, key: 'proven', label: 'Proven', copy: 'Many returns have brought you here.' },
++  { at: 365, key: 'year-one', label: 'Long view', copy: 'Your progress has a long history.' },
+ ] as const;
+ 
+ export function getProgressionStage(streak: number) {
+@@ -20,3 +20,9 @@
+ export function getNextProgressionStage(streak: number) {
+   return PROGRESSION_STAGES.find((stage) => stage.at > streak);
+ }
++
++/** A streak counts kept periods, not elapsed calendar time. */
++export function formatStreakCount(value: number, cadence: 'daily' | 'weekly'): string {
++  const unit = cadence === 'weekly' ? 'week' : 'day';
++  return `${value} ${unit}${value === 1 ? '' : 's'}`;
++}
+--- a/artifacts/chain/context/ChainsContext.tsx
++++ b/artifacts/chain/context/ChainsContext.tsx
+@@ -3,8 +3,10 @@
+ import {
+   applyDayStatus,
+   decodeChains,
++  getNextCompletionStatus,
+   getTodayStr,
+-  normalizeRestDays,
++  isChainKeptOnDate,
++  normalizeRestDayUpdate,
+   normalizeWeeklyTarget,
+   parseChains,
+   type Chain,
+@@ -13,8 +15,8 @@
+ import { createVersionedRepository } from '@/lib/versionedRepository';
+ import { reportDiagnostic } from '@/lib/diagnostics';
+ 
+-export type { Chain, DayStatus } from '@/domain/chains';
+-export { getStreak, getTodayStr, getWeeklyProgress, isRestDay, toLocalDateString } from '@/domain/chains';
++export type { Chain, ChainCommitmentStatus, DayStatus } from '@/domain/chains';
++export { getChainCommitmentStatus, getStreak, getTodayStr, getWeeklyProgress, isChainKeptOnDate, isRestDay, toLocalDateString } from '@/domain/chains';
+ 
+ export type ChainMutationResult =
+   | { status: 'persisted' }
+@@ -179,8 +181,10 @@
+ 
+   function updateChainRestDays(id: string, restDays: number[]) {
+     if (!chainsRef.current.some((chain) => chain.id === id)) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
++    const normalizedDays = normalizeRestDayUpdate(restDays);
++    if (normalizedDays === null) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
+     return persist(
+-      chainsRef.current.map((chain) => (chain.id === id ? { ...chain, restDays: normalizeRestDays(restDays) } : chain)),
++      chainsRef.current.map((chain) => (chain.id === id ? { ...chain, restDays: normalizedDays } : chain)),
+       'chains.updateRestDays',
+     );
+   }
+@@ -215,7 +219,7 @@
+     const today = getTodayStr();
+     const chain = chainsRef.current.find((item) => item.id === id);
+     if (!chain) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
+-    return setDayStatus(id, today, (chain.completedDates.includes(today) || chain.minimumDates.includes(today)) ? 'missed' : 'done');
++    return setDayStatus(id, today, getNextCompletionStatus(chain, today));
+   }
+ 
+   function useFreeze(id: string) {
+@@ -225,9 +229,8 @@
+ 
+   const isCompletedToday = (c: Chain) =>
+     c.completedDates.includes(getTodayStr());
+-  const isProtectedToday = (c: Chain) =>
+-    c.completedDates.includes(getTodayStr()) || c.minimumDates.includes(getTodayStr()) || c.frozenDates.includes(getTodayStr());
+-  const isFrozenToday = (c: Chain) => c.frozenDates.includes(getTodayStr());
++  const isProtectedToday = (c: Chain) => isChainKeptOnDate(c, getTodayStr());
++  const isFrozenToday = (c: Chain) => c.cadence === 'daily' && c.frozenDates.includes(getTodayStr());
+   const getRemainingFreezeTokens = (c: Chain) => c.freezeCredits;
+ 
+   return (
+--- a/artifacts/chain/context/PlanContext.tsx
++++ b/artifacts/chain/context/PlanContext.tsx
+@@ -2,17 +2,15 @@
+ import { AppState } from 'react-native';
+ import AsyncStorage from '@react-native-async-storage/async-storage';
+ import {
+-  decodePlanItems,
+   getPlanTodayKey,
+   getPlanTomorrowKey,
+   normalizeClosedDates,
+   normalizeFocusLog,
+-  resolvePlanForDate,
+   type FocusLogEntry,
+   type PlanItem,
+   type PlanItemOptions,
+ } from '@/domain/plan';
+-import { createVersionedRepository, type VersionedRepository } from '@/lib/versionedRepository';
++import { createPlanStore } from '@/lib/planRepository';
+ import { reportDiagnostic } from '@/lib/diagnostics';
+ import { removeFocusSession } from '@/lib/focusSession';
+ import { cancelPlanReminder } from '@/lib/planNotifications';
+@@ -36,6 +34,9 @@
+ 
+ interface PlanContextValue {
+   items: PlanItem[];
++  isLoading: boolean;
++  loadError: string | null;
++  retryLoad: () => void;
+   activeDate: string;
+   isToday: boolean;
+   isActiveDayClosed: boolean;
+@@ -58,26 +59,15 @@
+   toggleItem: (id: string) => Promise<PlanPersistenceResult>;
+ }
+ 
+-const KEY_PREFIX = '@chain_plan_';
+ const CLOSED_DATES_KEY = '@chain_plan_closed_dates';
+ export const FOCUS_LOG_KEY = '@chain_focus_log';
+ 
+-const planRepositories = new Map<string, VersionedRepository<PlanItem[]>>();
+-
+-function getPlanRepository(date: string) {
+-  let repository = planRepositories.get(date);
+-  if (!repository) {
+-    repository = createVersionedRepository<PlanItem[]>({
+-      storage: AsyncStorage,
+-      key: KEY_PREFIX + date,
+-      version: 2,
+-      decode: (value) => decodePlanItems(value, date),
+-      empty: () => [],
+-    });
+-    planRepositories.set(date, repository);
+-  }
+-  return repository;
+-}
++const planStore = createPlanStore({
++  storage: AsyncStorage,
++  createId: () => `${Date.now()}${Math.random().toString(36).substring(2, 9)}`,
++  cancelReminder: cancelPlanReminder,
++});
++const getPlanRepository = planStore.forDate;
+ 
+ const readPlan = (date: string) => getPlanRepository(date).read();
+ type PlanMutation = (current: PlanItem[]) => PlanItem[];
+@@ -86,6 +76,13 @@
+ 
+ export function PlanProvider({ children }: { children: React.ReactNode }) {
+   const [items, setItems] = useState<PlanItem[]>([]);
++  const [isLoading, setIsLoading] = useState(true);
++  const [loadError, setLoadError] = useState<string | null>(null);
++  const [loadAttempt, setLoadAttempt] = useState(0);
++  const retryLoad = useCallback(() => {
++    setIsLoading(true);
++    setLoadAttempt((attempt) => attempt + 1);
++  }, []);
+   const [activeDate, setActiveDate] = useState(getPlanTodayKey());
+   const [tomorrowItemCount, setTomorrowItemCount] = useState(0);
+   const [closedDateKeys, setClosedDateKeys] = useState<string[]>([]);
+@@ -111,6 +108,8 @@
+     itemsRef.current = nextItems;
+     setActiveDate(date);
+     setItems(nextItems);
++    setLoadError(null);
++    setIsLoading(false);
+   }
+ 
+   function applyVisibleMutation(date: string, mutator: PlanMutation) {
+@@ -122,11 +121,11 @@
+     if (date === getPlanTomorrowKey()) setTomorrowItemCount(next.length);
+   }
+ 
+-  function persistMutation(date: string, mutator: PlanMutation, operationName = 'plan.persist') {
++  function persistMutation(date: string, mutator: PlanMutation, operationName = 'plan.persist', editSeriesItemIds?: string[]) {
+     const visibleBefore = activeDateRef.current === date ? itemsRef.current : undefined;
+     applyVisibleMutation(date, mutator);
+     const optimisticRevision = visibleRevisionRef.current;
+-    const operation = getPlanRepository(date).update(mutator);
++    const operation = getPlanRepository(date).update(mutator, { editSeriesItemIds });
+     void operation
+       .then((persisted) => {
+         if (activeDateRef.current !== date || visibleRevisionRef.current !== optimisticRevision) return;
+@@ -165,6 +164,7 @@
+             if (date === getPlanTomorrowKey()) setTomorrowItemCount(persisted.length);
+           })
+           .catch((reconciliationError) => {
++            setLoadError('Your saved plan could not be loaded. Retry before making changes.');
+             reportDiagnostic({
+               area: 'storage',
+               operation: `${operationName}.reconcile`,
+@@ -232,9 +232,15 @@
+           replaceVisiblePlan(date, raw);
+           setTomorrowItemCount(tomorrowRaw.length);
+           setClosedDateKeys(normalizeClosedDates(closedRaw));
++          setLoadError(null);
++          setIsLoading(false);
+           return true;
+         }
+       } catch (error) {
++        if (!cancelled && requestId === navigationRequestRef.current) {
++          setLoadError('Your saved plan could not be loaded. Retry before making changes.');
++          setIsLoading(false);
++        }
+         reportDiagnostic({ area: 'storage', operation: 'plan.hydrate', severity: 'error', error });
+       }
+       return false;
+@@ -269,7 +275,7 @@
+       clearTimeout(dayTimer);
+       appStateSubscription.remove();
+     };
+-  }, []);
++  }, [loadAttempt]);
+ 
+   const isToday = activeDate === getPlanTodayKey();
+   const isActiveDayClosed = isToday && closedDateKeys.includes(activeDate);
+@@ -299,22 +305,12 @@
+   async function showTomorrow(): Promise<PlanItem[]> {
+     const date = getPlanTomorrowKey();
+     const requestId = ++navigationRequestRef.current;
+-    let shouldResolveRecurring = true;
+     let latest: PlanItem[] = [];
+     while (requestId === navigationRequestRef.current) {
+       const revisionAtStart = visibleRevisionRef.current;
+-      if (shouldResolveRecurring) {
+-        const todayItems = await readPlan(getPlanTodayKey());
+-        latest = await getPlanRepository(date).update((current) => (
+-          resolvePlanForDate(current, todayItems, date, () => `${Date.now()}${Math.random().toString(36).substring(2, 8)}`)
+-        ));
+-        shouldResolveRecurring = false;
+-      } else {
+-        latest = await readPlan(date);
+-      }
++      latest = await readPlan(date);
+       if (requestId !== navigationRequestRef.current) return latest;
+       if (revisionAtStart !== visibleRevisionRef.current) {
+-        shouldResolveRecurring = true;
+         continue;
+       }
+       replaceVisiblePlan(date, latest);
+@@ -390,7 +386,7 @@
+       ...current.map((entry) => options.isPriority ? { ...entry, isPriority: false } : entry),
+       item,
+     ];
+-    return attachPersistence(item, persistMutation(date, mutation, 'plan.addItem'));
++    return attachPersistence(item, persistMutation(date, mutation, 'plan.addItem', [item.id]));
+   }
+ 
+   function updateItem(id: string, options: PlanItemOptions) {
+@@ -409,7 +405,7 @@
+         : options.isPriority ? { ...item, isPriority: false } : item
+     ));
+     const updated: PlanItem = { ...existing, ...normalizedOptions };
+-    return attachPersistence(updated, persistMutation(date, mutation, 'plan.updateItem'));
++    return attachPersistence(updated, persistMutation(date, mutation, 'plan.updateItem', [id]));
+   }
+ 
+   async function updateReminderMetadata(id: string, reminderMinutes?: number, notificationId?: string): Promise<boolean> {
+@@ -541,14 +537,17 @@
+       notificationId: undefined,
+       completedAt: undefined,
+     };
+-    const nextTomorrow = await getPlanRepository(tomorrow).update((current) => [...current, moved]);
++    const nextTomorrow = await getPlanRepository(tomorrow).update((current) => [
++      ...current.filter((entry) => !(moved.repeatSourceId && entry.repeatSourceId === moved.repeatSourceId && entry.repeatGenerated && !entry.completed)),
++      { ...moved, repeatGenerated: false },
++    ]);
+     if (activeDateRef.current === tomorrow) {
+       applyVisibleMutation(tomorrow, (current) => (
+         current.some((entry) => entry.id === moved.id) ? current : [...current, moved]
+       ));
+     }
+-    // A cross-key transaction is not available in AsyncStorage. Updating the
+-    // destination first guarantees the task cannot disappear from both days.
++    // This operation uses two serialized saves. Updating the destination
++    // first guarantees the task cannot disappear from both days.
+     // If the source update fails, a recoverable duplicate may remain.
+     const remaining = await getPlanRepository(sourceDate).update((current) => (
+       current.filter((entry) => entry.id !== id)
+@@ -575,7 +574,10 @@
+       completedAt: undefined,
+       isPriority: false,
+     };
+-    const nextTomorrow = await getPlanRepository(tomorrow).update((current) => [...current, copied]);
++    const nextTomorrow = await getPlanRepository(tomorrow).update((current) => [
++      ...current.filter((entry) => !(copied.repeatSourceId && entry.repeatSourceId === copied.repeatSourceId && entry.repeatGenerated && !entry.completed)),
++      { ...copied, repeatGenerated: false },
++    ]);
+     if (activeDateRef.current === tomorrow) {
+       applyVisibleMutation(tomorrow, (current) => (
+         current.some((entry) => entry.id === copied.id) ? current : [...current, copied]
+@@ -623,7 +625,7 @@
+     return result;
+   }
+ 
+-  const value = useMemo(() => ({ items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, readItemsForDate, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, completeFocusItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys, readItemsForDate]);
++  const value = useMemo(() => ({ items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, readItemsForDate, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, completeFocusItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys, readItemsForDate]);
+   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
+ }
+ 
+--- a/artifacts/chain/domain/chains.ts
++++ b/artifacts/chain/domain/chains.ts
+@@ -23,6 +23,27 @@
+ 
+ export type DayStatus = 'done' | 'minimum' | 'frozen' | 'missed';
+ 
++/** Read-only fields shared by Chains, Plan and Gate when evaluating a promise. */
++export interface ChainCommitment {
++  createdAt: string;
++  cadence: 'daily' | 'weekly';
++  weeklyTarget: number;
++  restDays: readonly number[];
++  completedDates: readonly string[];
++  minimumDates: readonly string[];
++  frozenDates: readonly string[];
++}
++
++export interface ChainCommitmentStatus {
++  status: 'not-started' | 'rest' | 'done' | 'minimum' | 'frozen' | 'weekly-target-met' | 'pending';
++  /** Eligible for today's summary; daily rest days are not due. */
++  isDue: boolean;
++  /** The promise is covered, which need not mean an action was logged today. */
++  isKept: boolean;
++  weeklyProgress: number;
++  weeklyTargetMet: boolean;
++}
++
+ export interface DayStatusResult {
+   accepted: boolean;
+   changed: boolean;
+@@ -74,11 +95,17 @@
+   );
+ }
+ 
++/** Reject new schedules with no active day without rewriting legacy records. */
++export function normalizeRestDayUpdate(values: unknown): number[] | null {
++  const days = normalizeRestDays(values);
++  return days.length < 7 ? days : null;
++}
++
+ export function normalizeWeeklyTarget(value: unknown): number {
+   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 7 ? value : 3;
+ }
+ 
+-export function isRestDay(chain: Chain, date: string): boolean {
++export function isRestDay(chain: Pick<ChainCommitment, 'cadence' | 'restDays'>, date: string): boolean {
+   if (chain.cadence === 'weekly') return false;
+   return (chain.restDays ?? []).includes(getLocalDateFromString(date).getDay());
+ }
+@@ -90,13 +117,54 @@
+   return date;
+ }
+ 
+-export function getWeeklyProgress(chain: Chain, referenceDate = getTodayStr()): number {
++export function getWeeklyProgress(
++  chain: Pick<ChainCommitment, 'completedDates' | 'minimumDates'>,
++  referenceDate = getTodayStr(),
++): number {
+   const start = getWeekStart(getLocalDateFromString(referenceDate));
+   const end = new Date(start);
+   end.setDate(start.getDate() + 6);
+   const startKey = toLocalDateString(start);
+   const endKey = toLocalDateString(end);
+   return new Set([...chain.completedDates, ...chain.minimumDates].filter((date) => date >= startKey && date <= endKey)).size;
++}
++
++export function getChainCommitmentStatus(
++  chain: ChainCommitment,
++  requestedDate = getTodayStr(),
++): ChainCommitmentStatus {
++  const date = isDateKey(requestedDate) ? requestedDate : getTodayStr();
++  const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain, date) : 0;
++  const weeklyTargetMet = chain.cadence === 'weekly' && weeklyProgress >= chain.weeklyTarget;
++  let status: ChainCommitmentStatus['status'];
++
++  if (chain.createdAt > date) status = 'not-started';
++  else if (isRestDay(chain, date)) status = 'rest';
++  else if (chain.completedDates.includes(date)) status = 'done';
++  else if (chain.minimumDates.includes(date)) status = 'minimum';
++  else if (weeklyTargetMet) status = 'weekly-target-met';
++  else if (chain.cadence === 'daily' && chain.frozenDates.includes(date)) status = 'frozen';
++  else status = 'pending';
++
++  return {
++    status,
++    isDue: status !== 'not-started' && status !== 'rest',
++    isKept: status !== 'not-started' && status !== 'pending',
++    weeklyProgress,
++    weeklyTargetMet,
++  };
++}
++
++export function isChainKeptOnDate(chain: ChainCommitment, date = getTodayStr()): boolean {
++  return getChainCommitmentStatus(chain, date).isKept;
++}
++
++/** The primary completion action upgrades a minimum; only Done is undone. */
++export function getNextCompletionStatus(
++  chain: Pick<ChainCommitment, 'completedDates'>,
++  date = getTodayStr(),
++): 'done' | 'missed' {
++  return chain.completedDates.includes(date) ? 'missed' : 'done';
+ }
+ 
+ export function normalizeChain(value: unknown): Chain | null {
+@@ -184,6 +252,7 @@
+ }
+ 
+ export function getStreak(chain: Chain, referenceDate = getTodayStr()): number {
++  if (!isDateKey(referenceDate) || referenceDate < chain.createdAt) return 0;
+   if (chain.cadence === 'weekly') {
+     let weekStart = getWeekStart(getLocalDateFromString(referenceDate));
+     if (getWeeklyProgress(chain, referenceDate) < chain.weeklyTarget) weekStart.setDate(weekStart.getDate() - 7);
+@@ -201,13 +270,22 @@
+   const completed = new Set([...chain.completedDates, ...chain.minimumDates]);
+   const frozen = new Set(chain.frozenDates);
+   const coveredDays = new Set([...completed, ...frozen]);
++  // Old records can contain seven rest days. Preserve them, but never scan
++  // indefinitely: by the existing rules completions on rest days do not count.
++  if (normalizeRestDays(chain.restDays).length === 7) return 0;
+   let streak = 0;
++  let scannedDays = 0;
++  // Preserve the existing 3,650-completion limit even with six rest days per
++  // week, plus every stored Freeze that can bridge another active day.
++  const maxScannedDays = (3650 + frozen.size) * 7;
+   const date = getLocalDateFromString(referenceDate);
+ 
+   if (!coveredDays.has(referenceDate)) date.setDate(date.getDate() - 1);
+ 
+-  while (streak < 3650) {
++  while (streak < 3650 && scannedDays < maxScannedDays) {
+     const dateKey = toLocalDateString(date);
++    if (dateKey < chain.createdAt) break;
++    scannedDays += 1;
+     if (isRestDay(chain, dateKey) || frozen.has(dateKey)) {
+       date.setDate(date.getDate() - 1);
+     } else if (completed.has(dateKey)) {
+@@ -233,6 +311,11 @@
+   const wasFrozen = chain.frozenDates.includes(date);
+   const previousStatus: DayStatus = wasDone ? 'done' : wasMinimum ? 'minimum' : wasFrozen ? 'frozen' : 'missed';
+   if (previousStatus === status) return { accepted: true, changed: false, chain };
++  // Existing weekly Freeze dates remain editable/refundable, but a new one
++  // must not spend credit for a weekly streak it cannot protect.
++  if (status === 'frozen' && chain.cadence !== 'daily') {
++    return { accepted: false, changed: false, chain };
++  }
+   if (status === 'frozen' && !wasFrozen && chain.freezeCredits <= 0) {
+     return { accepted: false, changed: false, chain };
+   }
+--- a/artifacts/chain/domain/gateRules.ts
++++ b/artifacts/chain/domain/gateRules.ts
+@@ -1,3 +1,5 @@
++import { getChainCommitmentStatus, getTodayStr, isDateKey, type ChainCommitment } from './chains.ts';
++
+ export const GATE_RULES_SCHEMA_VERSION = 1;
+ export const GATE_DAILY_USAGE_OPTIONS = [5, 10, 15, 30, 45, 60, 90, 120] as const;
+ 
+@@ -22,15 +24,7 @@
+ }
+ 
+ /** Structural subset of Chain needed to evaluate today's release condition. */
+-export interface GateProgressChain {
+-  createdAt: string;
+-  cadence: 'daily' | 'weekly';
+-  weeklyTarget: number;
+-  restDays: readonly number[];
+-  completedDates: readonly string[];
+-  minimumDates: readonly string[];
+-  frozenDates: readonly string[];
+-}
++export type GateProgressChain = ChainCommitment;
+ 
+ export const DEFAULT_GATE_RULE: GateRule = {
+   trigger: { kind: 'onOpen' },
+@@ -147,64 +141,6 @@
+   return `${hours}h ${remainder}m`;
+ }
+ 
+-function toLocalDateString(date: Date): string {
+-  const year = date.getFullYear();
+-  const month = String(date.getMonth() + 1).padStart(2, '0');
+-  const day = String(date.getDate()).padStart(2, '0');
+-  return `${year}-${month}-${day}`;
+-}
+-
+-function getTodayStr(): string {
+-  return toLocalDateString(new Date());
+-}
+-
+-function isDateKey(value: unknown): value is string {
+-  if (typeof value !== 'string') return false;
+-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+-  if (!match) return false;
+-  const year = Number(match[1]);
+-  const month = Number(match[2]);
+-  const day = Number(match[3]);
+-  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+-  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+-  const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+-  return day <= daysInMonth[month - 1];
+-}
+-
+-function getLocalDateFromString(value: string): Date {
+-  const [year, month, day] = value.split('-').map(Number);
+-  return new Date(year, month - 1, day, 12);
+-}
+-
+-function isRestDay(chain: GateProgressChain, date: string): boolean {
+-  return chain.cadence === 'daily' && chain.restDays.includes(getLocalDateFromString(date).getDay());
+-}
+-
+-function getWeeklyProgress(chain: GateProgressChain, referenceDate: string): number {
+-  const start = getLocalDateFromString(referenceDate);
+-  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+-  const end = new Date(start);
+-  end.setDate(start.getDate() + 6);
+-  const startKey = toLocalDateString(start);
+-  const endKey = toLocalDateString(end);
+-  return new Set(
+-    [...chain.completedDates, ...chain.minimumDates].filter(
+-      (date) => date >= startKey && date <= endKey,
+-    ),
+-  ).size;
+-}
+-
+-function isChainKeptOnDate(chain: GateProgressChain, date: string): boolean {
+-  const protectedToday =
+-    chain.completedDates.includes(date) ||
+-    chain.minimumDates.includes(date) ||
+-    chain.frozenDates.includes(date);
+-  if (chain.cadence === 'weekly') {
+-    return getWeeklyProgress(chain, date) >= chain.weeklyTarget || protectedToday;
+-  }
+-  return protectedToday;
+-}
+-
+ /**
+  * Counts the Chains that form today's promise. Daily rest days are excluded.
+  * A weekly Chain already at target cannot keep Gate active unnecessarily.
+@@ -219,10 +155,10 @@
+   let kept = 0;
+ 
+   for (const chain of chains) {
+-    if (chain.createdAt > date) continue;
+-    if (chain.cadence === 'daily' && isRestDay(chain, date)) continue;
++    const commitment = getChainCommitmentStatus(chain, date);
++    if (!commitment.isDue) continue;
+     total += 1;
+-    if (isChainKeptOnDate(chain, date)) kept += 1;
++    if (commitment.isKept) kept += 1;
+   }
+ 
+   const pending = Math.max(0, total - kept);
+--- a/artifacts/chain/domain/plan.ts
++++ b/artifacts/chain/domain/plan.ts
+@@ -11,6 +11,8 @@
+   isPriority?: boolean;
+   repeatDays?: number[];
+   repeatSourceId?: string;
++  /** True only for an occurrence produced from a durable Repeat rule. */
++  repeatGenerated?: boolean;
+   durationMinutes?: number;
+   gateWindowId?: string;
+   completedAt?: string;
+@@ -162,6 +164,7 @@
+           isPriority: item.isPriority === true,
+           repeatDays: normalizeRepeatDays(item.repeatDays),
+           repeatSourceId: typeof item.repeatSourceId === 'string' ? item.repeatSourceId : undefined,
++          repeatGenerated: item.repeatGenerated === true,
+           durationMinutes:
+             typeof item.durationMinutes === 'number' && item.durationMinutes > 0
+               ? item.durationMinutes
+@@ -220,3 +223,182 @@
+     return [];
+   }
+ }
++
++/** Repeat rules outlive the daily tasks they produce. An empty weekday list stops a series. */
++export interface PlanRepeatRevision {
++  fromDate: string;
++  text: string;
++  timeSlot: string;
++  repeatDays: number[];
++  chainId?: string;
++  color?: string;
++  durationMinutes?: number;
++  gateWindowId?: string;
++}
++
++export interface PlanRepeatRule {
++  id: string;
++  revisions: PlanRepeatRevision[];
++  excludedDates: string[];
++}
++
++export interface PlanStorageState {
++  migrated: boolean;
++  days: Record<string, PlanItem[]>;
++  repeatRules: Record<string, PlanRepeatRule>;
++}
++
++export const emptyPlanStorage = (): PlanStorageState => ({ migrated: false, days: {}, repeatRules: {} });
++
++export function isPlanDateKey(value: string): boolean {
++  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
++  const date = new Date(`${value}T12:00:00`);
++  return !Number.isNaN(date.getTime()) && toPlanDateKey(date) === value;
++}
++
++export function planRepeatRevision(item: PlanItem, fromDate = item.planDate): PlanRepeatRevision {
++  return {
++    fromDate,
++    text: item.text,
++    timeSlot: item.timeSlot,
++    repeatDays: normalizeRepeatDays(item.repeatDays)?.sort((a, b) => a - b) ?? [],
++    chainId: item.chainId,
++    color: item.color,
++    durationMinutes: item.durationMinutes,
++    gateWindowId: item.gateWindowId,
++  };
++}
++
++export function planRepeatRevisionForDate(rule: PlanRepeatRule, date: string): PlanRepeatRevision | undefined {
++  return [...rule.revisions].reverse().find((revision) => revision.fromDate <= date);
++}
++
++/** Fail closed on malformed aggregate children; do not silently drop a saved day or rule. */
++export function decodePlanStorage(value: unknown): PlanStorageState | null {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
++  const state = value as Partial<PlanStorageState>;
++  if (typeof state.migrated !== 'boolean' || !state.days || typeof state.days !== 'object' || Array.isArray(state.days)
++    || !state.repeatRules || typeof state.repeatRules !== 'object' || Array.isArray(state.repeatRules)) return null;
++  const days: Record<string, PlanItem[]> = {};
++  for (const [date, raw] of Object.entries(state.days)) {
++    if (!isPlanDateKey(date)) return null;
++    const items = decodePlanItems(raw, date);
++    if (!items || items.length !== raw.length || items.some((item) => item.planDate !== date)) return null;
++    days[date] = items;
++  }
++  const repeatRules: Record<string, PlanRepeatRule> = {};
++  for (const [id, raw] of Object.entries(state.repeatRules)) {
++    if (!id || !raw || raw.id !== id || !Array.isArray(raw.revisions) || !raw.revisions.length || !Array.isArray(raw.excludedDates)) return null;
++    const revisions: PlanRepeatRevision[] = [];
++    for (const revision of raw.revisions) {
++      if (!revision || !isPlanDateKey(revision.fromDate) || !Array.isArray(revision.repeatDays)) return null;
++      if (revision.repeatDays.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) return null;
++      const [item] = decodePlanItems([{ ...revision, id, planDate: revision.fromDate, completed: false }], revision.fromDate) ?? [];
++      if (!item) return null;
++      revisions.push(planRepeatRevision(item, revision.fromDate));
++    }
++    if (new Set(revisions.map((revision) => revision.fromDate)).size !== revisions.length) return null;
++    if (raw.excludedDates.some((date) => typeof date !== 'string' || !isPlanDateKey(date))) return null;
++    repeatRules[id] = {
++      id,
++      revisions: revisions.sort((a, b) => a.fromDate.localeCompare(b.fromDate)),
++      excludedDates: [...new Set(raw.excludedDates)],
++    };
++  }
++  return { migrated: state.migrated, days, repeatRules };
++}
++
++/** Adds a missing occurrence once; a deleted occurrence is remembered independently of the day list. */
++export function resolveRecurringPlanForDate(
++  existing: PlanItem[],
++  rules: Record<string, PlanRepeatRule>,
++  date: string,
++  createId: () => string,
++): PlanItem[] {
++  if (!isPlanDateKey(date)) throw new Error('Invalid Plan date');
++  const day = new Date(`${date}T12:00:00`).getDay();
++  const present = new Set(existing.map((item) => item.repeatSourceId || item.id));
++  const next = [...existing];
++  for (const rule of Object.values(rules)) {
++    const revision = planRepeatRevisionForDate(rule, date);
++    if (!revision?.repeatDays.includes(day) || rule.excludedDates.includes(date) || present.has(rule.id)) continue;
++    const { fromDate: _fromDate, ...template } = revision;
++    next.push({
++      ...template,
++      id: createId(),
++      planDate: date,
++      completed: false,
++      isPriority: false,
++      repeatSourceId: rule.id,
++      repeatGenerated: true,
++      // Reminder fields describe a real scheduled notification, never a copied intention.
++      reminderMinutes: undefined,
++      notificationId: undefined,
++      completedAt: undefined,
++    });
++    present.add(rule.id);
++  }
++  return next.length === existing.length ? existing : next;
++}
++
++/** Seed only unambiguous current/next-day selections, never infer an active series from old history. */
++export function migratePlanRepeatRules(days: Record<string, PlanItem[]>, today: string): PlanStorageState {
++  const tomorrow = getPlanTomorrowKey(new Date(`${today}T12:00:00`));
++  const candidates = new Map<string, PlanItem[]>();
++  for (const item of [...(days[today] ?? []), ...(days[tomorrow] ?? [])]) {
++    const id = item.repeatSourceId || item.id;
++    candidates.set(id, [...(candidates.get(id) ?? []), item]);
++  }
++  const repeatRules: Record<string, PlanRepeatRule> = {};
++  for (const [id, items] of candidates) {
++    const fingerprints = items.map((item) => JSON.stringify({ ...planRepeatRevision(item), fromDate: '' }));
++    if (new Set(fingerprints).size !== 1 || !items[0].repeatDays?.length) continue;
++    repeatRules[id] = {
++      id,
++      revisions: [planRepeatRevision(items[0], items.some((item) => item.planDate === today) ? today : tomorrow)],
++      excludedDates: [],
++    };
++  }
++  return {
++    migrated: true,
++    repeatRules,
++    days: Object.fromEntries(Object.entries(days).map(([date, items]) => [date, items.map((item) => {
++      const id = item.repeatSourceId || item.id;
++      return repeatRules[id]
++        ? { ...item, repeatSourceId: id, repeatGenerated: item.repeatSourceId ? item.id !== id : false }
++        : item;
++    })])),
++  };
++}
++
++/** Explicit edits update this series from this date forward. Completion/reminder mutations never call this. */
++export function updatePlanRepeatRule(state: PlanStorageState, item: PlanItem, date: string): PlanStorageState {
++  const id = item.repeatSourceId || item.id;
++  const previous = state.repeatRules[id];
++  if (!previous && !item.repeatDays?.length) return state;
++  const revision = planRepeatRevision(item, date);
++  const rule: PlanRepeatRule = {
++    id,
++    revisions: [...(previous?.revisions ?? []).filter((entry) => entry.fromDate < date), revision],
++    excludedDates: previous?.excludedDates ?? [],
++  };
++  const days = { ...state.days };
++  for (const [day, entries] of Object.entries(days)) {
++    if (day <= date) continue;
++    days[day] = entries.flatMap((entry): PlanItem[] => {
++      if ((entry.repeatSourceId || entry.id) !== id || entry.completed) return [entry];
++      const scheduled = revision.repeatDays.includes(new Date(`${day}T12:00:00`).getDay());
++      if (entry.repeatGenerated && !scheduled) return [];
++      const reminderChanged = entry.timeSlot !== revision.timeSlot || entry.text !== revision.text || entry.chainId !== revision.chainId;
++      const { fromDate: _fromDate, ...template } = revision;
++      return [{
++        ...entry,
++        ...template,
++        repeatDays: revision.repeatDays.length ? revision.repeatDays : undefined,
++        reminderMinutes: reminderChanged ? undefined : entry.reminderMinutes,
++        notificationId: reminderChanged ? undefined : entry.notificationId,
++      }];
++    });
++  }
++  return { ...state, days, repeatRules: { ...state.repeatRules, [id]: rule } };
++}
+--- /dev/null
++++ b/artifacts/chain/lib/planRepository.ts
+@@ -0,0 +1,188 @@
++import {
++  decodePlanItems,
++  decodePlanStorage,
++  emptyPlanStorage,
++  getPlanTodayKey,
++  isPlanDateKey,
++  migratePlanRepeatRules,
++  resolveRecurringPlanForDate,
++  updatePlanRepeatRule,
++  type PlanItem,
++  type PlanStorageState,
++} from '../domain/plan.ts';
++import { createVersionedRepository, type KeyValueStorage, type VersionedRepository } from './versionedRepository.ts';
++
++export const PLAN_STORAGE_KEY = '@chain_plan_store';
++const LEGACY_PREFIX = '@chain_plan_';
++
++type PlanStorage = KeyValueStorage & { getAllKeys(): Promise<readonly string[]> };
++type PlanMutation = (items: PlanItem[]) => PlanItem[] | Promise<PlanItem[]>;
++type MutationOptions = { editSeriesItemIds?: string[] };
++export interface PlanDateRepository extends VersionedRepository<PlanItem[]> {
++  update(mutator: PlanMutation, options?: MutationOptions): Promise<PlanItem[]>;
++}
++
++/** One versioned payload makes instance, series and deletion-exception changes atomic. */
++export function createPlanStore({ storage, today = getPlanTodayKey, createId, cancelReminder }: {
++  storage: PlanStorage;
++  today?: () => string;
++  createId: () => string;
++  cancelReminder?: (id: string) => Promise<void>;
++}) {
++  const repository = createVersionedRepository<PlanStorageState>({
++    storage,
++    key: PLAN_STORAGE_KEY,
++    version: 1,
++    decode: decodePlanStorage,
++    empty: emptyPlanStorage,
++  });
++  let queue: Promise<void> = Promise.resolve();
++  const dateRepositories = new Map<string, PlanDateRepository>();
++
++  function enqueue<T>(operation: () => Promise<T>): Promise<T> {
++    const result = queue.catch(() => undefined).then(operation);
++    queue = result.then(() => undefined, () => undefined);
++    return result;
++  }
++
++  async function importLegacyDay(date: string): Promise<PlanItem[]> {
++    const [primary, backup] = await Promise.all([
++      storage.getItem(LEGACY_PREFIX + date),
++      storage.getItem(LEGACY_PREFIX + date + ':backup'),
++    ]);
++    const parsed = [primary, backup].map((raw): unknown => {
++      try { return raw === null ? null : JSON.parse(raw); } catch { return null; }
++    });
++    for (const value of parsed) {
++      if (value && typeof value === 'object' && 'data' in value && 'version' in value
++        && typeof value.version === 'number' && value.version > 2) {
++        throw new Error(`Plan ${date} was written by a newer app version`);
++      }
++    }
++    for (const value of parsed) {
++      if (value === null) continue;
++      let data: unknown = value;
++      if (typeof value === 'object' && 'data' in value) {
++        if ('version' in value && (!Number.isInteger(value.version) || Number(value.version) < 0)) continue;
++        data = value.data;
++      }
++      const items = decodePlanItems(data, date);
++      if (items && Array.isArray(data) && items.length === data.length && items.every((item) => item.planDate === date)) return items;
++    }
++    if (primary === null && backup === null) return [];
++    throw new Error(`Plan ${date} and its backup could not be safely read`);
++  }
++
++  async function load(): Promise<PlanStorageState> {
++    const snapshot = await repository.readWithMetadata();
++    if (snapshot.source === 'invalid' || snapshot.source === 'unsupported') {
++      throw new Error('Saved Plan data is unreadable or belongs to a newer app version');
++    }
++    if (snapshot.value.migrated) return snapshot.value;
++    const keys = await storage.getAllKeys();
++    const dates = [...new Set(keys.flatMap((key) => {
++      const match = /^@chain_plan_(\d{4}-\d{2}-\d{2})(?::backup)?$/.exec(key);
++      return match && isPlanDateKey(match[1]) ? [match[1]] : [];
++    }))];
++    const days = Object.fromEntries(await Promise.all(dates.map(async (date) => [date, await importLegacyDay(date)] as const)));
++    const migrated = migratePlanRepeatRules(days, today());
++    // Legacy keys remain byte-for-byte intact for recovery. This flag and all
++    // imported days become durable together, so a retry cannot partially migrate.
++    await repository.write(migrated);
++    return migrated;
++  }
++
++  function materialize(state: PlanStorageState, date: string): PlanStorageState {
++    const current = state.days[date] ?? [];
++    const next = date < today() ? current : resolveRecurringPlanForDate(current, state.repeatRules, date, createId);
++    if (state.days[date] && next === current) return state;
++    return { ...state, days: { ...state.days, [date]: next } };
++  }
++
++  async function commit(previous: PlanStorageState, next: PlanStorageState): Promise<void> {
++    if (previous === next || JSON.stringify(previous) === JSON.stringify(next)) return;
++    const remainingNotifications = new Set(Object.values(next.days).flatMap((items) => items.flatMap((item) => item.notificationId ? [item.notificationId] : [])));
++    const toCancel = [...new Set(Object.values(previous.days).flatMap((items) => items.flatMap((item) => (
++      item.notificationId && !remainingNotifications.has(item.notificationId) ? [item.notificationId] : []
++    ))))];
++    const cancelled = new Set<string>();
++    try {
++      for (const id of toCancel) {
++        if (!cancelReminder) throw new Error('A saved reminder must be cancelled before changing this occurrence');
++        await cancelReminder(id);
++        cancelled.add(id);
++      }
++      await repository.write(next);
++    } catch (error) {
++      if (cancelled.size) {
++        // Keep the old task/series after a failed save, but do not knowingly
++        // leave cancelled reminder metadata attached to it. Repair is best effort.
++        const repaired = {
++          ...previous,
++          days: Object.fromEntries(Object.entries(previous.days).map(([date, items]) => [date, items.map((item) => (
++            item.notificationId && cancelled.has(item.notificationId)
++              ? { ...item, reminderMinutes: undefined, notificationId: undefined }
++              : item
++          ))])),
++        };
++        await repository.write(repaired).catch(() => undefined);
++      }
++      throw error;
++    }
++  }
++
++  async function readDate(date: string): Promise<PlanItem[]> {
++    return enqueue(async () => {
++      const previous = await load();
++      const next = materialize(previous, date);
++      await commit(previous, next);
++      return next.days[date];
++    });
++  }
++
++  async function updateDate(date: string, mutator: PlanMutation, options: MutationOptions = {}): Promise<PlanItem[]> {
++    return enqueue(async () => {
++      const previous = await load();
++      let next = materialize(previous, date);
++      const current = next.days[date];
++      const result = await mutator(current);
++      const normalized = decodePlanItems(result, date);
++      if (!normalized || normalized.length !== result.length || normalized.some((item) => item.planDate !== date)) throw new Error('Invalid Plan mutation');
++      next = { ...next, days: { ...next.days, [date]: normalized }, repeatRules: { ...next.repeatRules } };
++      for (const old of current) {
++        if (normalized.some((item) => item.id === old.id)) continue;
++        const ruleId = old.repeatSourceId || old.id;
++        const rule = next.repeatRules[ruleId];
++        if (rule) next.repeatRules[ruleId] = { ...rule, excludedDates: [...new Set([...rule.excludedDates, date])] };
++      }
++      for (const id of options.editSeriesItemIds ?? []) {
++        const item = next.days[date].find((entry) => entry.id === id);
++        if (!item) continue;
++        const sourceId = item.repeatSourceId || item.id;
++        if (!next.repeatRules[sourceId] && !item.repeatDays?.length) continue;
++        const associated = { ...item, repeatSourceId: sourceId };
++        next.days[date] = next.days[date].map((entry) => entry.id === id ? associated : entry);
++        next = updatePlanRepeatRule(next, associated, date);
++      }
++      await commit(previous, next);
++      return next.days[date];
++    });
++  }
++
++  function forDate(date: string): PlanDateRepository {
++    if (!isPlanDateKey(date)) throw new Error('Invalid Plan date');
++    let facade = dateRepositories.get(date);
++    if (!facade) {
++      facade = {
++        read: () => readDate(date),
++        readWithMetadata: async () => ({ value: await readDate(date), source: 'primary', storedVersion: 1, migrated: false }),
++        write: async (items) => { await updateDate(date, () => items); },
++        update: (mutator, options) => updateDate(date, mutator, options),
++      };
++      dateRepositories.set(date, facade);
++    }
++    return facade;
++  }
++
++  return { forDate };
++}
+--- /dev/null
++++ b/artifacts/chain/tests/chains-commitment-regressions.test.mjs
+@@ -0,0 +1,196 @@
++import assert from 'node:assert/strict';
++import { spawnSync } from 'node:child_process';
++import test from 'node:test';
++
++import {
++  applyDayStatus,
++  getChainCommitmentStatus,
++  getNextCompletionStatus,
++  getStreak,
++  getWeeklyProgress,
++  isChainKeptOnDate,
++  normalizeChain,
++  normalizeRestDayUpdate,
++  toLocalDateString,
++} from '../domain/chains.ts';
++import { getGateTodayProgress } from '../domain/gateRules.ts';
++
++const today = '2026-09-06'; // Sunday
++
++function makeChain(overrides = {}) {
++  return {
++    id: 'chain-1', name: 'Read', color: '#ff6b3d', createdAt: '2026-08-24',
++    completedDates: [], minimumDates: [], minimumLabel: 'One page', frozenDates: [],
++    freezeCredits: 2, freezeRecoveryProgress: 0, freezeRecoveryCountedDates: [],
++    freezeSystemVersion: 2, restDays: [], cadence: 'daily', weeklyTarget: 3,
++    completionTimes: {}, ...overrides,
++  };
++}
++
++test('a legacy seven-rest-day schedule stays intact and cannot block streak calculation', () => {
++  const original = makeChain({ restDays: [0, 1, 2, 3, 4, 5, 6], completedDates: ['2026-09-04'] });
++  const normalized = normalizeChain(original);
++  assert.deepEqual(normalized.restDays, original.restDays);
++  assert.deepEqual(normalized.completedDates, original.completedDates);
++
++  // A killable child makes this regression fail cleanly if an unbounded scan
++  // returns, rather than freezing the complete Node test run.
++  const moduleUrl = new URL('../domain/chains.ts', import.meta.url).href;
++  const result = spawnSync(process.execPath, [
++    '--no-warnings', '--experimental-strip-types', '--input-type=module', '-e',
++    `import { getStreak } from ${JSON.stringify(moduleUrl)}; console.log(getStreak(${JSON.stringify(normalized)}, '${today}'));`,
++  ], { encoding: 'utf8', timeout: 3000 });
++  assert.equal(result.error, undefined);
++  assert.equal(result.status, 0, result.stderr);
++  assert.equal(result.stdout.trim(), '0');
++});
++
++test('new rest schedules must leave an active day without changing legacy normalization', () => {
++  assert.equal(normalizeRestDayUpdate([0, 1, 2, 3, 4, 5, 6]), null);
++  assert.equal(normalizeRestDayUpdate([0, 1, 2, 3, 4, 5, 6, 6]), null);
++  assert.deepEqual(normalizeRestDayUpdate([0, 2, 3, 4, 5, 6]), [0, 2, 3, 4, 5, 6]);
++  assert.deepEqual(normalizeRestDayUpdate([0, 0, 6, 99]), [0, 6]);
++  assert.deepEqual(normalizeRestDayUpdate([]), []);
++});
++
++test('daily streak preserves six rest days and counts only completed active days', () => {
++  const chain = makeChain({
++    restDays: [0, 2, 3, 4, 5, 6], // Monday only
++    completedDates: ['2026-08-24', '2026-08-26', '2026-08-31'],
++  });
++  const before = structuredClone(chain);
++  assert.equal(getStreak(chain, today), 2);
++  assert.deepEqual(chain, before);
++});
++
++test('daily streak stops at creation and preserves crossing daily Freeze and rest days', () => {
++  const chain = makeChain({
++    createdAt: '2026-09-01', completedDates: ['2026-08-31', '2026-09-01', '2026-09-03', '2026-09-04'],
++    frozenDates: ['2026-09-02'], restDays: [0, 6],
++  });
++  assert.equal(getStreak(chain, today), 3);
++  assert.equal(getStreak(chain, '2026-08-31'), 0);
++});
++
++test('the scan limit preserves 3650 completions across six rest days and intervening Freezes', () => {
++  // An intentionally long boundary fixture: a frozen active Sunday also
++  // requires crossing the six rest days before the next active Sunday.
++  const date = new Date(`${today}T12:00:00`);
++  const completedDates = [];
++  const frozenDates = [];
++  for (let week = 0; week < 3700; week += 1) {
++    const key = toLocalDateString(date);
++    if (week % 74 === 0) frozenDates.push(key);
++    else completedDates.push(key);
++    date.setDate(date.getDate() - 7);
++  }
++  const chain = makeChain({
++    createdAt: completedDates.at(-1),
++    restDays: [1, 2, 3, 4, 5, 6],
++    completedDates,
++    frozenDates,
++  });
++  assert.equal(completedDates.length, 3650);
++  assert.equal(frozenDates.length, 50);
++  assert.equal(getStreak(chain, today), 3650);
++});
++
++test('the primary completion action upgrades Minimum to Done and then permits undo', () => {
++  const minimum = applyDayStatus(makeChain(), today, 'minimum').chain;
++  const before = structuredClone(minimum);
++  const completed = applyDayStatus(minimum, today, getNextCompletionStatus(minimum, today), '2026-09-06T10:00:00.000Z');
++  assert.equal(completed.accepted, true);
++  assert.deepEqual(completed.chain.minimumDates, []);
++  assert.deepEqual(completed.chain.completedDates, [today]);
++  assert.equal(completed.chain.completionTimes[today], '2026-09-06T10:00:00.000Z');
++  assert.deepEqual(minimum, before);
++  const undone = applyDayStatus(completed.chain, today, getNextCompletionStatus(completed.chain, today));
++  assert.deepEqual(undone.chain.completedDates, []);
++  assert.deepEqual(undone.chain.minimumDates, []);
++});
++
++test('the primary completion action replaces a daily Freeze and refunds its credit', () => {
++  const frozen = applyDayStatus(makeChain(), today, 'frozen').chain;
++  const completed = applyDayStatus(frozen, today, getNextCompletionStatus(frozen, today)).chain;
++  assert.deepEqual(completed.completedDates, [today]);
++  assert.deepEqual(completed.frozenDates, []);
++  assert.equal(completed.freezeCredits, 2);
++});
++
++test('a new weekly Freeze is rejected without spending credit or replacing progress', () => {
++  for (const overrides of [{}, { minimumDates: [today] }, { completedDates: [today] }]) {
++    const chain = makeChain({ cadence: 'weekly', ...overrides });
++    const before = structuredClone(chain);
++    const result = applyDayStatus(chain, today, 'frozen');
++    assert.equal(result.accepted, false);
++    assert.equal(result.changed, false);
++    assert.equal(result.chain, chain);
++    assert.deepEqual(chain, before);
++  }
++});
++
++test('old weekly Freeze history survives normalization and remains correctable and refundable', () => {
++  const chain = normalizeChain(makeChain({ cadence: 'weekly', frozenDates: [today], freezeCredits: 1 }));
++  assert.deepEqual(chain.frozenDates, [today]);
++  assert.equal(chain.freezeCredits, 1);
++  assert.equal(applyDayStatus(chain, today, 'frozen').changed, false);
++  for (const status of ['missed', 'minimum', 'done']) {
++    const corrected = applyDayStatus(chain, today, status);
++    assert.equal(corrected.accepted, true);
++    assert.deepEqual(corrected.chain.frozenDates, []);
++    assert.equal(corrected.chain.freezeCredits, 2);
++  }
++  assert.deepEqual(chain.frozenDates, [today]);
++});
++
++test('a weekly Freeze record alone cannot count as kept or release conditional Gate', () => {
++  const chain = makeChain({ cadence: 'weekly', frozenDates: [today], freezeCredits: 1 });
++  assert.equal(getChainCommitmentStatus(chain, today).status, 'pending');
++  assert.equal(isChainKeptOnDate(chain, today), false);
++  assert.equal(getWeeklyProgress(chain, today), 0);
++  assert.deepEqual(getGateTodayProgress([chain], today), { total: 1, kept: 0, pending: 1, isKept: false });
++});
++
++test('a weekly target met earlier keeps the shared promise without inventing a completion today', () => {
++  const chain = makeChain({ cadence: 'weekly', completedDates: ['2026-08-31', '2026-09-02', '2026-09-04'] });
++  const before = structuredClone(chain);
++  assert.deepEqual(getChainCommitmentStatus(chain, today), {
++    status: 'weekly-target-met', isDue: true, isKept: true, weeklyProgress: 3, weeklyTargetMet: true,
++  });
++  assert.equal(isChainKeptOnDate(chain, today), true);
++  assert.equal(chain.completedDates.includes(today), false);
++  assert.deepEqual(getGateTodayProgress([chain], today), { total: 1, kept: 1, pending: 0, isKept: true });
++  assert.deepEqual(chain, before);
++});
++
++test('weekly minimum and done remain daily action states even before the weekly goal is met', () => {
++  const done = makeChain({ cadence: 'weekly', completedDates: [today] });
++  const minimum = makeChain({ cadence: 'weekly', minimumDates: [today] });
++  for (const [chain, status] of [[done, 'done'], [minimum, 'minimum']]) {
++    assert.deepEqual(getChainCommitmentStatus(chain, today), {
++      status, isDue: true, isKept: true, weeklyProgress: 1, weeklyTargetMet: false,
++    });
++  }
++});
++
++test('shared commitment and Gate agree across pending, rest, future, Freeze and weekly states', () => {
++  const chains = [
++    makeChain({ id: 'daily-done', completedDates: [today] }),
++    makeChain({ id: 'daily-minimum', minimumDates: [today] }),
++    makeChain({ id: 'daily-frozen', frozenDates: [today] }),
++    makeChain({ id: 'daily-rest', restDays: [0] }),
++    makeChain({ id: 'future', createdAt: '2026-09-07' }),
++    makeChain({ id: 'weekly-met', cadence: 'weekly', completedDates: ['2026-08-31', '2026-09-02', '2026-09-04'] }),
++    makeChain({ id: 'weekly-pending', cadence: 'weekly' }),
++    makeChain({ id: 'weekly-old-freeze', cadence: 'weekly', frozenDates: [today] }),
++  ];
++  const statuses = chains.map(chain => getChainCommitmentStatus(chain, today));
++  assert.equal(statuses[3].status, 'rest');
++  assert.equal(statuses[3].isKept, true);
++  assert.equal(statuses[4].status, 'not-started');
++  const due = statuses.filter(status => status.isDue);
++  assert.equal(due.length, 6);
++  assert.deepEqual(getGateTodayProgress(chains, today), {
++    total: due.length, kept: 4, pending: 2, isKept: false,
++  });
++});
+--- /dev/null
++++ b/artifacts/chain/tests/plan-repeat-regressions.test.mjs
+@@ -0,0 +1,221 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import { createPlanStore, PLAN_STORAGE_KEY } from '../lib/planRepository.ts';
++import { decodePlanStorage } from '../domain/plan.ts';
++
++const monday = '2026-09-07';
++const wednesday = '2026-09-09';
++const friday = '2026-09-11';
++const task = (date = monday, extra = {}) => ({ id: 'read', text: 'Read', timeSlot: '8 PM', completed: false, planDate: date, repeatDays: [1, 3, 5], ...extra });
++function setup(initial = {}, cancelReminder = async () => {}) {
++  const values = new Map(Object.entries(initial));
++  let clock = monday;
++  let sequence = 0;
++  let failWrite = false;
++  const storage = {
++    async getItem(key) { return values.get(key) ?? null; },
++    async getAllKeys() { return [...values.keys()]; },
++    async setItem(key, value) {
++      if (failWrite && key === PLAN_STORAGE_KEY) { failWrite = false; throw new Error('disk full'); }
++      values.set(key, value);
++    },
++  };
++  const open = () => createPlanStore({ storage, today: () => clock, createId: () => `generated-${++sequence}`, cancelReminder });
++  return { values, open, store: open(), setToday: (date) => { clock = date; }, failNextWrite: () => { failWrite = true; } };
++}
++async function seed(env, item = task()) {
++  return env.store.forDate(item.planDate).update(() => [item], { editSeriesItemIds: [item.id] });
++}
++const envelope = (data, version = 2) => JSON.stringify({ version, data });
++
++test('Repeat survives restart and skipped days without visiting Tomorrow', async () => {
++  const env = setup();
++  await seed(env);
++  env.setToday(wednesday);
++  const repo = env.open().forDate(wednesday);
++  const [item] = await repo.read();
++  assert.equal(item.text, 'Read');
++  assert.equal(item.repeatSourceId, 'read');
++  assert.equal(item.completed, false);
++  assert.equal(item.repeatGenerated, true);
++  assert.equal((await repo.read()).length, 1);
++  env.setToday(friday);
++  assert.equal((await env.open().forDate(friday).read()).length, 1);
++});
++
++test('Repeated tasks clear completion, priority and unscheduled reminder metadata', async () => {
++  const env = setup();
++  await seed(env, task(monday, { completed: true, completedAt: 'saved-time', isPriority: true, notificationId: 'existing', reminderMinutes: 15, chainId: 'chain', durationMinutes: 30, color: '#ff0000' }));
++  const [item] = await env.store.forDate(wednesday).read();
++  assert.equal(item.completed, false);
++  assert.equal(item.completedAt, undefined);
++  assert.equal(item.isPriority, false);
++  assert.equal(item.notificationId, undefined);
++  assert.equal(item.reminderMinutes, undefined);
++  assert.equal(item.chainId, 'chain');
++  assert.equal(item.durationMinutes, 30);
++  assert.equal(item.color, '#ff0000');
++});
++
++test('Deleting an occurrence persists an exception but leaves later repeats', async () => {
++  const env = setup();
++  await seed(env);
++  await env.store.forDate(wednesday).update(() => []);
++  assert.deepEqual(await env.open().forDate(wednesday).read(), []);
++  assert.equal((await env.open().forDate(friday).read()).length, 1);
++});
++
++test('Series edits update pending future instances while preserving completed history', async () => {
++  const env = setup();
++  await seed(env);
++  const [wed] = await env.store.forDate(wednesday).read();
++  await env.store.forDate(friday).update((items) => items.map((item) => ({ ...item, completed: true, completedAt: 'saved' })));
++  await env.store.forDate(wednesday).update((items) => items.map((item) => ({ ...item, text: 'Read chapters', timeSlot: '9 PM' })), { editSeriesItemIds: [wed.id] });
++  assert.equal((await env.store.forDate(monday).read())[0].text, 'Read');
++  assert.equal((await env.store.forDate(friday).read())[0].text, 'Read');
++  assert.equal((await env.store.forDate('2026-09-14').read())[0].text, 'Read chapters');
++});
++
++test('Stopping Repeat removes generated future tasks, preserves manually copied tasks and cancels their removed reminders', async () => {
++  const cancelled = [];
++  const env = setup({}, async (id) => { cancelled.push(id); });
++  await seed(env);
++  await env.store.forDate(wednesday).update((items) => items.map((item) => ({ ...item, notificationId: 'wed-reminder', reminderMinutes: 15 })));
++  await env.store.forDate(friday).update((items) => items.map((item) => ({ ...item, repeatGenerated: false })));
++  await env.store.forDate(monday).update((items) => items.map((item) => ({ ...item, repeatDays: [] })), { editSeriesItemIds: ['read'] });
++  assert.deepEqual(await env.open().forDate(wednesday).read(), []);
++  assert.equal((await env.open().forDate(friday).read()).length, 1);
++  assert.deepEqual(await env.open().forDate('2026-09-14').read(), []);
++  assert.deepEqual(cancelled, ['wed-reminder']);
++});
++
++test('Failure to cancel a reminder aborts the series change', async () => {
++  const env = setup({}, async () => { throw new Error('native failure'); });
++  await seed(env);
++  await env.store.forDate(wednesday).update((items) => items.map((item) => ({ ...item, notificationId: 'wed-reminder' })));
++  await assert.rejects(env.store.forDate(monday).update((items) => items.map((item) => ({ ...item, repeatDays: [] })), { editSeriesItemIds: ['read'] }), /native failure/);
++  assert.equal((await env.store.forDate(wednesday).read())[0].notificationId, 'wed-reminder');
++  assert.equal((await env.store.forDate(friday).read()).length, 1);
++});
++
++test('A failed save preserves the rule and repairs metadata for a cancelled reminder', async () => {
++  const cancelled = [];
++  const env = setup({}, async (id) => { cancelled.push(id); });
++  await seed(env);
++  await env.store.forDate(wednesday).update((items) => items.map((item) => ({ ...item, notificationId: 'wed-reminder', reminderMinutes: 15 })));
++  env.failNextWrite();
++  await assert.rejects(env.store.forDate(monday).update((items) => items.map((item) => ({ ...item, repeatDays: [] })), { editSeriesItemIds: ['read'] }), /disk full/);
++  const [preserved] = await env.store.forDate(wednesday).read();
++  assert.equal(preserved.text, 'Read');
++  assert.equal(preserved.notificationId, undefined);
++  assert.equal(preserved.reminderMinutes, undefined);
++  assert.equal((await env.store.forDate(friday).read()).length, 1);
++  assert.deepEqual(cancelled, ['wed-reminder']);
++});
++
++test('Concurrent writes across dates do not overwrite each other', async () => {
++  const env = setup();
++  await seed(env);
++  await Promise.all([
++    env.store.forDate(wednesday).update((items) => items.map((item) => ({ ...item, completed: true }))),
++    env.store.forDate(friday).update((items) => [...items, task(friday, { id: 'extra', repeatDays: undefined })]),
++  ]);
++  assert.equal((await env.store.forDate(wednesday).read())[0].completed, true);
++  assert.equal((await env.store.forDate(friday).read()).length, 2);
++});
++
++test('Migration preserves all saved days and original bytes; only current unambiguous rules start', async () => {
++  const historical = task('2026-08-01', { id: 'old', notificationId: 'history', completed: true });
++  const current = task();
++  const initial = { '@chain_plan_2026-08-01': envelope([historical]), [`@chain_plan_${monday}`]: envelope([current]) };
++  const env = setup(initial);
++  await env.store.forDate(monday).read();
++  for (const [key, value] of Object.entries(initial)) assert.equal(env.values.get(key), value);
++  assert.equal((await env.store.forDate('2026-08-01').read())[0].notificationId, 'history');
++  const state = JSON.parse(env.values.get(PLAN_STORAGE_KEY)).data;
++  assert.deepEqual(Object.keys(state.repeatRules), ['read']);
++  assert.equal((await env.open().forDate(wednesday).read()).length, 1);
++});
++
++test('Conflicting legacy Repeat settings are preserved without guessing a rule', async () => {
++  const env = setup({
++    [`@chain_plan_${monday}`]: envelope([task()]),
++    '@chain_plan_2026-09-08': envelope([task('2026-09-08', { id: 'copied', repeatSourceId: 'read', repeatDays: [2, 4] })]),
++  });
++  await env.store.forDate(monday).read();
++  assert.deepEqual(JSON.parse(env.values.get(PLAN_STORAGE_KEY)).data.repeatRules, {});
++  assert.equal((await env.store.forDate('2026-09-08').read())[0].repeatDays.length, 2);
++});
++
++test('Corrupt legacy primary uses a valid backup; future versions are never overwritten', async () => {
++  const env = setup({ [`@chain_plan_${monday}`]: 'broken', [`@chain_plan_${monday}:backup`]: envelope([task()]) });
++  assert.equal((await env.store.forDate(monday).read())[0].text, 'Read');
++  assert.equal(env.values.get(`@chain_plan_${monday}`), 'broken');
++  const future = setup({ [`@chain_plan_${monday}`]: envelope([task()], 3), [`@chain_plan_${monday}:backup`]: envelope([task()]) });
++  await assert.rejects(future.store.forDate(monday).read(), /newer app version/);
++  assert.equal(future.values.has(PLAN_STORAGE_KEY), false);
++});
++
++test('Unreadable historical data blocks migration without silently losing a day', async () => {
++  const env = setup({ '@chain_plan_2026-08-01': '[null]', [`@chain_plan_${monday}`]: envelope([task()]) });
++  await assert.rejects(env.store.forDate(monday).read(), /could not be safely read/);
++  assert.equal(env.values.has(PLAN_STORAGE_KEY), false);
++  assert.equal(env.values.get('@chain_plan_2026-08-01'), '[null]');
++});
++
++test('Failed first migration retries safely and never removes legacy records', async () => {
++  const raw = envelope([task()]);
++  const env = setup({ [`@chain_plan_${monday}`]: raw });
++  env.failNextWrite();
++  await assert.rejects(env.store.forDate(monday).read(), /disk full/);
++  assert.equal(env.values.has(PLAN_STORAGE_KEY), false);
++  assert.equal((await env.open().forDate(monday).read()).length, 1);
++  assert.equal(env.values.get(`@chain_plan_${monday}`), raw);
++});
++
++test('Aggregate corruption recovers backup; an unsupported aggregate is refused', async () => {
++  const env = setup();
++  await seed(env);
++  await env.store.forDate(wednesday).read();
++  env.values.set(PLAN_STORAGE_KEY, 'corrupt');
++  assert.equal((await env.open().forDate(wednesday).read()).length, 1);
++  env.values.set(`${PLAN_STORAGE_KEY}:backup`, envelope({}, 99));
++  await assert.rejects(env.open().forDate(friday).read(), /newer app version/);
++  assert.equal(JSON.parse(env.values.get(`${PLAN_STORAGE_KEY}:backup`)).version, 99);
++});
++
++test('Historical reads do not invent missed tasks and malformed aggregate children fail closed', async () => {
++  const env = setup();
++  await seed(env);
++  env.setToday(friday);
++  assert.deepEqual(await env.open().forDate(wednesday).read(), []);
++  assert.equal(decodePlanStorage({ migrated: true, days: { [monday]: [null] }, repeatRules: {} }), null);
++  assert.throws(() => env.store.forDate('2026-02-30'), /Invalid Plan date/);
++});
++
++test('Editing time updates an already materialized pending occurrence and cancels its obsolete reminder', async () => {
++  const cancelled = [];
++  const env = setup({}, async (id) => { cancelled.push(id); });
++  await seed(env);
++  await env.store.forDate(wednesday).update((items) => items.map((item) => ({ ...item, notificationId: 'old-time', reminderMinutes: 15 })));
++  await env.store.forDate(monday).update((items) => items.map((item) => ({ ...item, timeSlot: '9 PM' })), { editSeriesItemIds: ['read'] });
++  const [next] = await env.open().forDate(wednesday).read();
++  assert.equal(next.timeSlot, '9 PM');
++  assert.equal(next.notificationId, undefined);
++  assert.deepEqual(cancelled, ['old-time']);
++});
++
++test('A copied occurrence replaces the generated destination without creating a duplicate on reload', async () => {
++  const env = setup();
++  const [source] = await seed(env);
++  const copied = { ...source, id: 'manual-copy', planDate: wednesday, repeatGenerated: false };
++  await env.store.forDate(wednesday).update((items) => [
++    ...items.filter((item) => !(item.repeatSourceId === copied.repeatSourceId && item.repeatGenerated && !item.completed)),
++    copied,
++  ]);
++  const destination = await env.open().forDate(wednesday).read();
++  assert.equal(destination.length, 1);
++  assert.equal(destination[0].id, 'manual-copy');
++  assert.equal((await env.open().forDate(monday).read()).length, 1);
++  assert.equal((await env.open().forDate(friday).read()).length, 1);
++});
+--- /dev/null
++++ b/artifacts/chain/tests/progression.test.mjs
+@@ -0,0 +1,30 @@
++import assert from 'node:assert/strict';
++import test from 'node:test';
++
++import { formatStreakCount, getNextProgressionStage, getProgressionStage } from '../constants/progression.ts';
++
++test('streak milestones keep their actual cadence instead of converting to calendar years', () => {
++  assert.equal(formatStreakCount(1, 'daily'), '1 day');
++  assert.equal(formatStreakCount(7, 'daily'), '7 days');
++  assert.equal(formatStreakCount(365, 'daily'), '365 days');
++  assert.equal(formatStreakCount(1, 'weekly'), '1 week');
++  assert.equal(formatStreakCount(7, 'weekly'), '7 weeks');
++  assert.equal(formatStreakCount(365, 'weekly'), '365 weeks');
++});
++
++test('shared milestones make no false week, year or automatic habit claims', () => {
++  const seven = getProgressionStage(7);
++  const thirty = getProgressionStage(30);
++  const longStreak = getProgressionStage(365);
++  assert.doesNotMatch(`${seven.label} ${seven.copy}`, /full week|seven days/i);
++  assert.doesNotMatch(`${thirty.label} ${thirty.copy}`, /real habit|automatic|guaranteed/i);
++  assert.doesNotMatch(`${longStreak.label} ${longStreak.copy}`, /\byear\b/i);
++});
++
++test('neutral copy preserves existing progression thresholds and stable keys', () => {
++  assert.equal(getProgressionStage(0).key, 'starting-line');
++  assert.equal(getProgressionStage(29).key, 'part-of-week');
++  assert.equal(getProgressionStage(30).key, 'real-habit');
++  assert.equal(getNextProgressionStage(29)?.at, 30);
++  assert.equal(getNextProgressionStage(365), undefined);
++});
+--- a/artifacts/chain/tsconfig.json
++++ b/artifacts/chain/tsconfig.json
+@@ -4,6 +4,8 @@
+     "baseUrl": ".",
+     "ignoreDeprecations": "6.0",
+     "strict": true,
++    "noEmit": true,
++    "allowImportingTsExtensions": true,
+     "paths": {
+       "@/*": [
+         "./*"

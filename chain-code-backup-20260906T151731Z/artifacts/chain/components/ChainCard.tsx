@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import {
@@ -8,18 +9,17 @@ import {
   getStreak,
   getTodayStr,
   getWeeklyProgress,
-  getChainCommitmentStatus,
   isRestDay,
   useChains,
 } from '@/context/ChainsContext';
 import { getProgressionStage } from '@/constants/progression';
-import { CONTROL, RADIUS, SPACE, TYPE } from '@/constants/designSystem';
+import { CONTROL, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/designSystem';
 import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
 import { playFeedback } from '@/lib/feedback';
 import AnimatedPressable from './AnimatedPressable';
 import WeekStrip from './WeekStrip';
 import MilestoneModal from './MilestoneModal';
-import { Surface } from './ui/AppUI';
+import { AppButton, Surface } from './ui/AppUI';
 import { ChainSymbol } from './ui/ChainSymbol';
 
 interface Props {
@@ -33,13 +33,11 @@ const GLASS_SURFACE_COLOR = '#121214';
 export default function ChainCard({ chain }: Props) {
   const colors = useColors();
   const reducedMotion = useReducedMotion();
-  const { toggleToday, isCompletedToday } = useChains();
-  const today = getTodayStr();
-  const commitment = getChainCommitmentStatus(chain, today);
+  const { toggleToday, isCompletedToday, isProtectedToday, isFrozenToday } = useChains();
   const done = isCompletedToday(chain);
-  const minimum = chain.minimumDates.includes(today);
-  const frozen = commitment.status === 'frozen';
-  const keptToday = done || minimum;
+  const protectedToday = isProtectedToday(chain);
+  const frozen = isFrozenToday(chain);
+  const keptToday = done || chain.minimumDates.includes(getTodayStr());
   const streak = getStreak(chain);
   const stage = getProgressionStage(streak);
   const restingToday = isRestDay(chain, getTodayStr());
@@ -54,44 +52,37 @@ export default function ChainCard({ chain }: Props) {
   const [mutationBusy, setMutationBusy] = useState(false);
   const mutationBusyRef = useRef(false);
   const prevDoneRef = useRef(keptToday);
-  const prevStreakRef = useRef(streak);
+  const prevWeeklyProgressRef = useRef(weeklyProgress);
   const previousCompletedRef = useRef(done);
   const checkArrival = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (
-      !prevDoneRef.current
-      && keptToday
-      && MILESTONES.has(streak)
-      && (chain.cadence !== 'weekly' || streak > prevStreakRef.current)
-    ) {
+    if (!prevDoneRef.current && keptToday && MILESTONES.has(streak)) {
       setCelebratingMilestone(streak);
     }
     prevDoneRef.current = keptToday;
-    prevStreakRef.current = streak;
-  }, [chain.cadence, keptToday, streak]);
+  }, [keptToday, streak]);
 
   useEffect(() => {
-    if (celebratingExtra === null) return;
-    const timer = setTimeout(() => setCelebratingExtra(null), 4000);
-    return () => clearTimeout(timer);
-  }, [celebratingExtra]);
-
-  useEffect(() => {
-    if (chain.cadence !== 'weekly' || weeklyProgress <= chain.weeklyTarget) {
-      setCelebratingExtra(null);
+    if (
+      chain.cadence === 'weekly'
+      && weeklyProgress > chain.weeklyTarget
+      && weeklyProgress > prevWeeklyProgressRef.current
+    ) {
+      setCelebratingExtra(weeklyProgress - chain.weeklyTarget);
     }
+    prevWeeklyProgressRef.current = weeklyProgress;
   }, [chain.cadence, chain.weeklyTarget, weeklyProgress]);
 
   useEffect(() => {
     const becameComplete = done && !previousCompletedRef.current;
     previousCompletedRef.current = done;
+    if (!becameComplete) return;
 
     if (reducedMotion) {
       checkArrival.setValue(1);
       return;
     }
-    if (!becameComplete) return;
 
     checkArrival.setValue(0);
     const animation = Animated.timing(checkArrival, {
@@ -112,21 +103,12 @@ export default function ChainCard({ chain }: Props) {
     mutationBusyRef.current = false;
     setMutationBusy(false);
     if (result.status !== 'persisted') {
-      setCelebratingExtra(null);
-      setCelebratingMilestone(null);
       playFeedback('error');
       Alert.alert('Chain not updated', 'Chain couldn’t save that change. Your previous status has been restored.');
       return;
     }
-    // Upgrading a minimum keeps the same logged day. Celebrate only a new day,
-    // after storage confirms it, without interrupting the next Chain.
-    if (chain.cadence === 'weekly' && !keptToday && weeklyProgress >= chain.weeklyTarget) {
-      setCelebratingExtra(weeklyProgress + 1 - chain.weeklyTarget);
-    } else {
-      setCelebratingExtra(null);
-    }
     playFeedback(done ? 'selection' : 'light');
-  }, [done, chain.id, chain.cadence, chain.weeklyTarget, keptToday, restingToday, toggleToday, weeklyProgress]);
+  }, [done, chain.id, restingToday, toggleToday]);
 
   const handleCardPress = useCallback(() => {
     router.push({ pathname: '/chain/[id]', params: { id: chain.id } });
@@ -138,11 +120,9 @@ export default function ChainCard({ chain }: Props) {
       ? 'frozen today'
       : done
         ? 'completed today'
-        : minimum
+        : protectedToday
           ? 'minimum version logged today'
-          : commitment.weeklyTargetMet
-            ? 'weekly goal met, no entry today'
-            : 'not yet logged today';
+          : 'not yet logged today';
 
   return (
     <>
@@ -150,7 +130,7 @@ export default function ChainCard({ chain }: Props) {
         <View style={[styles.stripe, { backgroundColor: chain.color }]} />
         <AnimatedPressable
           accessibilityRole="button"
-          accessibilityLabel={`${chain.name}, ${chain.cadence === 'weekly' ? `${weeklyProgress} of ${chain.weeklyTarget} days this week, ` : ''}${streak} ${chain.cadence === 'weekly' ? 'week' : 'day'} streak, ${statusLabel}`}
+          accessibilityLabel={`${chain.name}, ${streak} ${chain.cadence === 'weekly' ? 'week' : 'day'} streak, ${statusLabel}`}
           accessibilityHint="Opens Chain details"
           onPress={handleCardPress}
           containerStyle={styles.detailsTarget}
@@ -162,11 +142,7 @@ export default function ChainCard({ chain }: Props) {
                 {chain.name}
               </Text>
               <Text style={[styles.stageLabel, { color: readableAccent }]} numberOfLines={1}>
-                {chain.cadence === 'weekly'
-                  ? celebratingExtra !== null
-                    ? 'ANOTHER DAY KEPT'
-                    : `${streak}-WEEK STREAK`
-                  : stage.label.toUpperCase()}
+                {stage.label.toUpperCase()}
               </Text>
             </View>
             <View style={styles.streakBlock}>
@@ -177,11 +153,11 @@ export default function ChainCard({ chain }: Props) {
                   { color: readableAccent },
                 ]}
               >
-                {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget}` : streak}
+                {streak}
               </Text>
               <Text style={[styles.streakLabel, { color: colors.mutedForeground }]}>
                 {chain.cadence === 'weekly'
-                  ? 'this week'
+                  ? streak === 1 ? 'week' : 'weeks'
                   : streak === 1 ? 'day' : 'days'}
               </Text>
             </View>
@@ -198,12 +174,8 @@ export default function ChainCard({ chain }: Props) {
               ? `${chain.name} is resting today`
               : frozen
                 ? `Replace today's freeze with a completion for ${chain.name}`
-                : minimum
-                  ? `Complete ${chain.name}, minimum already logged today`
-                  : commitment.weeklyTargetMet && !done
-                    ? `Log an extra day for ${chain.name}, weekly goal already met`
-                    : `${done ? 'Unmark' : 'Mark'} ${chain.name} for today`}
-            accessibilityState={{ checked: done ? true : minimum ? 'mixed' : false, disabled: restingToday || mutationBusy, busy: mutationBusy }}
+                : `${keptToday ? 'Unmark' : 'Mark'} ${chain.name} for today`}
+            accessibilityState={{ checked: protectedToday, disabled: restingToday || mutationBusy, busy: mutationBusy }}
             disabled={restingToday || mutationBusy}
             onPress={handleCheck}
             scaleTo={0.94}
@@ -216,7 +188,7 @@ export default function ChainCard({ chain }: Props) {
             ]}
           >
             {frozen ? (
-              <ChainSymbol name="freeze" size={20} color={statusForeground} />
+              <Ionicons name="snow" size={18} color={statusForeground} />
             ) : keptToday ? (
               done ? (
                 <Animated.View
@@ -233,14 +205,14 @@ export default function ChainCard({ chain }: Props) {
                 <ChainSymbol name="minimum" size={20} color={statusForeground} />
               )
             ) : restingToday ? (
-              <ChainSymbol name="rest" size={20} color={colors.mutedForeground} />
+              <Ionicons name="moon-outline" size={18} color={colors.mutedForeground} />
             ) : null}
           </AnimatedPressable>
-          {chain.cadence === 'weekly' && commitment.weeklyTargetMet ? (
+          {chain.cadence === 'weekly' ? (
             <Text numberOfLines={1} style={[styles.weeklyProgress, { color: readableAccent }]}>
               {weeklyProgress > chain.weeklyTarget
                 ? `+${weeklyProgress - chain.weeklyTarget}`
-                : 'Goal met'}
+                : `${weeklyProgress}/${chain.weeklyTarget}`}
             </Text>
           ) : null}
         </View>
@@ -255,7 +227,67 @@ export default function ChainCard({ chain }: Props) {
           onDismiss={() => setCelebratingMilestone(null)}
         />
       ) : null}
+      <ExtraWorkMoment
+        extra={celebratingExtra}
+        chain={chain}
+        onClose={() => setCelebratingExtra(null)}
+      />
     </>
+  );
+}
+
+function ExtraWorkMoment({
+  extra,
+  chain,
+  onClose,
+}: {
+  extra: number | null;
+  chain: Chain;
+  onClose: () => void;
+}) {
+  const colors = useColors();
+  const reducedMotion = useReducedMotion();
+  const readableAccent = readableAccentColor(chain.color, GLASS_SURFACE_COLOR, 4.8);
+  if (extra === null) return null;
+  return (
+    <Modal
+      transparent
+      visible
+      statusBarTranslucent
+      animationType={reducedMotion ? 'none' : 'fade'}
+      onRequestClose={onClose}
+    >
+      <View style={styles.extraShade}>
+        <Pressable
+          accessible={false}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+        <View accessibilityViewIsModal style={styles.extraFrame}>
+          <Surface elevated accentColor={chain.color} style={styles.extraCard}>
+            <ScrollView
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.extraContent}
+            >
+              <View style={[styles.extraIcon, { backgroundColor: chain.color + '1C' }]}>
+                <Ionicons name="add-circle-outline" size={24} color={readableAccent} />
+              </View>
+              <Text style={[TYPE.eyebrow, { color: readableAccent }]}>BEYOND THE TARGET</Text>
+              <Text style={[styles.extraTitle, { color: colors.foreground }]}>Another day kept.</Text>
+              <Text style={[styles.extraBody, { color: colors.mutedForeground }]}>
+                {extra} {extra === 1 ? 'day' : 'days'} beyond this week’s target for {chain.name}.
+              </Text>
+              <View style={styles.extraAction}>
+                <AppButton label="Continue" onPress={onClose} accentColor={chain.color} />
+              </View>
+            </ScrollView>
+          </Surface>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -286,4 +318,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   weeklyProgress: { ...TYPE.metadata, minHeight: 15, textAlign: 'center' },
+  extraShade: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: SCRIM,
+    padding: SPACE.xl,
+  },
+  extraFrame: { width: '100%', maxWidth: 340, maxHeight: '82%' },
+  extraCard: { borderRadius: RADIUS.modal, maxHeight: '100%' },
+  extraContent: { alignItems: 'center', padding: SPACE.xl },
+  extraIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: RADIUS.control,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACE.md,
+  },
+  extraTitle: { ...TYPE.modalTitle, textAlign: 'center', marginTop: SPACE.xxs },
+  extraBody: { ...TYPE.body, textAlign: 'center', marginTop: SPACE.xs },
+  extraAction: { alignSelf: 'stretch', marginTop: SPACE.xl },
 });

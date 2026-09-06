@@ -33,7 +33,7 @@ import {
   useChains,
 } from '@/context/ChainsContext';
 import { FOCUS_LOG_KEY, type FocusLogEntry } from '@/context/PlanContext';
-import { formatStreakCount, getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
+import { getProgressionStage, PROGRESSION_STAGES } from '@/constants/progression';
 import { AmbientScreen } from '@/components/AmbientSurface';
 import AnimatedPressable from '@/components/AnimatedPressable';
 import { Surface, SectionLabel, SheetHandle } from '@/components/ui/AppUI';
@@ -43,7 +43,6 @@ import { CONTROL, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constants/design
 import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
 import { playFeedback } from '@/lib/feedback';
 import { normalizeFocusLog } from '@/domain/plan';
-import { getChainCommitmentStatus } from '@/domain/chains';
 import { reportDiagnostic } from '@/lib/diagnostics';
 
 const FROZEN_COLOR = '#5B8CFF';
@@ -106,14 +105,16 @@ function rhythmFrom(chain: Chain, focusLog: FocusLogEntry[]) {
   const hour = top(hourCounts);
   const day = top(weekdayCounts);
   const sessions = focusLog.filter((entry) => entry.chainId === chain.id);
+  const focusDays = new Map<number, number>();
+  sessions.forEach((entry) => { const weekday = new Date(`${entry.date}T12:00:00`).getDay(); focusDays.set(weekday, (focusDays.get(weekday) || 0) + entry.minutes); });
   const minutes = sessions.reduce((total, entry) => total + entry.minutes, 0);
-  return { hour, day, minutes, samples: stamps.length };
+  return { hour, day: top(focusDays) ?? day, minutes, samples: stamps.length };
 }
 
 function readableHour(hour?: number) {
   if (hour === undefined) return 'still forming';
   const start = new Date(2024, 0, 1, hour, 0);
-  const end = new Date(2024, 0, 1, hour + 1, 0);
+  const end = new Date(2024, 0, 1, hour + 2, 0);
   const options = { hour: 'numeric' } as const;
   return `${start.toLocaleTimeString(undefined, options)}–${end.toLocaleTimeString(undefined, options)}`;
 }
@@ -178,7 +179,7 @@ function CalendarGrid({
           : minimum
             ? 'minimum version'
             : frozen
-              ? chain.cadence === 'weekly' ? 'saved freeze, no weekly credit' : 'frozen'
+              ? 'frozen'
               : isBeforeChain
                 ? 'before this chain started'
                 : isFuture
@@ -187,7 +188,7 @@ function CalendarGrid({
                     ? 'rest day'
                     : isToday
                       ? 'pending'
-                      : chain.cadence === 'weekly' ? 'not logged' : 'missed';
+                      : 'missed';
         const localizedDate = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
           weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
         });
@@ -199,7 +200,7 @@ function CalendarGrid({
             ? { backgroundColor: FROZEN_COLOR + '33', borderColor: FROZEN_COLOR }
             : status === 'rest day'
               ? { backgroundColor: colors.secondary, borderColor: colors.border }
-            : status === 'missed' || status === 'not logged'
+            : status === 'missed'
               ? { backgroundColor: 'transparent', borderColor: colors.border }
               : status === 'pending'
                 ? { backgroundColor: 'transparent', borderColor: chain.color }
@@ -221,7 +222,7 @@ function CalendarGrid({
             ]}
           >
             <View style={[styles.monthDay, stateStyle, status === 'pending' && { borderColor: chain.color, borderWidth: 2 }]}>
-              {frozen ? <ChainSymbol name="freeze" size={13} color={FROZEN_COLOR} /> : minimum ? <ChainSymbol name="minimum" size={13} color={accentText} /> : status === 'rest day' ? <ChainSymbol name="rest" size={13} color={colors.mutedForeground} /> : <Text maxFontSizeMultiplier={1.4} style={[styles.monthDayText, { color: done ? solidAccentText : date < today ? colors.mutedForeground : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
+              {frozen ? <Ionicons name="snow" size={13} color={FROZEN_COLOR} /> : minimum ? <Ionicons name="leaf-outline" size={13} color={accentText} /> : status === 'rest day' ? <Ionicons name="remove" size={15} color={colors.mutedForeground} /> : <Text maxFontSizeMultiplier={1.4} style={[styles.monthDayText, { color: done ? solidAccentText : date < today ? colors.mutedForeground : colors.foreground }]}>{Number(date.slice(-2))}</Text>}
             </View>
           </Pressable>
         );
@@ -251,8 +252,7 @@ export default function ChainDetailScreen() {
     isReady,
   } = useChains();
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [progressOpen, setProgressOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [showMoreColors, setShowMoreColors] = useState(false);
   const [minimumEditorOpen, setMinimumEditorOpen] = useState(false);
   const [minimumDraft, setMinimumDraft] = useState('');
@@ -309,8 +309,6 @@ export default function ChainDetailScreen() {
   }
 
   const streak = getStreak(chain);
-  const commitment = getChainCommitmentStatus(chain);
-  const isWeekly = chain.cadence === 'weekly';
   const done = isCompletedToday(chain);
   const frozen = isFrozenToday(chain);
   const freezeTokens = getRemainingFreezeTokens(chain);
@@ -319,7 +317,7 @@ export default function ChainDetailScreen() {
   const totalProtected = chain.completedDates.length + chain.minimumDates.length;
   const dueDaysSinceStart = countDueDays(chain, getTodayStr());
   const consistency = Math.min(100, Math.round((totalProtected / dueDaysSinceStart) * 100));
-  const restingToday = commitment.status === 'rest';
+  const restingToday = isRestDay(chain, getTodayStr());
   const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain) : 0;
   const rhythm = rhythmFrom(chain, focusLog);
   const weekStart = new Date();
@@ -389,7 +387,7 @@ export default function ChainDetailScreen() {
   }
 
   async function handleFreeze() {
-    if (!chain || isWeekly || freezeTokens === 0) return;
+    if (!chain || freezeTokens === 0) return;
     const updated = await commitChainChange(() => useFreeze(chain.id));
     if (!updated) return;
     playFeedback('light');
@@ -432,10 +430,6 @@ export default function ChainDetailScreen() {
 
   async function changeRestDays(restDays: number[]) {
     if (!chain) return;
-    if (new Set(restDays).size >= 7) {
-      Alert.alert('Keep one active day', 'Choose up to six rest days so this Chain has a day to return to.');
-      return;
-    }
     const updated = await commitChainChange(() => updateChainRestDays(chain.id, restDays));
     if (!updated) return;
     playFeedback('selection');
@@ -447,7 +441,6 @@ export default function ChainDetailScreen() {
 
   async function applyDayStatus(date: string, status: DayStatus) {
     if (!chain) return;
-    if (isWeekly && status === 'frozen') return;
     if (mutationBusyRef.current) return;
     mutationBusyRef.current = true;
     const result = await setDayStatus(chain.id, date, status);
@@ -466,18 +459,14 @@ export default function ChainDetailScreen() {
   }
 
   function handleSelectDay(date: string) {
-    if (!chain) return;
     const prettyDate = new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
       weekday: 'long', month: 'long', day: 'numeric',
     });
-    const note = isWeekly && chain.frozenDates.includes(date)
-      ? `${prettyDate}\nThis saved freeze does not count towards your weekly goal. Replacing or clearing it returns its credit, up to the two-credit limit.`
-      : prettyDate;
-    Alert.alert('Update day', note, [
+    Alert.alert('Update day', prettyDate, [
       { text: 'Done', onPress: () => { void applyDayStatus(date, 'done'); } },
       { text: 'Minimum version', onPress: () => { void applyDayStatus(date, 'minimum'); } },
-      ...(!isWeekly ? [{ text: 'Freeze', onPress: () => { void applyDayStatus(date, 'frozen'); } }] : []),
-      { text: isWeekly ? 'Clear entry' : 'Missed', style: 'destructive', onPress: () => { void applyDayStatus(date, 'missed'); } },
+      { text: 'Freeze', onPress: () => { void applyDayStatus(date, 'frozen'); } },
+      { text: 'Missed', style: 'destructive', onPress: () => { void applyDayStatus(date, 'missed'); } },
       { text: 'Cancel', style: 'cancel' },
     ]);
   }
@@ -495,6 +484,16 @@ export default function ChainDetailScreen() {
         >
           <Ionicons name="chevron-back" size={24} color={colors.foreground} />
         </AnimatedPressable>
+        <AnimatedPressable
+          onPress={handleDelete}
+          accessibilityRole="button"
+          accessibilityLabel={`Delete ${chain.name}`}
+          accessibilityHint="Asks for confirmation before permanently deleting this chain."
+          style={styles.deleteBtn}
+          scaleTo={0.94}
+        >
+          <Ionicons name="trash-outline" size={20} color={colors.destructive} />
+        </AnimatedPressable>
       </View>
 
       <ScrollView
@@ -504,26 +503,182 @@ export default function ChainDetailScreen() {
         {/* Chain name + color bar */}
         <View style={[styles.titleRow]}>
           <View style={[styles.colorDot, { backgroundColor: chain.color }]} />
-          <Text accessibilityRole="header" style={[styles.chainName, { color: colors.foreground }]}>
+          <Text style={[styles.chainName, { color: colors.foreground }]}>
             {chain.name}
           </Text>
         </View>
 
-        <SectionLabel>TODAY</SectionLabel>
-        {!restingToday && (
-          <Text style={[styles.todayStatus, { color: colors.mutedForeground }]}>
-            {done ? 'Full version logged. Tap below to undo.'
-              : commitment.status === 'minimum' ? `Minimum logged: ${chain.minimumLabel}. You can still do the full version.`
-              : frozen ? 'Today is frozen. You can still log the full version.'
-              : isWeekly && commitment.weeklyTargetMet ? 'Weekly goal met. Another check-in is optional.'
-              : isWeekly ? `${Math.max(0, chain.weeklyTarget - weeklyProgress)} more day${chain.weeklyTarget - weeklyProgress === 1 ? '' : 's'} to reach your weekly goal.`
-              : 'Ready for today’s check-in.'}
+        <View style={styles.accentSection}>
+          <SectionLabel>CHAIN ACCENT</SectionLabel>
+          <View style={styles.colorRow}>
+            {[...CHAIN_COLORS, ...(showMoreColors ? EXTRA_CHAIN_COLORS : [])].map((color) => {
+              const selected = color === chain.color;
+              return (
+                <AnimatedPressable
+                  key={color}
+                  accessibilityRole="radio"
+                  accessibilityLabel={`${COLOR_NAMES[color] ?? 'Custom'} chain color`}
+                  accessibilityState={{ checked: selected }}
+                  onPress={() => handleColorChange(color)}
+                  style={[
+                    styles.colorRing,
+                    {
+                      borderColor: selected ? color : 'transparent',
+                    },
+                  ]}
+                  scaleTo={0.92}
+                >
+                  <View style={[styles.colorSwatch, { backgroundColor: color }]}>
+                    {selected && <Ionicons name="checkmark" size={16} color={readableTextColor(color)} />}
+                  </View>
+                </AnimatedPressable>
+              );
+            })}
+            <AnimatedPressable
+              onPress={() => setShowMoreColors((open) => !open)}
+              accessibilityRole="button"
+              accessibilityLabel={showMoreColors ? 'Show fewer chain colors' : 'Show more chain colors'}
+              accessibilityState={{ expanded: showMoreColors }}
+              style={[styles.colorRing, { borderColor: colors.border }]}
+              scaleTo={0.92}
+            >
+              <View style={[styles.colorSwatch, { backgroundColor: colors.card }]}>
+                <Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={15} color={colors.mutedForeground} />
+              </View>
+            </AnimatedPressable>
+          </View>
+        </View>
+
+        <Surface style={styles.scheduleCard}>
+          <AnimatedPressable
+            onPress={() => setScheduleOpen((open) => !open)}
+            accessibilityRole="button"
+            accessibilityLabel={chain.cadence === 'weekly' ? 'Weekly goal' : 'Weekly schedule'}
+            accessibilityState={{ expanded: scheduleOpen }}
+            style={styles.scheduleHeader}
+          >
+            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}>
+              <Ionicons name="calendar-outline" size={18} color={accentText} />
+            </View>
+            <View style={styles.scheduleCopy}>
+              <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>
+                {chain.cadence === 'weekly' ? 'Weekly goal' : 'Weekly schedule'}
+              </Text>
+              <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>
+                {chain.cadence === 'weekly'
+                  ? `${weeklyProgress}/${chain.weeklyTarget} days this week`
+                  : chain.restDays.length
+                    ? `${SCHEDULE_DAYS.filter(({ value }) => chain.restDays.includes(value)).map(({ label }) => label).join(', ')} off`
+                    : 'Every day counts'}
+              </Text>
+            </View>
+            <Ionicons name={scheduleOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
+          </AnimatedPressable>
+          {scheduleOpen && (
+            <View style={styles.scheduleExpanded}>
+              <Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>
+                {chain.cadence === 'weekly'
+                  ? 'Reach your target in a week to extend your week streak.'
+                  : 'Choose rest days. They never break your streak.'}
+              </Text>
+              <View style={styles.scheduleSelector}>
+                <SevenChoiceSelector
+                  options={chain.cadence === 'weekly' ? WEEKLY_TARGET_OPTIONS : REST_DAY_OPTIONS}
+                  selectionMode={chain.cadence === 'weekly' ? 'single' : 'multiple'}
+                  selectedValues={chain.cadence === 'weekly' ? [chain.weeklyTarget] : chain.restDays}
+                  onSelectionChange={(selectedValues) => {
+                    if (chain.cadence === 'weekly') {
+                      const target = selectedValues[0];
+                      if (target !== undefined) void changeWeeklyTarget(target);
+                    } else {
+                      void changeRestDays(selectedValues);
+                    }
+                  }}
+                  accentColor={chain.color}
+                  selectedTextColor={solidAccentText}
+                  textColor={colors.mutedForeground}
+                  borderColor={colors.border}
+                  backgroundColor={colors.background}
+                  accessibilityLabel={chain.cadence === 'weekly' ? 'Weekly target' : 'Rest days'}
+                />
+              </View>
+            </View>
+          )}
+        </Surface>
+
+        <View style={[styles.minimumPanel, { backgroundColor: chain.color + '12', borderColor: chain.color + '44' }]}>
+          <AnimatedPressable
+            onPress={editMinimum}
+            accessibilityRole="button"
+            accessibilityLabel="Edit minimum version"
+            accessibilityValue={{ text: chain.minimumLabel }}
+            accessibilityHint="Opens the minimum version editor."
+            style={styles.minimumCard}
+          >
+            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
+              <ChainSymbol name="minimum" size={20} color={accentText} />
+            </View>
+            <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
+            <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
+            <Ionicons name="chevron-forward" size={17} color={accentText} />
+          </AnimatedPressable>
+        </View>
+
+        {/* Streak hero */}
+        <View style={[styles.streakHero, { backgroundColor: chain.color + '14', borderColor: chain.color + '33' }]}>
+          <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={[styles.streakNumber, { color: accentText }]}>{streak}</Text>
+          <Text style={[styles.streakWord, { color: colors.mutedForeground }]}>
+            {chain.cadence === 'weekly' ? 'week streak' : 'day streak'}
           </Text>
-        )}
+          <Text style={[styles.streakSub, { color: colors.mutedForeground }]}>
+            {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : `${totalCompleted} total completed`}
+          </Text>
+          <View style={[styles.stagePill, { backgroundColor: chain.color + '22' }]}><Text style={[styles.stageText, { color: accentText }]}>{stage.label.toUpperCase()} · {stage.copy}</Text></View>
+          {nextStage ? <View style={styles.nextStage}><View style={[styles.nextStageTrack, { backgroundColor: chain.color + '22' }]}><View style={[styles.nextStageFill, { backgroundColor: chain.color, width: `${Math.max(5, stageProgress * 100)}%` }]} /></View><Text style={[styles.nextStageText, { color: colors.mutedForeground }]}>{nextStage.at - streak} {stageUnit}{nextStage.at - streak === 1 ? '' : 's'} to {nextStage.label}</Text></View> : <Text style={[styles.nextStageText, { color: accentText }]}>Your long-term rhythm is built.</Text>}
+        </View>
+
+        <Surface style={styles.milestoneCard}>
+          <Text style={[styles.milestoneTitle, { color: colors.mutedForeground }]}>MILESTONES</Text>
+          <View style={styles.milestoneRow}>
+            {PROGRESSION_STAGES.filter((item) => [1, 7, 30, 100, 365].includes(item.at)).map((milestone) => {
+              const unlocked = streak >= milestone.at;
+              const milestoneLabel = milestone.at === 365 ? '1 year' : `${milestone.at} ${stageUnit}${milestone.at === 1 ? '' : 's'}`;
+              return (
+                <View
+                  key={milestone.key}
+                  accessible
+                  accessibilityLabel={`${milestoneLabel}, ${unlocked ? 'unlocked' : 'locked'}`}
+                  style={styles.milestoneItem}
+                >
+                  <View style={[styles.milestoneDot, { backgroundColor: unlocked ? chain.color : colors.background, borderColor: unlocked ? chain.color : colors.border }]}>
+                    <Ionicons name={unlocked ? 'checkmark' : 'lock-closed'} size={13} color={unlocked ? solidAccentText : colors.mutedForeground} />
+                  </View>
+                  <Text style={[styles.milestoneLabel, { color: unlocked ? accentText : colors.mutedForeground }]}>
+                    {milestone.at === 365 ? '1y' : milestone.at}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </Surface>
+
+        <Surface style={styles.insightsCard}>
+          <View style={styles.insight}><Text style={[styles.insightValue, { color: accentText }]}>{chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget}` : `${consistency}%`}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>{chain.cadence === 'weekly' ? 'THIS WEEK' : 'CONSISTENCY'}</Text></View>
+          <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.insight}><Text style={[styles.insightValue, { color: colors.foreground }]}>{totalProtected}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>DAYS KEPT</Text></View>
+          <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.insight}><Text style={[styles.insightValue, { color: '#5B8CFF' }]}>{chain.frozenDates.length}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>PROTECTED</Text></View>
+        </Surface>
+
+        <View style={[styles.rhythmCard, { backgroundColor: chain.color + '10', borderColor: chain.color + '38' }]}>
+          <View style={[styles.rhythmIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="pulse-outline" size={18} color={accentText} /></View>
+          <View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: accentText }]}>RHYTHM</Text><Text style={[styles.rhythmTitle, { color: colors.foreground }]}>{rhythm.samples >= 3 ? `You usually protect this around ${readableHour(rhythm.hour)}.` : 'Your rhythm is still forming.'}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{rhythm.samples >= 3 ? `${weekdayLabel(rhythm.day ?? 1)} is your strongest day${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of planned focus logged` : ''}.` : `Complete it a few more times and Chain will spot your best window${rhythm.minutes ? ` · ${Math.round(rhythm.minutes / 60 * 10) / 10}h of focus logged so far` : ''}.`}</Text></View>
+        </View>
+        <Surface style={styles.weekReflection}><View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={accentText} /></View><View style={styles.rhythmCopy}><Text style={[styles.rhythmEyebrow, { color: accentText }]}>THIS WEEK</Text><Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>{weeklyFocusMinutes ? `${Math.floor(weeklyFocusMinutes / 60)}h ${weeklyFocusMinutes % 60}m focused on ${chain.name}` : weeklyKeptDays ? `${weeklyKeptDays} ${chain.cadence === 'weekly' ? 'check-in' : 'day'}${weeklyKeptDays === 1 ? '' : 's'} kept this week.` : `No ${chain.cadence === 'weekly' ? 'check-ins' : 'days'} kept yet this week.`}</Text><Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>{weeklyFocus.length ? `${weeklyFocus.length} focus block${weeklyFocus.length === 1 ? '' : 's'} logged · You showed up for yourself.` : stage.key === 'starting-line' ? 'Your reflection becomes meaningful with your next session.' : stage.copy}</Text></View></Surface>
         {/* Today's action */}
         {restingToday ? (
           <Surface style={styles.restBanner}>
-            <ChainSymbol name="rest" size={19} color={accentText} />
+            <Ionicons name="moon-outline" size={19} color={accentText} />
             <View style={styles.scheduleCopy}>
               <Text style={[styles.restTitle, { color: colors.foreground }]}>Rest day</Text>
               <Text style={[styles.restBody, { color: colors.mutedForeground }]}>Your streak is safe. Come back tomorrow.</Text>
@@ -534,7 +689,7 @@ export default function ChainDetailScreen() {
             <AnimatedPressable
               onPress={handleToggle}
               accessibilityRole="button"
-              accessibilityLabel={done ? `Remove today's completion for ${chain.name}` : commitment.status === 'minimum' ? `Upgrade today's minimum to a full completion for ${chain.name}` : isWeekly && commitment.weeklyTargetMet ? `Log an optional extra day for ${chain.name}` : `Mark ${chain.name} done today`}
+              accessibilityLabel={done ? `Remove today's completion for ${chain.name}` : `Mark ${chain.name} done today`}
               accessibilityState={{ selected: done }}
               containerStyle={styles.primaryActionContainer}
               style={[
@@ -545,17 +700,17 @@ export default function ChainDetailScreen() {
                 },
               ]}
             >
-              <ChainSymbol
-                name={done ? 'check' : commitment.status === 'minimum' ? 'minimum' : 'empty'}
+              <Ionicons
+                name={done ? 'checkmark-circle' : 'ellipse-outline'}
                 size={21}
-                color={done ? solidAccentText : commitment.status === 'minimum' ? accentText : colors.mutedForeground}
+                color={done ? solidAccentText : colors.mutedForeground}
               />
               <Text style={[styles.actionBtnText, { color: done ? solidAccentText : colors.foreground }]}>
-                {done ? 'Logged today' : commitment.status === 'minimum' ? 'Mark full version' : isWeekly && commitment.weeklyTargetMet ? 'Log an extra day' : isWeekly ? 'Log today' : 'Mark done today'}
+                {done ? 'Logged today' : chain.cadence === 'weekly' ? 'Log today' : 'Mark done today'}
               </Text>
             </AnimatedPressable>
 
-            {!isWeekly && <AnimatedPressable
+            <AnimatedPressable
               onPress={handleFreeze}
               disabled={freezeTokens === 0 || done || frozen}
               accessibilityRole="button"
@@ -571,24 +726,23 @@ export default function ChainDetailScreen() {
                 },
               ]}
             >
-              <ChainSymbol name="freeze" size={19} color="#5B8CFF" />
+              <Ionicons name="snow-outline" size={19} color="#5B8CFF" />
               <Text style={[styles.actionBtnText, { color: colors.foreground }]}>Freeze · {freezeTokens}</Text>
-            </AnimatedPressable>}
+            </AnimatedPressable>
           </View>
         )}
 
-        <Surface style={styles.weekReflection}>
-          <View style={[styles.weekReflectionIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="analytics-outline" size={17} color={accentText} /></View>
-          <View style={styles.rhythmCopy}>
-            <Text style={[styles.rhythmEyebrow, { color: accentText }]}>THIS WEEK</Text>
-            <Text style={[styles.weekReflectionTitle, { color: colors.foreground }]}>
-              {isWeekly ? `${weeklyProgress}/${chain.weeklyTarget} days logged` : `${weeklyKeptDays} day${weeklyKeptDays === 1 ? '' : 's'} kept`}
-            </Text>
-            <Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>
-              {weeklyFocus.length ? `${weeklyFocusMinutes} focus minutes logged across ${weeklyFocus.length} block${weeklyFocus.length === 1 ? '' : 's'}.` : 'Full and minimum versions both count.'}
+        {freezeTokens < 2 && <View style={[styles.safetyNetCard, { backgroundColor: '#4488ff12', borderColor: '#4488ff44' }]}><View style={[styles.safetyNetIcon, { backgroundColor: '#4488ff22' }]}><Ionicons name="snow-outline" size={16} color="#4488ff" /></View><View style={styles.scheduleCopy}><Text style={[styles.safetyNetTitle, { color: '#4488ff' }]}>Safety net · {freezeTokens} available</Text><Text style={[styles.safetyNetBody, { color: colors.mutedForeground }]}>{freezeRecoveryRemaining} real completed day{freezeRecoveryRemaining === 1 ? '' : 's'} to restore one.</Text></View></View>}
+
+        {/* Frozen today indicator */}
+        {frozen && !done && (
+          <View style={[styles.frozenBanner, { backgroundColor: '#4488ff22', borderColor: '#4488ff44' }]}>
+            <Ionicons name="snow" size={14} color="#4488ff" />
+            <Text style={[styles.frozenText, { color: '#4488ff' }]}>
+              Today is frozen — your streak is protected
             </Text>
           </View>
-        </Surface>
+        )}
 
         {/* Calendar */}
         <SectionLabel>MONTHLY HISTORY</SectionLabel>
@@ -648,239 +802,16 @@ export default function ChainDetailScreen() {
               <View style={[styles.legendDot, { backgroundColor: chain.color + '38', borderColor: chain.color, borderWidth: 1 }]} />
               <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Minimum</Text>
             </View>
-            {(!isWeekly || chain.frozenDates.length > 0) && <View style={styles.legendItem}>
+            <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: FROZEN_COLOR + '55', borderColor: FROZEN_COLOR, borderWidth: 1 }]} />
-              <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>{isWeekly ? 'Saved freeze' : 'Frozen'}</Text>
-            </View>}
+              <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Frozen</Text>
+            </View>
             <View style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: 'transparent', borderColor: colors.border, borderWidth: 1 }]} />
-              <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>{isWeekly ? 'Not logged' : 'Missed'}</Text>
+              <Text style={[styles.legendLabel, { color: colors.mutedForeground }]}>Missed</Text>
             </View>
           </View>
-          {isWeekly && chain.frozenDates.length > 0 && <Text style={[styles.calendarHint, { color: colors.mutedForeground, paddingHorizontal: SPACE.md, paddingBottom: SPACE.md }]}>Saved freezes stay in your history. They do not count towards a weekly goal.</Text>}
         </Surface>
-
-        <Surface style={styles.disclosureCard}>
-          <AnimatedPressable
-            onPress={() => setProgressOpen((open) => !open)}
-            accessibilityRole="button"
-            accessibilityLabel="Progress"
-            accessibilityState={{ expanded: progressOpen }}
-            style={styles.scheduleHeader}
-          >
-            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="stats-chart-outline" size={18} color={accentText} /></View>
-            <View style={styles.scheduleCopy}>
-              <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Progress</Text>
-              <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>Milestones and recorded patterns</Text>
-            </View>
-            <Ionicons name={progressOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
-          </AnimatedPressable>
-        </Surface>
-        {progressOpen && (
-          <View style={styles.disclosureContent}>
-            {/* Streak hero */}
-            <View style={[styles.streakHero, { backgroundColor: chain.color + '14', borderColor: chain.color + '33' }]}>
-              <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={[styles.streakNumber, { color: accentText }]}>{streak}</Text>
-              <Text style={[styles.streakWord, { color: colors.mutedForeground }]}>
-                {chain.cadence === 'weekly' ? 'week streak' : 'day streak'}
-              </Text>
-              <Text style={[styles.streakSub, { color: colors.mutedForeground }]}>
-                {chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget} days this week` : `${totalCompleted} total completed`}
-              </Text>
-              <View style={[styles.stagePill, { backgroundColor: chain.color + '22' }]}><Text style={[styles.stageText, { color: accentText }]}>{stage.label.toUpperCase()} · {stage.copy}</Text></View>
-              {nextStage ? <View style={styles.nextStage}><View style={[styles.nextStageTrack, { backgroundColor: chain.color + '22' }]}><View style={[styles.nextStageFill, { backgroundColor: chain.color, width: `${Math.max(5, stageProgress * 100)}%` }]} /></View><Text style={[styles.nextStageText, { color: colors.mutedForeground }]}>{nextStage.at - streak} {stageUnit}{nextStage.at - streak === 1 ? '' : 's'} to {nextStage.label}</Text></View> : <Text style={[styles.nextStageText, { color: accentText }]}>All current milestones reached.</Text>}
-            </View>
-
-            <Surface style={styles.milestoneCard}>
-              <Text style={[styles.milestoneTitle, { color: colors.mutedForeground }]}>MILESTONES · {isWeekly ? 'WEEKS' : 'DAYS'}</Text>
-              <View style={styles.milestoneRow}>
-                {PROGRESSION_STAGES.filter((item) => [1, 7, 30, 100, 365].includes(item.at)).map((milestone) => {
-                  const unlocked = streak >= milestone.at;
-                  const milestoneLabel = formatStreakCount(milestone.at, chain.cadence);
-                  return (
-                    <View
-                      key={milestone.key}
-                      accessible
-                      accessibilityLabel={`${milestoneLabel}, ${unlocked ? 'unlocked' : 'locked'}`}
-                      style={styles.milestoneItem}
-                    >
-                      <View style={[styles.milestoneDot, { backgroundColor: unlocked ? chain.color : colors.background, borderColor: unlocked ? chain.color : colors.border }]}>
-                        <Ionicons name={unlocked ? 'checkmark' : 'lock-closed'} size={13} color={unlocked ? solidAccentText : colors.mutedForeground} />
-                      </View>
-                      <Text style={[styles.milestoneLabel, { color: unlocked ? accentText : colors.mutedForeground }]}>
-                        {milestone.at}
-                      </Text>
-                    </View>
-                  );
-                })}
-              </View>
-            </Surface>
-
-            <Surface style={styles.insightsCard}>
-              <View style={styles.insight}><Text style={[styles.insightValue, { color: accentText }]}>{chain.cadence === 'weekly' ? `${weeklyProgress}/${chain.weeklyTarget}` : `${consistency}%`}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>{chain.cadence === 'weekly' ? 'THIS WEEK' : 'CONSISTENCY'}</Text></View>
-              <View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
-              <View style={styles.insight}><Text style={[styles.insightValue, { color: colors.foreground }]}>{totalProtected}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>DAYS KEPT</Text></View>
-              {!isWeekly && <><View style={[styles.insightDivider, { backgroundColor: colors.border }]} />
-              <View style={styles.insight}><Text style={[styles.insightValue, { color: '#5B8CFF' }]}>{chain.frozenDates.length}</Text><Text style={[styles.insightLabel, { color: colors.mutedForeground }]}>FROZEN</Text></View></>}
-            </Surface>
-
-            <View style={[styles.rhythmCard, { backgroundColor: chain.color + '10', borderColor: chain.color + '38' }]}>
-              <View style={[styles.rhythmIcon, { backgroundColor: chain.color + '20' }]}><Ionicons name="pulse-outline" size={18} color={accentText} /></View>
-              <View style={styles.rhythmCopy}>
-                <Text style={[styles.rhythmEyebrow, { color: accentText }]}>CHECK-IN RHYTHM</Text>
-                <Text style={[styles.rhythmTitle, { color: colors.foreground }]}>
-                  {rhythm.samples >= 3 ? `Most frequent check-in hour: ${readableHour(rhythm.hour)}.` : 'A few more full check-ins will help show a pattern.'}
-                </Text>
-                <Text style={[styles.rhythmBody, { color: colors.mutedForeground }]}>
-                  {rhythm.samples >= 3 && rhythm.day !== undefined ? `${weekdayLabel(rhythm.day)} has the most full check-ins. ` : ''}
-                  {rhythm.minutes > 0 ? `${rhythm.minutes} focus minutes logged. ` : ''}
-                  {`Based on ${rhythm.samples} full-version check-in${rhythm.samples === 1 ? '' : 's'}. Times may differ from when you did the activity.`}
-                </Text>
-              </View>
-            </View>
-          </View>
-        )}
-
-        <Surface style={styles.disclosureCard}>
-          <AnimatedPressable
-            onPress={() => setSettingsOpen((open) => !open)}
-            accessibilityRole="button"
-            accessibilityLabel="Chain settings"
-            accessibilityState={{ expanded: settingsOpen }}
-            style={styles.scheduleHeader}
-          >
-            <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}><Ionicons name="settings-outline" size={18} color={accentText} /></View>
-            <View style={styles.scheduleCopy}>
-              <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>Chain settings</Text>
-              <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>Schedule, minimum version and color</Text>
-            </View>
-            <Ionicons name={settingsOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.mutedForeground} />
-          </AnimatedPressable>
-        </Surface>
-        {settingsOpen && (
-          <View style={styles.disclosureContent}>
-            <View style={styles.accentSection}>
-              <SectionLabel>CHAIN ACCENT</SectionLabel>
-              <View style={styles.colorRow}>
-                {[...CHAIN_COLORS, ...(showMoreColors ? EXTRA_CHAIN_COLORS : [])].map((color) => {
-                  const selected = color === chain.color;
-                  return (
-                    <AnimatedPressable
-                      key={color}
-                      accessibilityRole="radio"
-                      accessibilityLabel={`${COLOR_NAMES[color] ?? 'Custom'} chain color`}
-                      accessibilityState={{ checked: selected }}
-                      onPress={() => handleColorChange(color)}
-                      style={[
-                        styles.colorRing,
-                        {
-                          borderColor: selected ? color : 'transparent',
-                        },
-                      ]}
-                      scaleTo={0.92}
-                    >
-                      <View style={[styles.colorSwatch, { backgroundColor: color }]}>
-                        {selected && <ChainSymbol name="check" size={16} color={readableTextColor(color)} />}
-                      </View>
-                    </AnimatedPressable>
-                  );
-                })}
-                <AnimatedPressable
-                  onPress={() => setShowMoreColors((open) => !open)}
-                  accessibilityRole="button"
-                  accessibilityLabel={showMoreColors ? 'Show fewer chain colors' : 'Show more chain colors'}
-                  accessibilityState={{ expanded: showMoreColors }}
-                  style={[styles.colorRing, { borderColor: colors.border }]}
-                  scaleTo={0.92}
-                >
-                  <View style={[styles.colorSwatch, { backgroundColor: colors.card }]}>
-                    <Ionicons name={showMoreColors ? 'chevron-up' : 'chevron-down'} size={15} color={colors.mutedForeground} />
-                  </View>
-                </AnimatedPressable>
-              </View>
-            </View>
-
-            <Surface style={styles.scheduleCard}>
-              <View style={styles.scheduleHeader}>
-                <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '18' }]}>
-                  <Ionicons name="calendar-outline" size={18} color={accentText} />
-                </View>
-                <View style={styles.scheduleCopy}>
-                  <Text style={[styles.scheduleTitle, { color: colors.foreground }]}>
-                    {chain.cadence === 'weekly' ? 'Weekly goal' : 'Weekly schedule'}
-                  </Text>
-                  <Text style={[styles.scheduleBody, { color: colors.mutedForeground }]}>
-                    {chain.cadence === 'weekly'
-                      ? `${weeklyProgress}/${chain.weeklyTarget} days this week`
-                      : chain.restDays.length
-                        ? `${SCHEDULE_DAYS.filter(({ value }) => chain.restDays.includes(value)).map(({ label }) => label).join(', ')} off`
-                        : 'Every day counts'}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.scheduleExpanded}>
-                  <Text style={[styles.scheduleHint, { color: colors.mutedForeground }]}>
-                    {chain.cadence === 'weekly'
-                      ? 'Reach your target in a week to extend your week streak.'
-                      : 'Choose rest days. They never break your streak.'}
-                  </Text>
-                  <View style={styles.scheduleSelector}>
-                    <SevenChoiceSelector
-                      options={chain.cadence === 'weekly' ? WEEKLY_TARGET_OPTIONS : REST_DAY_OPTIONS}
-                      selectionMode={chain.cadence === 'weekly' ? 'single' : 'multiple'}
-                      selectedValues={chain.cadence === 'weekly' ? [chain.weeklyTarget] : chain.restDays}
-                      onSelectionChange={(selectedValues) => {
-                        if (chain.cadence === 'weekly') {
-                          const target = selectedValues[0];
-                          if (target !== undefined) void changeWeeklyTarget(target);
-                        } else {
-                          void changeRestDays(selectedValues);
-                        }
-                      }}
-                      accentColor={chain.color}
-                      selectedTextColor={solidAccentText}
-                      textColor={colors.mutedForeground}
-                      borderColor={colors.border}
-                      backgroundColor={colors.background}
-                      accessibilityLabel={chain.cadence === 'weekly' ? 'Weekly target' : 'Rest days'}
-                    />
-                  </View>
-              </View>
-            </Surface>
-
-            <View style={[styles.minimumPanel, { backgroundColor: chain.color + '12', borderColor: chain.color + '44' }]}>
-              <AnimatedPressable
-                onPress={editMinimum}
-                accessibilityRole="button"
-                accessibilityLabel="Edit minimum version"
-                accessibilityValue={{ text: chain.minimumLabel }}
-                accessibilityHint="Opens the minimum version editor."
-                style={styles.minimumCard}
-              >
-                <View style={[styles.scheduleIcon, { backgroundColor: chain.color + '20' }]}>
-                  <ChainSymbol name="minimum" size={20} color={accentText} />
-                </View>
-                <Text style={[styles.minimumTitle, { color: colors.foreground }]}>Minimum version</Text>
-                <Text numberOfLines={1} style={[styles.minimumValue, { color: colors.mutedForeground }]}>{chain.minimumLabel}</Text>
-                <Ionicons name="chevron-forward" size={17} color={accentText} />
-              </AnimatedPressable>
-            </View>
-
-            {!isWeekly && freezeTokens < 2 && <View style={[styles.safetyNetCard, { backgroundColor: '#4488ff12', borderColor: '#4488ff44' }]}><View style={[styles.safetyNetIcon, { backgroundColor: '#4488ff22' }]}><ChainSymbol name="freeze" size={16} color="#4488ff" /></View><View style={styles.scheduleCopy}><Text style={[styles.safetyNetTitle, { color: '#4488ff' }]}>Safety net · {freezeTokens} available</Text><Text style={[styles.safetyNetBody, { color: colors.mutedForeground }]}>{freezeRecoveryRemaining} real completed day{freezeRecoveryRemaining === 1 ? '' : 's'} to restore one.</Text></View></View>}
-
-              <AnimatedPressable
-                onPress={handleDelete}
-                accessibilityRole="button"
-                accessibilityLabel={`Delete ${chain.name}`}
-                accessibilityHint="Asks for confirmation before permanently deleting this chain."
-                style={[styles.deleteSetting, { borderColor: colors.border }]}
-                scaleTo={0.98}
-              >
-                <Ionicons name="trash-outline" size={20} color={colors.destructive} />
-                <Text style={[styles.actionBtnText, { color: colors.destructive }]}>Delete chain</Text>
-              </AnimatedPressable>
-          </View>
-        )}
 
         {/* Started date */}
         <Text style={[styles.startedText, { color: colors.mutedForeground }]}>
@@ -1029,10 +960,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  deleteSetting: { minHeight: CONTROL.buttonHeight, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACE.xs, borderRadius: RADIUS.button, borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm },
-  disclosureCard: { borderRadius: RADIUS.card, overflow: 'hidden' },
-  disclosureContent: { gap: SPACE.md },
-  todayStatus: { ...TYPE.body, marginTop: -SPACE.xs },
+  deleteBtn: {
+    width: CONTROL.minimumTarget,
+    height: CONTROL.minimumTarget,
+    borderRadius: RADIUS.capsule,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   notFound: {
     flex: 1,
     alignItems: 'center',
@@ -1252,7 +1186,20 @@ const styles = StyleSheet.create({
   actionBtnText: {
     ...TYPE.bodyStrong,
     textAlign: 'center',
-    flexShrink: 1,
+  },
+  frozenBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACE.xs,
+    minHeight: CONTROL.minimumTarget,
+    paddingHorizontal: SPACE.md,
+    paddingVertical: SPACE.xs,
+    borderRadius: RADIUS.control,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  frozenText: {
+    ...TYPE.caption,
   },
   safetyNetCard: { flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, padding: SPACE.sm },
   safetyNetIcon: { width: 36, height: 36, borderRadius: RADIUS.compact, alignItems: 'center', justifyContent: 'center' },

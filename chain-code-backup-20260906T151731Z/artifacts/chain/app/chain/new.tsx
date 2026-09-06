@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { ChainSymbol } from '@/components/ui/ChainSymbol';
 import { router } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { CHAIN_COLORS, EXTRA_CHAIN_COLORS } from '@/constants/colors';
@@ -242,7 +241,7 @@ export default function NewChainScreen() {
                     isSelected && styles.colorSwatchSelected,
                   ]}
                 >
-                  {isSelected && <ChainSymbol name="check" size={17} color={readableTextColor(c)} />}
+                  {isSelected && <Ionicons name="checkmark" size={17} color={readableTextColor(c)} />}
                 </Pressable>
               </View>
             );

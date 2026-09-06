@@ -23,7 +23,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useColors } from '@/hooks/useColors';
 import { EXTRA_CHAIN_COLORS } from '@/constants/colors';
 import { readableAccentColor, readableTextColor } from '@/constants/sectionTheme';
-import { Chain, getTodayStr, getChainCommitmentStatus, isRestDay, useChains } from '@/context/ChainsContext';
+import { Chain, getTodayStr, isRestDay, useChains } from '@/context/ChainsContext';
 import { PlanItem, usePlan } from '@/context/PlanContext';
 import { decodeMorningBriefingTime, parsePlanTimeSlot } from '@/domain/plan';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
@@ -33,7 +33,6 @@ import { CONTROL, MOTION, OPACITY, RADIUS, SCRIM, SPACE, TYPE } from '@/constant
 import { CLOCK_MINUTE_OPTIONS, isClockMinuteOption } from '@/constants/time';
 import { playFeedback } from '@/lib/feedback';
 import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
-import { ChainSymbol } from '@/components/ui/ChainSymbol';
 
 const QUICK_TIMES = ['7 AM', '9 AM', '12 PM', '3 PM', '6 PM', '8 PM'];
 const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
@@ -82,7 +81,7 @@ export default function PlanScreen() {
   const insets = useSafeAreaInsets();
   const { fontScale } = useWindowDimensions();
   const { chains, setDayStatus, isProtectedToday } = useChains();
-  const { items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem } = usePlan();
+  const { items, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem } = usePlan();
   const { taskId, planDate } = useLocalSearchParams<{ taskId?: string; planDate?: string }>();
   const [inputText, setInputText] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
@@ -102,9 +101,10 @@ export default function PlanScreen() {
   const [briefingReady, setBriefingReady] = useState(false);
   const [showBriefingPicker, setShowBriefingPicker] = useState(false);
   const [editingItem, setEditingItem] = useState<PlanItem | null>(null);
+  const [showCompletion, setShowCompletion] = useState(false);
   const [showReminderPermission, setShowReminderPermission] = useState(false);
   const [showDayReview, setShowDayReview] = useState(false);
-  const [chainCompletion, setChainCompletion] = useState<{ item: PlanItem; chain: Chain } | null>(null);
+  const [chainCompletion, setChainCompletion] = useState<{ item: PlanItem; chain: Chain; finishesAgenda: boolean } | null>(null);
   const [chainCompletionBusy, setChainCompletionBusy] = useState(false);
   const [highlightedItemId, setHighlightedItemId] = useState<string | undefined>();
   const [newlyAddedItemId, setNewlyAddedItemId] = useState<string | undefined>();
@@ -477,7 +477,9 @@ export default function PlanScreen() {
       const linkedChain = item.chainId ? chains.find((chain) => chain.id === item.chainId) : undefined;
       const needsChainConfirmation = completing && linkedChain && !linkedChain.completedDates.includes(today);
       if (needsChainConfirmation && linkedChain) {
-        setChainCompletion({ item, chain: linkedChain });
+        setChainCompletion({ item, chain: linkedChain, finishesAgenda: isLastTask });
+      } else if (isLastTask) {
+        setShowCompletion(true);
       }
     } finally {
       reminderActionIdsRef.current.delete(item.id);
@@ -603,6 +605,10 @@ export default function PlanScreen() {
     chainCompletionBusyRef.current = true;
     setChainCompletionBusy(true);
     const completion = chainCompletion;
+    const remainingChainsAreDone = chains
+      .filter((chain) => chain.id !== completion.chain.id)
+      .every((chain) => isRestDay(chain, today) || isProtectedToday(chain));
+    const shouldCelebrate = completion.finishesAgenda && remainingChainsAreDone;
     const result = await setDayStatus(completion.chain.id, today, 'done');
     chainCompletionBusyRef.current = false;
     setChainCompletionBusy(false);
@@ -613,6 +619,7 @@ export default function PlanScreen() {
     }
     playFeedback('success');
     setChainCompletion(null);
+    if (shouldCelebrate) setShowCompletion(true);
   }
 
   function chooseCustomTime() {
@@ -651,20 +658,9 @@ export default function PlanScreen() {
     void closeToday().then(showTomorrow);
   }
 
-  if (isLoading || loadError) {
-    return (
-      <AmbientScreen tone="plan" style={styles.root}>
-        <View style={[styles.header, { paddingTop: topPad + 12 }]}>
-          <Text style={[styles.headerTitle, { color: colors.foreground }]}>Plan</Text>
-          <Text accessibilityLiveRegion="polite" style={[styles.headerSub, { color: colors.mutedForeground }]}>
-            {isLoading ? 'Loading your plan…' : loadError}
-          </Text>
-          {!isLoading && <Pressable accessibilityRole="button" accessibilityLabel="Retry loading your saved plan" onPress={retryLoad} style={[styles.addConfirmBtn, { backgroundColor: colors.primary, marginTop: 16 }]}>
-            <Text style={[styles.addConfirmText, { color: colors.primaryForeground }]}>Retry</Text>
-          </Pressable>}
-        </View>
-      </AmbientScreen>
-    );
+  function prepareTomorrowWithClosure() {
+    setShowCompletion(false);
+    void closeToday().then(showTomorrow);
   }
 
   return (
@@ -691,15 +687,18 @@ export default function PlanScreen() {
         ) : (
           <View style={[styles.reflectCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
-            {chains.map((chain, index) => (
-              <ChainReflection key={chain.id} chain={chain} date={today} isLast={index === chains.length - 1} />
-            ))}
+            {chains.map((chain, index) => {
+              const done = chain.completedDates.includes(today);
+              const minimum = chain.minimumDates.includes(today);
+              const frozen = chain.frozenDates.includes(today);
+              return <ChainReflection key={chain.id} chain={chain} done={done} minimum={minimum} frozen={frozen} resting={isRestDay(chain, today)} isLast={index === chains.length - 1} />;
+            })}
           </View>
         )}</>}
 
         {!isToday && items.length > 0 && (
           <View style={[styles.tomorrowSet, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '55' }]}>
-            <View style={[styles.tomorrowSetIcon, { backgroundColor: colors.primary + '22' }]}><ChainSymbol name="rest" size={20} color={colors.primary} /></View>
+            <View style={[styles.tomorrowSetIcon, { backgroundColor: colors.primary + '22' }]}><Ionicons name="moon" size={20} color={colors.primary} /></View>
             <View style={styles.tomorrowSetCopy}><Text style={[styles.tomorrowSetTitle, { color: colors.foreground }]}>Tomorrow is set</Text><Text style={[styles.tomorrowSetBody, { color: colors.mutedForeground }]}>{items.length} tasks{plannedFocusMinutes ? ` · ${formatDurationLabel(plannedFocusMinutes)} of focus` : ''}{reminderCount ? ` · ${reminderCount === 1 ? 'reminder' : 'reminders'} ready` : ''} · {priorityItem ? `One thing: ${priorityItem.text}` : 'Choose one thing that matters most.'}</Text></View>
           </View>
         )}
@@ -740,20 +739,10 @@ export default function PlanScreen() {
           />
         ))}
 
-        {isToday && items.length > 0 && !hasPendingItems && (
-          <View accessible accessibilityLiveRegion="polite" style={[styles.planComplete, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <ChainSymbol name="check" size={20} color={colors.primary} />
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.briefingTitle, { color: colors.foreground }]}>All tasks complete</Text>
-              <Text style={[styles.briefingBody, { color: colors.mutedForeground }]}>You followed through on your plan.</Text>
-            </View>
-          </View>
-        )}
-
         {items.length === 0 && (
           <View style={[styles.emptyFocus, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
-            <View style={[styles.moonCircle, { backgroundColor: colors.primary + '18' }]}><ChainSymbol name="rest" size={22} color={colors.primary} /></View>
+            <View style={[styles.moonCircle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="moon" size={22} color={colors.primary} /></View>
             <Text style={[styles.emptyFocusTitle, { color: colors.foreground }]}>{isToday ? 'Your day is clear.' : 'A calm start begins tonight.'}</Text>
             <Text style={[styles.emptyFocusBody, { color: colors.mutedForeground }]}>{isToday ? 'There are no unfinished tasks waiting for you.' : 'Choose what deserves space tomorrow, then let the plan hold the rest.'}</Text>
           </View>
@@ -796,7 +785,7 @@ export default function PlanScreen() {
 
         {isToday && !isActiveDayClosed && hasPendingItems && (
           <Pressable accessibilityRole="button" accessibilityLabel="Start nightly reset" onPress={() => setShowDayReview(true)} style={({ pressed }) => [styles.reviewTrigger, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? OPACITY.pressed : 1 }]}>
-            <View style={[styles.reviewIcon, { backgroundColor: colors.primary + '18' }]}><ChainSymbol name="rest" size={18} color={colors.primary} /></View>
+            <View style={[styles.reviewIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="moon-outline" size={18} color={colors.primary} /></View>
             <View style={styles.reviewCopy}><Text style={[styles.reviewTitle, { color: colors.foreground }]}>Nightly reset</Text><Text style={[styles.reviewSubtitle, { color: colors.mutedForeground }]}>Close today, then prepare tomorrow.</Text></View>
             <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
           </Pressable>
@@ -817,7 +806,6 @@ export default function PlanScreen() {
                   onSubmitEditing={handleAdd}
                   autoFocus
                 />
-                {editingItem?.repeatSourceId && <Text style={[styles.chainHelper, { color: colors.mutedForeground }]}>Changes apply from this date onward. Clear all Repeat days to stop future repeats.</Text>}
                 <ComposerMeta
                   colors={colors}
                   chains={chains}
@@ -884,6 +872,7 @@ export default function PlanScreen() {
           if (briefingHour === null || await disableMorningBriefing()) setShowBriefingPicker(false);
         }}
       />
+      <CompletionMoment visible={showCompletion} onClose={() => setShowCompletion(false)} onPrepareTomorrow={prepareTomorrowWithClosure} />
       <ReminderPermissionMoment visible={showReminderPermission} minutes={selectedReminder} onSkip={() => { setShowReminderPermission(false); void savePlanItem(false); }} onAllow={() => { void enableRemindersAndSave(); }} />
       <DayReviewMoment visible={showDayReview} completedCount={completedCount} totalCount={items.length} protectedChains={protectedChains} chainCount={chains.length} pendingItems={items.filter((item) => !item.completed)} onMove={(item) => { void moveToTomorrow(item); }} onLetGo={(item) => { void letGo(item); }} onClose={() => setShowDayReview(false)} onPrepareTomorrow={finishDayAndPrepareTomorrow} />
       <ChainCompletionMoment visible={!!chainCompletion} item={chainCompletion?.item} chain={chainCompletion?.chain} busy={chainCompletionBusy} onConfirm={() => { void completeLinkedChain(); }} onClose={() => { if (!chainCompletionBusy) setChainCompletion(null); }} />
@@ -901,40 +890,14 @@ export default function PlanScreen() {
   );
 }
 
-function ChainReflection({ chain, date, isLast }: { chain: Chain; date: string; isLast: boolean }) {
+function ChainReflection({ chain, done, minimum, frozen, resting, isLast }: { chain: Chain; done: boolean; minimum: boolean; frozen: boolean; resting: boolean; isLast: boolean }) {
   const colors = useColors();
   const chainTextAccent = readableAccentColor(chain.color, colors.cardSolid);
-  const commitment = getChainCommitmentStatus(chain, date);
-  const labels = {
-    done: 'done today',
-    minimum: 'minimum kept',
-    frozen: 'frozen today',
-    rest: 'rest day',
-    'weekly-target-met': 'weekly goal met',
-    pending: 'pending',
-    'not-started': 'not started',
-  };
-  const label = labels[commitment.status];
-  const symbol = commitment.status === 'minimum' ? 'minimum'
-    : commitment.status === 'frozen' ? 'freeze'
-      : commitment.status === 'rest' ? 'rest'
-        : commitment.isKept ? 'check' : null;
-  const accent = commitment.status === 'frozen' ? '#4488ff'
-    : commitment.status === 'rest' ? colors.mutedForeground : chainTextAccent;
   return <View>
-    <View
-      accessible
-      accessibilityLabel={`${chain.name}. ${chain.cadence === 'weekly' ? `${commitment.weeklyProgress} of ${chain.weeklyTarget} days this week. ` : ''}${label}.`}
-      style={styles.reflectRow}
-    >
+    <View style={styles.reflectRow}>
       <View style={[styles.reflectDot, { backgroundColor: chain.color }]} />
       <Text style={[styles.reflectName, { color: colors.foreground }]} numberOfLines={1}>{chain.name}</Text>
-      {symbol ? (
-        <View style={[styles.doneBadge, { backgroundColor: accent + '18' }]}>
-          <ChainSymbol name={symbol} size={12} color={accent} />
-          <Text style={[styles.doneBadgeText, { color: accent }]}>{label}</Text>
-        </View>
-      ) : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>{label}</Text>}
+      {done ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '20' }]}><Ionicons name="checkmark" size={12} color={chainTextAccent} /><Text style={[styles.doneBadgeText, { color: chainTextAccent }]}>done today</Text></View> : minimum ? <View style={[styles.doneBadge, { backgroundColor: chain.color + '14' }]}><Ionicons name="leaf-outline" size={12} color={chainTextAccent} /><Text style={[styles.doneBadgeText, { color: chainTextAccent }]}>minimum kept</Text></View> : frozen ? <View style={[styles.doneBadge, { backgroundColor: '#4488ff20' }]}><Ionicons name="snow" size={12} color="#4488ff" /><Text style={[styles.doneBadgeText, { color: '#4488ff' }]}>frozen today</Text></View> : resting ? <View style={[styles.doneBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="moon-outline" size={12} color={colors.mutedForeground} /><Text style={[styles.doneBadgeText, { color: colors.mutedForeground }]}>rest day</Text></View> : <Text style={[styles.pendingText, { color: colors.mutedForeground }]}>pending</Text>}
     </View>
     {!isLast && <View style={[styles.divider, { backgroundColor: colors.border }]} />}
   </View>;
@@ -960,11 +923,11 @@ function ComposerMeta({ colors, chains, selectedChainId, setSelectedChainId, sel
     <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>TIME</Text>
     <ScrollView ref={timeScrollRef} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeSlots}>
       <Pressable accessibilityRole="button" accessibilityLabel={selectedTime && !QUICK_TIMES.includes(selectedTime) ? `Custom time ${selectedTime}` : 'Choose a custom time'} accessibilityState={{ selected: Boolean(selectedTime && !QUICK_TIMES.includes(selectedTime)) }} onPress={openTimePicker} style={[styles.timeChip, { backgroundColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.background, borderColor: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primary : colors.border }]}><Ionicons name="time-outline" size={14} color={selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primaryForeground : colors.mutedForeground} /><Text style={[styles.timeChipText, { color: selectedTime && !QUICK_TIMES.includes(selectedTime) ? colors.primaryForeground : colors.mutedForeground }]}>{selectedTime && !QUICK_TIMES.includes(selectedTime) ? selectedTime : 'Custom'}</Text></Pressable>
-      {QUICK_TIMES.map((time) => <Pressable key={time} accessibilityRole="button" accessibilityLabel={`Task time ${time}`} accessibilityState={{ selected: time === selectedTime }} onPress={() => setSelectedTime(time === selectedTime ? '' : time)} style={[styles.timeChip, { backgroundColor: time === selectedTime ? colors.primary : colors.background, borderColor: time === selectedTime ? colors.primary : colors.border }]}><Text style={[styles.timeChipText, { color: time === selectedTime ? colors.primaryForeground : colors.mutedForeground }]}>{time}</Text></Pressable>)}
+      {QUICK_TIMES.map((time) => <Pressable key={time} accessibilityRole="radio" accessibilityLabel={`Task time ${time}`} accessibilityState={{ selected: time === selectedTime }} onPress={() => setSelectedTime(time === selectedTime ? '' : time)} style={[styles.timeChip, { backgroundColor: time === selectedTime ? colors.primary : colors.background, borderColor: time === selectedTime ? colors.primary : colors.border }]}><Text style={[styles.timeChipText, { color: time === selectedTime ? colors.primaryForeground : colors.mutedForeground }]}>{time}</Text></Pressable>)}
     </ScrollView>
     <Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>ADD TO A CHAIN · OPTIONAL</Text>
     <Text style={[styles.chainHelper, { color: colors.mutedForeground }]}>Only link tasks that move that chain forward. Unlinked tasks stay neutral.</Text>
-    <FlatList data={[{ id: '', name: 'No chain', color: colors.mutedForeground }, ...chains]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(chain) => chain.id} contentContainerStyle={styles.chainChoices} renderItem={({ item: chain }) => { const selected = (chain.id || undefined) === selectedChainId; return <Pressable accessibilityRole="radio" accessibilityLabel={chain.id ? `Link to ${chain.name}` : 'Do not link a chain'} accessibilityState={{ checked: selected }} onPress={() => setSelectedChainId(chain.id || undefined)} style={[styles.chainChip, { borderColor: selected ? chain.color : colors.border, backgroundColor: selected ? chain.color + '1F' : colors.background }]}><View style={[styles.chainChipDot, { backgroundColor: chain.color }]} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{chain.name}</Text></Pressable>; }} />
+    <FlatList data={[{ id: '', name: 'No chain', color: colors.mutedForeground }, ...chains]} horizontal keyboardShouldPersistTaps="always" showsHorizontalScrollIndicator={false} keyExtractor={(chain) => chain.id} contentContainerStyle={styles.chainChoices} renderItem={({ item: chain }) => { const selected = (chain.id || undefined) === selectedChainId; return <Pressable accessibilityRole="radio" accessibilityLabel={chain.id ? `Link to ${chain.name}` : 'Do not link a chain'} accessibilityState={{ selected }} onPress={() => setSelectedChainId(chain.id || undefined)} style={[styles.chainChip, { borderColor: selected ? chain.color : colors.border, backgroundColor: selected ? chain.color + '1F' : colors.background }]}><View style={[styles.chainChipDot, { backgroundColor: chain.color }]} /><Text style={[styles.chainChipText, { color: selected ? colors.foreground : colors.mutedForeground }]}>{chain.name}</Text></Pressable>; }} />
     {allowPriority && <><Text style={[styles.metaLabel, { color: colors.mutedForeground }]}>{priorityForToday ? 'TODAY\'S ONE THING · OPTIONAL' : 'TOMORROW\'S ONE THING · OPTIONAL'}</Text><Pressable accessibilityRole="switch" accessibilityLabel="Make this your one thing" accessibilityState={{ checked: isPriority }} onPress={() => setIsPriority(!isPriority)} style={[styles.priorityPick, { borderColor: isPriority ? colors.primary : colors.border, backgroundColor: isPriority ? colors.primary + '1A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="sparkles-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Make this your one thing</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>The task that matters most {priorityForToday ? 'today' : 'tomorrow'}.</Text></View>{isPriority && <Ionicons name="checkmark-circle" size={19} color={colors.primary} />}</Pressable></>}
     <Pressable accessibilityRole="button" accessibilityLabel="Task details" accessibilityHint="Opens color, repeat, focus and reminder options" accessibilityState={{ expanded: showAdvancedOptions }} onPress={() => { Keyboard.dismiss(); setShowAdvancedOptions(true); }} style={[styles.detailsToggle, { borderColor: detailsCount ? colors.primary + '70' : colors.border, backgroundColor: detailsCount ? colors.primary + '0A' : colors.background }]}><View style={[styles.priorityIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="options-outline" size={15} color={colors.primary} /></View><View style={styles.priorityCopy}><Text style={[styles.priorityTitle, { color: colors.foreground }]}>Task details</Text><Text style={[styles.priorityBody, { color: colors.mutedForeground }]}>{detailsCount ? `${detailsCount} ${detailsCount === 1 ? 'detail' : 'details'} set` : 'Color, repeat, focus and reminders.'}</Text></View><Ionicons name="chevron-forward" size={18} color={detailsCount ? colors.primary : colors.mutedForeground} /></Pressable>
     <TaskDetailsSheet
@@ -1043,7 +1006,7 @@ function TaskDetailsSheet({ visible, onClose, colors, selectedChainId, selectedC
           {openSection === 'accent' && !accentLocked && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.taskDetailChips}>
             {[undefined, ...TASK_ACCENTS].map((color, index) => {
               const selected = color === selectedTaskColor;
-              return <Pressable key={color ?? 'neutral'} accessibilityRole="radio" accessibilityLabel={color ? `Accent color ${index}` : 'Neutral accent'} accessibilityState={{ checked: selected }} onPress={() => setSelectedTaskColor(color)} style={[styles.colorChoice, { borderColor: selected ? (color || colors.primary) : colors.border, backgroundColor: selected ? (color || colors.mutedForeground) + '20' : colors.background }]}>{color ? <View style={[styles.colorChoiceDot, { backgroundColor: color }]} /> : <Ionicons name="remove-outline" size={17} color={colors.mutedForeground} />}{!color && <Text style={[styles.colorChoiceText, { color: colors.mutedForeground }]}>Neutral</Text>}</Pressable>;
+              return <Pressable key={color ?? 'neutral'} accessibilityRole="radio" accessibilityLabel={color ? `Accent color ${index}` : 'Neutral accent'} accessibilityState={{ selected }} onPress={() => setSelectedTaskColor(color)} style={[styles.colorChoice, { borderColor: selected ? (color || colors.primary) : colors.border, backgroundColor: selected ? (color || colors.mutedForeground) + '20' : colors.background }]}>{color ? <View style={[styles.colorChoiceDot, { backgroundColor: color }]} /> : <Ionicons name="remove-outline" size={17} color={colors.mutedForeground} />}{!color && <Text style={[styles.colorChoiceText, { color: colors.mutedForeground }]}>Neutral</Text>}</Pressable>;
             })}
           </ScrollView>}
 
@@ -1056,7 +1019,7 @@ function TaskDetailsSheet({ visible, onClose, colors, selectedChainId, selectedC
             onPress={() => toggleSection('repeat')}
             colors={colors}
           />
-          {openSection === 'repeat' && <View style={styles.sevenChoiceWrap}><SevenChoiceSelector options={WEEKDAY_OPTIONS} selectionMode="multiple" selectedValues={repeatDays} onSelectionChange={setRepeatDays} accentColor={colors.primary} selectedTextColor={colors.primaryForeground} textColor={colors.mutedForeground} borderColor={colors.border} backgroundColor={colors.background} accessibilityLabel="Repeat days" /><Text style={[styles.chainHelper, { color: colors.mutedForeground }]}>Returns on these days. Clear every day to stop future repeats. Reminders are set per task.</Text></View>}
+          {openSection === 'repeat' && <View style={styles.sevenChoiceWrap}><SevenChoiceSelector options={WEEKDAY_OPTIONS} selectionMode="multiple" selectedValues={repeatDays} onSelectionChange={setRepeatDays} accentColor={colors.primary} selectedTextColor={colors.primaryForeground} textColor={colors.mutedForeground} borderColor={colors.border} backgroundColor={colors.background} accessibilityLabel="Repeat days" /></View>}
 
           <TaskDetailSectionRow
             icon="hourglass-outline"
@@ -1068,8 +1031,8 @@ function TaskDetailsSheet({ visible, onClose, colors, selectedChainId, selectedC
             colors={colors}
           />
           {openSection === 'focus' && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.taskDetailChips}>
-            <Pressable accessibilityRole="radio" accessibilityLabel="No focus duration" accessibilityState={{ checked: selectedDuration === undefined }} onPress={() => setSelectedDuration(undefined)} style={[styles.detailChip, { borderColor: selectedDuration === undefined ? colors.primary : colors.border, backgroundColor: selectedDuration === undefined ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selectedDuration === undefined ? colors.primary : colors.mutedForeground }]}>None</Text></Pressable>
-            {DURATION_OPTIONS.map((minutes) => { const selected = selectedDuration === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={`Focus for ${formatDurationLabel(minutes)}`} accessibilityState={{ checked: selected }} onPress={() => setSelectedDuration(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{formatDurationLabel(minutes)}</Text></Pressable>; })}
+            <Pressable accessibilityRole="radio" accessibilityLabel="No focus duration" accessibilityState={{ selected: selectedDuration === undefined }} onPress={() => setSelectedDuration(undefined)} style={[styles.detailChip, { borderColor: selectedDuration === undefined ? colors.primary : colors.border, backgroundColor: selectedDuration === undefined ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selectedDuration === undefined ? colors.primary : colors.mutedForeground }]}>None</Text></Pressable>
+            {DURATION_OPTIONS.map((minutes) => { const selected = selectedDuration === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={`Focus for ${formatDurationLabel(minutes)}`} accessibilityState={{ selected }} onPress={() => setSelectedDuration(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{formatDurationLabel(minutes)}</Text></Pressable>; })}
           </ScrollView>}
 
           <TaskDetailSectionRow
@@ -1083,8 +1046,8 @@ function TaskDetailsSheet({ visible, onClose, colors, selectedChainId, selectedC
             colors={colors}
           />
           {openSection === 'reminder' && selectedTime && <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.taskDetailChips}>
-            <Pressable accessibilityRole="radio" accessibilityLabel="No reminder" accessibilityState={{ checked: selectedReminder === undefined }} onPress={() => setSelectedReminder(undefined)} style={[styles.detailChip, { borderColor: selectedReminder === undefined ? colors.primary : colors.border, backgroundColor: selectedReminder === undefined ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selectedReminder === undefined ? colors.primary : colors.mutedForeground }]}>None</Text></Pressable>
-            {REMINDER_OPTIONS.map((minutes) => { const selected = selectedReminder === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={minutes === 0 ? 'Remind at start' : `Remind ${minutes} minutes before`} accessibilityState={{ checked: selected }} onPress={() => setSelectedReminder(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{minutes === 0 ? 'At start' : `${minutes} min`}</Text></Pressable>; })}
+            <Pressable accessibilityRole="radio" accessibilityLabel="No reminder" accessibilityState={{ selected: selectedReminder === undefined }} onPress={() => setSelectedReminder(undefined)} style={[styles.detailChip, { borderColor: selectedReminder === undefined ? colors.primary : colors.border, backgroundColor: selectedReminder === undefined ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selectedReminder === undefined ? colors.primary : colors.mutedForeground }]}>None</Text></Pressable>
+            {REMINDER_OPTIONS.map((minutes) => { const selected = selectedReminder === minutes; return <Pressable key={minutes} accessibilityRole="radio" accessibilityLabel={minutes === 0 ? 'Remind at start' : `Remind ${minutes} minutes before`} accessibilityState={{ selected }} onPress={() => setSelectedReminder(minutes)} style={[styles.detailChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + '1F' : colors.background }]}><Text style={[styles.detailChipText, { color: selected ? colors.primary : colors.mutedForeground }]}>{minutes === 0 ? 'At start' : `${minutes} min`}</Text></Pressable>; })}
           </ScrollView>}
         </ScrollView>
         <Pressable accessibilityRole="button" accessibilityLabel="Done editing task details" onPress={onClose} style={[styles.taskDetailsDone, { backgroundColor: colors.primary }]}><Text style={[styles.taskDetailsDoneText, { color: colors.primaryForeground }]}>Done</Text></Pressable>
@@ -1102,17 +1065,6 @@ function PlanItemRow({ item, chainName, highlighted, newlyAdded, reminderSyncing
   const chainTextAccent = readableAccentColor(accentColor, colors.cardSolid);
   const borderColor = highlighted ? displayAccent : item.isPriority ? colors.primary : item.completed ? displayAccent + '48' : colors.border;
   const backgroundColor = highlighted ? accentColor + '14' : item.isPriority ? colors.primary + '0D' : item.completed ? accentColor + '12' : colors.card;
-  const taskSummary = [
-    item.text,
-    item.timeSlot || 'Anytime',
-    item.durationMinutes ? `${formatDurationLabel(item.durationMinutes)} focus` : undefined,
-    item.isPriority ? 'Your one thing' : undefined,
-    chainName ? `Linked to ${chainName}` : undefined,
-    item.completed ? 'Completed' : 'Not completed',
-    item.reminderMinutes !== undefined
-      ? item.reminderMinutes === 0 ? 'Reminder at start' : `Reminder ${item.reminderMinutes} minutes before`
-      : undefined,
-  ].filter(Boolean).join('. ');
   const arrival = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     if (!newlyAdded || reduceMotion) {
@@ -1127,8 +1079,8 @@ function PlanItemRow({ item, chainName, highlighted, newlyAdded, reminderSyncing
   return <Animated.View style={[styles.planItem, { backgroundColor, borderColor, marginBottom: isLast ? 20 : 8, opacity: arrival, transform: [{ translateY: arrival.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) }, { scale: arrival.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }]}>
     <GlassSurface pointerEvents="none" accentColor={displayAccent} style={StyleSheet.absoluteFill} />
     <View style={[styles.planBar, { backgroundColor: item.completed ? displayAccent + 'A8' : displayAccent }]} />
-    <Pressable accessibilityRole="checkbox" accessibilityLabel={reminderSyncing ? `Saving reminder for ${item.text}` : item.completed ? `Mark ${item.text} incomplete` : `Complete ${item.text}`} accessibilityState={{ checked: item.completed, disabled: completionLocked, busy: reminderSyncing }} hitSlop={8} disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? displayAccent : completionLocked ? 'transparent' : displayAccent + '14', borderColor: item.completed ? displayAccent : completionLocked ? colors.mutedForeground : displayAccent, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <ChainSymbol name="check" size={13} color={readableTextColor(displayAccent)} /> : reminderSyncing ? <Ionicons name="hourglass-outline" size={12} color={colors.mutedForeground} /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
-    <Pressable accessibilityRole="button" accessibilityLabel={taskSummary} accessibilityHint={locked ? undefined : 'Opens task editing'} accessibilityState={{ disabled: locked }} disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
+    <Pressable accessibilityRole="checkbox" accessibilityLabel={reminderSyncing ? `Saving reminder for ${item.text}` : item.completed ? `Mark ${item.text} incomplete` : `Complete ${item.text}`} accessibilityState={{ checked: item.completed, disabled: completionLocked, busy: reminderSyncing }} hitSlop={8} disabled={completionLocked} onPress={onToggle} style={styles.planCheck}><View style={[styles.planCheckCircle, { backgroundColor: item.completed ? displayAccent : completionLocked ? 'transparent' : displayAccent + '14', borderColor: item.completed ? displayAccent : completionLocked ? colors.mutedForeground : displayAccent, opacity: completionLocked && !item.completed ? 0.58 : 1 }]}>{item.completed ? <Ionicons name="checkmark" size={13} color={readableTextColor(displayAccent)} /> : reminderSyncing ? <Ionicons name="hourglass-outline" size={12} color={colors.mutedForeground} /> : completionLocked ? <Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /> : null}</View></Pressable>
+    <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${item.text}`} accessibilityState={{ disabled: locked }} disabled={locked} onPress={onEdit} style={styles.planTextBlock}>
       <View style={styles.planMeta}>{item.isPriority && <View style={[styles.priorityBadge, { backgroundColor: colors.primary + '1A' }]}><Ionicons name="sparkles" size={10} color={colors.primary} /><Text style={[styles.priorityBadgeText, { color: colors.primary }]}>ONE THING</Text></View>}{completionLocked && !locked && <View style={[styles.tomorrowBadge, { backgroundColor: colors.mutedForeground + '18' }]}><Ionicons name="lock-closed-outline" size={11} color={colors.mutedForeground} /><Text style={[styles.tomorrowBadgeText, { color: colors.mutedForeground }]}>TOMORROW</Text></View>}{item.timeSlot ? <Text style={[styles.planTime, { color: textAccent }]}>{item.timeSlot}{item.durationMinutes ? `  ·  ${formatDurationLabel(item.durationMinutes)}` : ''}{item.reminderMinutes !== undefined ? `  ·  ${item.reminderMinutes === 0 ? 'AT START' : `${item.reminderMinutes} MIN REMINDER`}` : ''}</Text> : <Text style={[styles.planTime, { color: item.isPriority ? colors.primary : colors.mutedForeground }]}>{item.durationMinutes ? `${formatDurationLabel(item.durationMinutes)} BLOCK` : 'ANYTIME'}</Text>}{chainName && <View style={[styles.linkBadge, { backgroundColor: accentColor + '1A' }]}><Ionicons name="link-outline" size={10} color={chainTextAccent} /><Text style={[styles.linkBadgeText, { color: chainTextAccent }]}>{chainName}</Text></View>}</View>
       <Text style={[styles.planText, { color: item.completed ? colors.foreground + 'A6' : colors.foreground, textDecorationLine: item.completed ? 'line-through' : 'none', textDecorationColor: item.completed ? colors.primary : undefined, textDecorationStyle: 'solid' }]} numberOfLines={2}>{item.text}</Text>
     </Pressable>
@@ -1143,9 +1095,32 @@ function TaskMenuMoment({ item, showCopy, showFocus, onClose, onFocus, onCopy, o
   const titleStyle = { ...TYPE.sectionTitle, color: colors.foreground, marginBottom: SPACE.md } as const;
   const actionStyle = { minHeight: CONTROL.minimumTarget, flexDirection: 'row', alignItems: 'center', gap: SPACE.sm, borderRadius: RADIUS.control, paddingHorizontal: SPACE.md, marginBottom: SPACE.xs } as const;
   const actionTextStyle = { ...TYPE.bodyStrong } as const;
-  return <Modal transparent visible animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={onClose}><View style={completionStyles.shade}><View accessibilityViewIsModal style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch' }]}><Text style={titleStyle} numberOfLines={1}>{item.text}</Text>{showFocus && <Pressable accessibilityRole="button" accessibilityLabel={`Start focus for ${formatDurationLabel(item.durationMinutes || 0)}`} onPress={onFocus} style={[actionStyle, { backgroundColor: colors.primary }]}><Ionicons name="play" size={16} color={colors.primaryForeground} /><Text style={[actionTextStyle, { color: colors.primaryForeground }]}>Start focus · {formatDurationLabel(item.durationMinutes || 0)}</Text></Pressable>}{showCopy && <Pressable accessibilityRole="button" accessibilityLabel="Copy task to tomorrow" onPress={onCopy} style={[actionStyle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="copy-outline" size={18} color={colors.primary} /><Text style={[actionTextStyle, { color: colors.primary }]}>Copy to tomorrow</Text></Pressable>}<Pressable accessibilityRole="button" accessibilityLabel="Edit task" onPress={onEdit} style={[actionStyle, { backgroundColor: colors.background }]}><Ionicons name="create-outline" size={18} color={colors.foreground} /><Text style={[actionTextStyle, { color: colors.foreground }]}>Edit task</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel={item.repeatSourceId ? "Delete this occurrence" : "Delete task"} onPress={onDelete} style={[actionStyle, { backgroundColor: colors.destructive + '16' }]}><Ionicons name="trash-outline" size={18} color={colors.destructive} /><Text style={[actionTextStyle, { color: colors.destructive }]}>{item.repeatSourceId ? "Delete this occurrence" : "Delete task"}</Text></Pressable><Pressable accessibilityRole="button" onPress={onClose} style={completionStyles.secondaryButton}><Text style={[completionStyles.secondaryText, { color: colors.mutedForeground }]}>Cancel</Text></Pressable></View></View></Modal>;
+  return <Modal transparent visible animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={onClose}><View style={completionStyles.shade}><View accessibilityViewIsModal style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border, alignItems: 'stretch' }]}><Text style={titleStyle} numberOfLines={1}>{item.text}</Text>{showFocus && <Pressable accessibilityRole="button" accessibilityLabel={`Start focus for ${formatDurationLabel(item.durationMinutes || 0)}`} onPress={onFocus} style={[actionStyle, { backgroundColor: colors.primary }]}><Ionicons name="play" size={16} color={colors.primaryForeground} /><Text style={[actionTextStyle, { color: colors.primaryForeground }]}>Start focus · {formatDurationLabel(item.durationMinutes || 0)}</Text></Pressable>}{showCopy && <Pressable accessibilityRole="button" accessibilityLabel="Copy task to tomorrow" onPress={onCopy} style={[actionStyle, { backgroundColor: colors.primary + '18' }]}><Ionicons name="copy-outline" size={18} color={colors.primary} /><Text style={[actionTextStyle, { color: colors.primary }]}>Copy to tomorrow</Text></Pressable>}<Pressable accessibilityRole="button" accessibilityLabel="Edit task" onPress={onEdit} style={[actionStyle, { backgroundColor: colors.background }]}><Ionicons name="create-outline" size={18} color={colors.foreground} /><Text style={[actionTextStyle, { color: colors.foreground }]}>Edit task</Text></Pressable><Pressable accessibilityRole="button" accessibilityLabel="Delete task" onPress={onDelete} style={[actionStyle, { backgroundColor: colors.destructive + '16' }]}><Ionicons name="trash-outline" size={18} color={colors.destructive} /><Text style={[actionTextStyle, { color: colors.destructive }]}>Delete task</Text></Pressable><Pressable accessibilityRole="button" onPress={onClose} style={completionStyles.secondaryButton}><Text style={[completionStyles.secondaryText, { color: colors.mutedForeground }]}>Cancel</Text></Pressable></View></View></Modal>;
 }
 
+function CompletionMoment({ visible, onClose, onPrepareTomorrow }: { visible: boolean; onClose: () => void; onPrepareTomorrow: () => void }) {
+  const colors = useColors();
+  const reduceMotion = useReducedMotion();
+  const scale = useRef(new Animated.Value(1)).current;
+  const iconScale = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (!visible) return;
+    if (reduceMotion) {
+      scale.setValue(1);
+      iconScale.setValue(1);
+      return;
+    }
+    scale.setValue(0.97);
+    iconScale.setValue(0.96);
+    const animation = Animated.parallel([
+      Animated.timing(scale, { toValue: 1, duration: MOTION.standard, useNativeDriver: true }),
+      Animated.timing(iconScale, { toValue: 1, duration: MOTION.standard, useNativeDriver: true }),
+    ]);
+    animation.start();
+    return () => animation.stop();
+  }, [visible, scale, iconScale, reduceMotion]);
+  return <Modal transparent visible={visible} animationType={reduceMotion ? 'none' : 'fade'} onRequestClose={onClose}><View style={completionStyles.shade}><Animated.View accessibilityViewIsModal style={[completionStyles.card, { backgroundColor: colors.card, borderColor: colors.border, transform: [{ scale }] }]}><Animated.View style={[completionStyles.icon, { backgroundColor: colors.primary + '20', transform: [{ scale: iconScale }] }]}><Ionicons name="checkmark" size={30} color={colors.primary} /></Animated.View><Text style={[completionStyles.title, { color: colors.foreground }]}>Day complete</Text><Text style={[completionStyles.body, { color: colors.mutedForeground, textAlign: 'center', lineHeight: 20 }]}>You followed through today. Let that count.</Text><Pressable accessibilityRole="button" onPress={onPrepareTomorrow} style={[completionStyles.primaryButton, { backgroundColor: colors.primary }]}><Text style={[completionStyles.primaryText, { color: colors.primaryForeground }]}>Prepare tomorrow</Text></Pressable><Pressable accessibilityRole="button" onPress={onClose} style={completionStyles.secondaryButton}><Text style={[completionStyles.secondaryText, { color: colors.mutedForeground }]}>Done</Text></Pressable></Animated.View></View></Modal>;
+}
 
 function ReminderPermissionMoment({ visible, minutes, onSkip, onAllow }: { visible: boolean; minutes?: number; onSkip: () => void; onAllow: () => void }) {
   const colors = useColors();
@@ -1169,7 +1144,7 @@ function DayReviewMoment({ visible, completedCount, totalCount, protectedChains,
     <View style={styles.modalShade}>
       <Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={onClose} />
       <View accessibilityViewIsModal style={[styles.reviewModal, { backgroundColor: colors.card, borderColor: colors.border, maxHeight: '86%', minHeight: 0, paddingBottom: Math.max(insets.bottom, SPACE.xxl) }]}>
-        <View style={[styles.reviewModalIcon, { backgroundColor: colors.primary + '18' }]}><ChainSymbol name="rest" size={21} color={colors.primary} /></View>
+        <View style={[styles.reviewModalIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="moon" size={21} color={colors.primary} /></View>
         <Text style={[styles.reviewModalTitle, { color: colors.foreground }]}>Close today gently</Text>
         <Text style={[styles.reviewModalBody, { color: colors.mutedForeground }]}>{completedCount}/{totalCount} tasks complete{chainCount ? ` · ${protectedChains}/${chainCount} chains protected.` : '.'}</Text>
         {pendingItems.length === 0
@@ -1317,7 +1292,7 @@ function MorningBriefingSheet({
                   key={optionHour}
                   accessibilityRole="radio"
                   accessibilityLabel={formatBriefingTime(optionHour)}
-                  accessibilityState={{ checked: selected, disabled: busy }}
+                  accessibilityState={{ selected, disabled: busy }}
                   disabled={busy}
                   onPress={() => { void onSelect(optionHour, 0); }}
                   style={({ pressed }) => [styles.briefingOption, { backgroundColor: selected ? colors.primary + '16' : colors.background, borderColor: selected ? colors.primary : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}
@@ -1328,7 +1303,7 @@ function MorningBriefingSheet({
                 </Pressable>;
               })}
 
-              <Pressable accessibilityRole="radio" accessibilityLabel="Turn morning briefing off" accessibilityState={{ checked: hour === null, disabled: busy }} disabled={busy} onPress={() => { void onDisable(); }} style={({ pressed }) => [styles.briefingOption, { backgroundColor: hour === null ? colors.muted : colors.background, borderColor: hour === null ? colors.mutedForeground + '55' : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}>
+              <Pressable accessibilityRole="radio" accessibilityLabel="Turn morning briefing off" accessibilityState={{ selected: hour === null, disabled: busy }} disabled={busy} onPress={() => { void onDisable(); }} style={({ pressed }) => [styles.briefingOption, { backgroundColor: hour === null ? colors.muted : colors.background, borderColor: hour === null ? colors.mutedForeground + '55' : colors.border, opacity: busy ? OPACITY.disabled : pressed ? OPACITY.pressed : 1 }]}>
                 <View style={[styles.briefingOptionIcon, { backgroundColor: colors.mutedForeground + '16' }]}><Ionicons name="notifications-off-outline" size={17} color={colors.mutedForeground} /></View>
                 <Text style={[styles.briefingOptionText, { color: colors.foreground }]}>Off</Text>
                 {hour === null && <Ionicons name="checkmark-circle" size={20} color={colors.mutedForeground} />}
@@ -1346,7 +1321,7 @@ function MorningBriefingSheet({
                   key={item}
                   accessibilityRole="radio"
                   accessibilityLabel={`${item % 12 || 12} ${item >= 12 ? 'PM' : 'AM'}`}
-                  accessibilityState={{ checked: item === draftHour, disabled: busy }}
+                  accessibilityState={{ selected: item === draftHour, disabled: busy }}
                   disabled={busy}
                   onLayout={item === draftHour ? ({ nativeEvent }) => revealSelectedValue(hourListRef.current, () => hourListHeightRef.current || pickerHeight, nativeEvent.layout.y, nativeEvent.layout.height) : undefined}
                   onPress={() => setDraftHour(item)}
@@ -1361,7 +1336,7 @@ function MorningBriefingSheet({
                   key={item}
                   accessibilityRole="radio"
                   accessibilityLabel={`${item} minutes`}
-                  accessibilityState={{ checked: item === draftMinute, disabled: busy }}
+                  accessibilityState={{ selected: item === draftMinute, disabled: busy }}
                   disabled={busy}
                   onLayout={item === draftMinute ? ({ nativeEvent }) => revealSelectedValue(minuteListRef.current, () => minuteListHeightRef.current || pickerHeight, nativeEvent.layout.y, nativeEvent.layout.height) : undefined}
                   onPress={() => setDraftMinute(item)}
@@ -1399,7 +1374,7 @@ function TimePickerModal({ visible, hour, minute, setHour, setMinute, onClose, o
     <View style={styles.modalShade}><Pressable accessible={false} style={StyleSheet.absoluteFill} onPress={onClose} /><View accessibilityViewIsModal style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border, maxHeight: height - Math.max(insets.top, SPACE.sm), paddingBottom: Math.max(insets.bottom, SPACE.xxl) }]}>
       <View style={styles.modalHeader}><Text style={[styles.modalTitle, { color: colors.foreground }]}>Choose a time</Text><Pressable accessibilityRole="button" accessibilityLabel="Close time picker" onPress={onClose} style={styles.modalClose}><Ionicons name="close" size={22} color={colors.mutedForeground} /></Pressable></View>
       <Text style={[styles.timePreview, { color: colors.primary }]}>{formatTime(hour, minute)}</Text>
-      <View style={[styles.pickerColumns, { height: pickerHeight }]}><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>HOUR</Text><FlatList data={HOURS} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item % 12 || 12} ${item >= 12 ? 'PM' : 'AM'}`} accessibilityState={{ checked: item === hour }} onPress={() => setHour(item)} style={[styles.pickerValue, { backgroundColor: item === hour ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === hour ? colors.primary : colors.foreground }]}>{item % 12 || 12} {item >= 12 ? 'PM' : 'AM'}</Text></Pressable>} /></View><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={MINUTES} keyExtractor={(value) => value} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item} minutes`} accessibilityState={{ checked: item === minute }} onPress={() => setMinute(item)} style={[styles.pickerValue, { backgroundColor: item === minute ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === minute ? colors.primary : colors.foreground }]}>{item}</Text></Pressable>} /></View></View>
+      <View style={[styles.pickerColumns, { height: pickerHeight }]}><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>HOUR</Text><FlatList data={HOURS} keyExtractor={(value) => String(value)} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item % 12 || 12} ${item >= 12 ? 'PM' : 'AM'}`} accessibilityState={{ selected: item === hour }} onPress={() => setHour(item)} style={[styles.pickerValue, { backgroundColor: item === hour ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === hour ? colors.primary : colors.foreground }]}>{item % 12 || 12} {item >= 12 ? 'PM' : 'AM'}</Text></Pressable>} /></View><View style={styles.pickerColumn}><Text style={[styles.pickerLabel, { color: colors.mutedForeground }]}>MINUTE</Text><FlatList data={MINUTES} keyExtractor={(value) => value} style={styles.pickerList} renderItem={({ item }) => <Pressable accessibilityRole="radio" accessibilityLabel={`${item} minutes`} accessibilityState={{ selected: item === minute }} onPress={() => setMinute(item)} style={[styles.pickerValue, { backgroundColor: item === minute ? colors.primary + '24' : 'transparent' }]}><Text style={[styles.pickerValueText, { color: item === minute ? colors.primary : colors.foreground }]}>{item}</Text></Pressable>} /></View></View>
       {!minuteIsOnGrid && <Text accessibilityLiveRegion="polite" style={[styles.briefingLegacyTime, { color: colors.mutedForeground }]}>The saved exact time remains unchanged until you choose a 5-minute time.</Text>}
       <Pressable accessibilityRole="button" accessibilityLabel={minuteIsOnGrid ? `Use ${formatTime(hour, minute)}` : 'Choose a five-minute value to change this time'} accessibilityState={{ disabled: !minuteIsOnGrid }} disabled={!minuteIsOnGrid} onPress={onConfirm} style={[styles.modalConfirm, { backgroundColor: colors.primary, opacity: minuteIsOnGrid ? 1 : OPACITY.disabled }]}><Text style={[styles.modalConfirmText, { color: colors.primaryForeground }]}>{minuteIsOnGrid ? 'Use this time' : 'Choose a 5-minute time'}</Text></Pressable>
     </View></View>
@@ -1458,7 +1433,6 @@ const styles = StyleSheet.create({
   moonCircle: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderRadius: RADIUS.capsule, alignItems: 'center', justifyContent: 'center', marginBottom: SPACE.hairline },
   emptyFocusTitle: { ...TYPE.sectionTitle, textAlign: 'center' },
   emptyFocusBody: { ...TYPE.body, textAlign: 'center' },
-  planComplete: { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.card, borderWidth: StyleSheet.hairlineWidth, padding: SPACE.md, marginBottom: SPACE.md, gap: SPACE.md },
   planItem: { flexDirection: 'row', alignItems: 'center', borderRadius: RADIUS.card, borderCurve: 'continuous', borderWidth: StyleSheet.hairlineWidth, paddingRight: SPACE.sm, paddingVertical: SPACE.sm, marginBottom: SPACE.xs, gap: SPACE.xs, overflow: 'hidden' },
   planBar: { width: SPACE.xxs, alignSelf: 'stretch' },
   planCheck: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, alignItems: 'center', justifyContent: 'center' },

@@ -1,5 +1,3 @@
-import { getChainCommitmentStatus, getTodayStr, isDateKey, type ChainCommitment } from './chains.ts';
-
 export const GATE_RULES_SCHEMA_VERSION = 1;
 export const GATE_DAILY_USAGE_OPTIONS = [5, 10, 15, 30, 45, 60, 90, 120] as const;
 
@@ -24,7 +22,15 @@ export interface GateTodayProgress {
 }
 
 /** Structural subset of Chain needed to evaluate today's release condition. */
-export type GateProgressChain = ChainCommitment;
+export interface GateProgressChain {
+  createdAt: string;
+  cadence: 'daily' | 'weekly';
+  weeklyTarget: number;
+  restDays: readonly number[];
+  completedDates: readonly string[];
+  minimumDates: readonly string[];
+  frozenDates: readonly string[];
+}
 
 export const DEFAULT_GATE_RULE: GateRule = {
   trigger: { kind: 'onOpen' },
@@ -141,6 +147,64 @@ export function formatGateUsageMinutes(value: number): string {
   return `${hours}h ${remainder}m`;
 }
 
+function toLocalDateString(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getTodayStr(): string {
+  return toLocalDateString(new Date());
+}
+
+function isDateKey(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const isLeapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [31, isLeapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day <= daysInMonth[month - 1];
+}
+
+function getLocalDateFromString(value: string): Date {
+  const [year, month, day] = value.split('-').map(Number);
+  return new Date(year, month - 1, day, 12);
+}
+
+function isRestDay(chain: GateProgressChain, date: string): boolean {
+  return chain.cadence === 'daily' && chain.restDays.includes(getLocalDateFromString(date).getDay());
+}
+
+function getWeeklyProgress(chain: GateProgressChain, referenceDate: string): number {
+  const start = getLocalDateFromString(referenceDate);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  const startKey = toLocalDateString(start);
+  const endKey = toLocalDateString(end);
+  return new Set(
+    [...chain.completedDates, ...chain.minimumDates].filter(
+      (date) => date >= startKey && date <= endKey,
+    ),
+  ).size;
+}
+
+function isChainKeptOnDate(chain: GateProgressChain, date: string): boolean {
+  const protectedToday =
+    chain.completedDates.includes(date) ||
+    chain.minimumDates.includes(date) ||
+    chain.frozenDates.includes(date);
+  if (chain.cadence === 'weekly') {
+    return getWeeklyProgress(chain, date) >= chain.weeklyTarget || protectedToday;
+  }
+  return protectedToday;
+}
+
 /**
  * Counts the Chains that form today's promise. Daily rest days are excluded.
  * A weekly Chain already at target cannot keep Gate active unnecessarily.
@@ -155,10 +219,10 @@ export function getGateTodayProgress(
   let kept = 0;
 
   for (const chain of chains) {
-    const commitment = getChainCommitmentStatus(chain, date);
-    if (!commitment.isDue) continue;
+    if (chain.createdAt > date) continue;
+    if (chain.cadence === 'daily' && isRestDay(chain, date)) continue;
     total += 1;
-    if (commitment.isKept) kept += 1;
+    if (isChainKeptOnDate(chain, date)) kept += 1;
   }
 
   const pending = Math.max(0, total - kept);

@@ -16,7 +16,6 @@ import { useColors } from '@/hooks/useColors';
 import {
   Chain,
   getTodayStr,
-  getChainCommitmentStatus,
   isRestDay,
   toLocalDateString,
   useChains,
@@ -42,7 +41,7 @@ function formatDate(): string {
 export default function ChainsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { chains, isReady, setDayStatus } = useChains();
+  const { chains, isReady, setDayStatus, isProtectedToday, isFrozenToday } = useChains();
   const { items, activeDate, readItemsForDate } = usePlan();
   const [localDay, setLocalDay] = useState(getTodayStr());
   const [todayItems, setTodayItems] = useState<PlanItem[]>([]);
@@ -93,19 +92,16 @@ export default function ChainsScreen() {
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const bottomSafe = Platform.OS === 'web' ? 0 : insets.bottom;
   const focusTask = todayItems.find((item) => item.isPriority && !item.completed);
-  const dueChains = chains.filter((chain) => getChainCommitmentStatus(chain, localDay).isDue);
+  const dueChains = chains.filter((chain) => !isRestDay(chain, localDay));
   const eligibleChains = dueChains.filter(
-    (chain) => !getChainCommitmentStatus(chain, localDay).isKept,
+    (chain) => !isProtectedToday(chain) && !isFrozenToday(chain),
   );
   const taskChain = focusTask
     ? eligibleChains.find((chain) => chain.id === focusTask.chainId)
     : undefined;
   const focusChain = taskChain ?? eligibleChains[0];
-  const frozenChains = dueChains.filter((chain) => getChainCommitmentStatus(chain, localDay).status === 'frozen');
-  const keptCount = dueChains.filter((chain) => {
-    const commitment = getChainCommitmentStatus(chain, localDay);
-    return commitment.isKept && commitment.status !== 'frozen';
-  }).length;
+  const frozenChains = dueChains.filter((chain) => isFrozenToday(chain));
+  const keptCount = dueChains.filter((chain) => isProtectedToday(chain) && !isFrozenToday(chain)).length;
   const allProtected = chains.length > 0 && eligibleChains.length === 0;
   const allResting = chains.length > 0 && dueChains.length === 0;
 
@@ -114,7 +110,6 @@ export default function ChainsScreen() {
   const yesterdayKey = toLocalDateString(yesterday);
   const recoveryChain = eligibleChains.find(
     (chain) => chain.createdAt < localDay
-      && chain.cadence === 'daily'
       && !isRestDay(chain, yesterdayKey)
       && !chain.completedDates.includes(yesterdayKey)
       && !chain.minimumDates.includes(yesterdayKey)

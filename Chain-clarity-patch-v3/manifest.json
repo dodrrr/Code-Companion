@@ -1,0 +1,152 @@
+{
+  "patch": "Chain clarity v3 \u2014 cumulative",
+  "files": [
+    {
+      "path": "artifacts/chain/app/(tabs)/index.tsx",
+      "accepted_sha256": [
+        "2f2687b6141badd1e29fe572f1d07c1863601ae62849237d20411e45b694c820",
+        "cc3bb12313b866951a0403d5c44d97bbfa70478e7df6783e66035d647035ba28"
+      ],
+      "final_sha256": "cc3bb12313b866951a0403d5c44d97bbfa70478e7df6783e66035d647035ba28"
+    },
+    {
+      "path": "artifacts/chain/app/(tabs)/plan.tsx",
+      "accepted_sha256": [
+        "8d37cd64ad20765e9e6f430ec0159610d8420863fbabc32a4dc01c640930fc2f",
+        "bde4714476ca19a8c18ece071c089d8efc35d47ff6d00d585eca5a7ce6bf5401",
+        "b3a2004daa0380635da6efa79f629c33e5fc4cce7e14f9858f8d9fdd71436d06"
+      ],
+      "final_sha256": "df34683fbc9d38e2c54e054025f4fda999f81f2b5b0632bb69b17b2d349526a6"
+    },
+    {
+      "path": "artifacts/chain/app/chain/[id].tsx",
+      "accepted_sha256": [
+        "728833bcb9968db0616ae78a101b87cd6962b6c7e851176d5a98d76f91e3fd15",
+        "cf065005fa85c3e88d06feb62a3544581d860fecc993d3badfa2217f965fb90a",
+        "436751d8766b08919fc7f8a2d8382b2d8c95dce0a010b6a83aa94e5ad7ab4985"
+      ],
+      "final_sha256": "97a0d6fc0ebc2771e404995716eab8e1fcb85996881dc486316a95821539870e"
+    },
+    {
+      "path": "artifacts/chain/app/chain/new.tsx",
+      "accepted_sha256": [
+        "e7f677c5ff707ff7807d24ab72355dc5598273fdefa9f1e122ab5f60481d10f0",
+        "0067fb276cdca855b6f71cba63925d2ec3ed504642708467ebc399a4d40ad005"
+      ],
+      "final_sha256": "0067fb276cdca855b6f71cba63925d2ec3ed504642708467ebc399a4d40ad005"
+    },
+    {
+      "path": "artifacts/chain/components/ChainCard.tsx",
+      "accepted_sha256": [
+        "2baa298072445877aeb166e4611a825e2c665f6d807bfdb2b7915e86f407b038",
+        "298d51fe19f8b9d577763b5eaacec2eb17abe53d55e1c995654e2cf826bf8bb3",
+        "40cbeb9fac2b1b53f987b8c5846e30e71b50cfc3d5465cba8bd317bd7b1b5c69"
+      ],
+      "final_sha256": "0f4e2976c0e281383284eed685d8a0bc213a1120ebe74ef742c049158721742a"
+    },
+    {
+      "path": "artifacts/chain/components/WeekStrip.tsx",
+      "accepted_sha256": [
+        "df72daba9c2e9179f134cff21de33a07c8b35dbed1f4aababa2fa1c6f8b692e6",
+        "241eb67386e69bf81e28f6657ce65d3c97601b0cc8e69f54b82413ea1b9383fe"
+      ],
+      "final_sha256": "241eb67386e69bf81e28f6657ce65d3c97601b0cc8e69f54b82413ea1b9383fe"
+    },
+    {
+      "path": "artifacts/chain/components/ui/ChainSymbol.tsx",
+      "accepted_sha256": [
+        "3083a6493adaef666ca2109ef6ec8be350b904789f956cd6acbdf5d994a0f887",
+        "25c7dffedf59482b5f903e3e0a0c71fa23d70ba76f9753ae975001a92431ffae"
+      ],
+      "final_sha256": "25c7dffedf59482b5f903e3e0a0c71fa23d70ba76f9753ae975001a92431ffae"
+    },
+    {
+      "path": "artifacts/chain/constants/progression.ts",
+      "accepted_sha256": [
+        "5c9cdfc8dab988ad879b486b5ba5a0f2fe7b95b5727a71c5d15a0f8d3d362659",
+        "3d0f275c3749ba8098aa3fe47ba34ecf135db1fd329c881954efa2dae9279ab0"
+      ],
+      "final_sha256": "3d0f275c3749ba8098aa3fe47ba34ecf135db1fd329c881954efa2dae9279ab0"
+    },
+    {
+      "path": "artifacts/chain/context/ChainsContext.tsx",
+      "accepted_sha256": [
+        "01bf070991eb32067f9a973bfeeae12b05962f24543a985fb9197d19119cd651",
+        "442eae7f70e7ffb98bf836042f8ab3207bae8fedef58c3d6e01cfb53454dd692"
+      ],
+      "final_sha256": "442eae7f70e7ffb98bf836042f8ab3207bae8fedef58c3d6e01cfb53454dd692"
+    },
+    {
+      "path": "artifacts/chain/context/PlanContext.tsx",
+      "accepted_sha256": [
+        "7dc038130c5c2632748babf1d5a6dc52c9688ccea607e44c8f52dee2bd9290a6",
+        "33a4124337f2d34471ce8bbd266c25b9879cb2d0739b8c534cc3a1275b28588b"
+      ],
+      "final_sha256": "33a4124337f2d34471ce8bbd266c25b9879cb2d0739b8c534cc3a1275b28588b"
+    },
+    {
+      "path": "artifacts/chain/domain/chains.ts",
+      "accepted_sha256": [
+        "840fc51edb6657e92a9eb8954c0e46a8978936cd1d673bd549ef8614d4c8f912",
+        "a0e4e0f73416fda6dd452bad1707638603ce55092cd52b90b8c51cb50004d6db"
+      ],
+      "final_sha256": "a0e4e0f73416fda6dd452bad1707638603ce55092cd52b90b8c51cb50004d6db"
+    },
+    {
+      "path": "artifacts/chain/domain/gateRules.ts",
+      "accepted_sha256": [
+        "ff095ec79f8d0d5c7d2cecaf3f6e166175ff5233c83f9341fa33d2916bf3c43d",
+        "345c11759ecc035346d8cd27d39124615052d22128b4e3fa7b0387346d3296e7"
+      ],
+      "final_sha256": "345c11759ecc035346d8cd27d39124615052d22128b4e3fa7b0387346d3296e7"
+    },
+    {
+      "path": "artifacts/chain/domain/plan.ts",
+      "accepted_sha256": [
+        "6afccba3049a389c7dc22a874386e0eec1018facdea97f1decf36a620c95455d",
+        "e8521c938045de70817ecdc1edcf845bd3bd051cb77df9d397bf7b6e6e126964"
+      ],
+      "final_sha256": "e8521c938045de70817ecdc1edcf845bd3bd051cb77df9d397bf7b6e6e126964"
+    },
+    {
+      "path": "artifacts/chain/lib/planRepository.ts",
+      "accepted_sha256": [
+        null,
+        "17ca7a3dd2f5cdd04bda87abe9f715c6ebcdadf0496276af50a3c25ad8a8d45d"
+      ],
+      "final_sha256": "17ca7a3dd2f5cdd04bda87abe9f715c6ebcdadf0496276af50a3c25ad8a8d45d"
+    },
+    {
+      "path": "artifacts/chain/tests/chains-commitment-regressions.test.mjs",
+      "accepted_sha256": [
+        null,
+        "49059b810eefb38e7882ca6f0a356035bb488fbaf30fa50ed3aa0c667f33aa25"
+      ],
+      "final_sha256": "49059b810eefb38e7882ca6f0a356035bb488fbaf30fa50ed3aa0c667f33aa25"
+    },
+    {
+      "path": "artifacts/chain/tests/plan-repeat-regressions.test.mjs",
+      "accepted_sha256": [
+        null,
+        "a570b07bc340dbb52f6d5f35899a4fd283ed6c3d96c938a728ef83c2cdd83018"
+      ],
+      "final_sha256": "a570b07bc340dbb52f6d5f35899a4fd283ed6c3d96c938a728ef83c2cdd83018"
+    },
+    {
+      "path": "artifacts/chain/tests/progression.test.mjs",
+      "accepted_sha256": [
+        null,
+        "360f8e2c7a42b08840f1b3a0b8e9b81c31a2ec65ff3e71c5ad2658b2ca0439bb"
+      ],
+      "final_sha256": "360f8e2c7a42b08840f1b3a0b8e9b81c31a2ec65ff3e71c5ad2658b2ca0439bb"
+    },
+    {
+      "path": "artifacts/chain/tsconfig.json",
+      "accepted_sha256": [
+        "9db70911842b5031c1dd933c7781e1c7fbdc438ae75f89dc041fddc84f45ef2c",
+        "bb847023b2bcea50a833af74a9f2d9752a2ae5463e71a42ced1378b023cd253c"
+      ],
+      "final_sha256": "bb847023b2bcea50a833af74a9f2d9752a2ae5463e71a42ced1378b023cd253c"
+    }
+  ]
+}

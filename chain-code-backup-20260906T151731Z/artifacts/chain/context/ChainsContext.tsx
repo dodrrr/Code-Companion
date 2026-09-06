@@ -3,10 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   applyDayStatus,
   decodeChains,
-  getNextCompletionStatus,
   getTodayStr,
-  isChainKeptOnDate,
-  normalizeRestDayUpdate,
+  normalizeRestDays,
   normalizeWeeklyTarget,
   parseChains,
   type Chain,
@@ -15,8 +13,8 @@ import {
 import { createVersionedRepository } from '@/lib/versionedRepository';
 import { reportDiagnostic } from '@/lib/diagnostics';
 
-export type { Chain, ChainCommitmentStatus, DayStatus } from '@/domain/chains';
-export { getChainCommitmentStatus, getStreak, getTodayStr, getWeeklyProgress, isChainKeptOnDate, isRestDay, toLocalDateString } from '@/domain/chains';
+export type { Chain, DayStatus } from '@/domain/chains';
+export { getStreak, getTodayStr, getWeeklyProgress, isRestDay, toLocalDateString } from '@/domain/chains';
 
 export type ChainMutationResult =
   | { status: 'persisted' }
@@ -181,10 +179,8 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
 
   function updateChainRestDays(id: string, restDays: number[]) {
     if (!chainsRef.current.some((chain) => chain.id === id)) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
-    const normalizedDays = normalizeRestDayUpdate(restDays);
-    if (normalizedDays === null) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
     return persist(
-      chainsRef.current.map((chain) => (chain.id === id ? { ...chain, restDays: normalizedDays } : chain)),
+      chainsRef.current.map((chain) => (chain.id === id ? { ...chain, restDays: normalizeRestDays(restDays) } : chain)),
       'chains.updateRestDays',
     );
   }
@@ -219,7 +215,7 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
     const today = getTodayStr();
     const chain = chainsRef.current.find((item) => item.id === id);
     if (!chain) return Promise.resolve<ChainMutationResult>({ status: 'rejected' });
-    return setDayStatus(id, today, getNextCompletionStatus(chain, today));
+    return setDayStatus(id, today, (chain.completedDates.includes(today) || chain.minimumDates.includes(today)) ? 'missed' : 'done');
   }
 
   function useFreeze(id: string) {
@@ -229,8 +225,9 @@ export function ChainsProvider({ children }: { children: React.ReactNode }) {
 
   const isCompletedToday = (c: Chain) =>
     c.completedDates.includes(getTodayStr());
-  const isProtectedToday = (c: Chain) => isChainKeptOnDate(c, getTodayStr());
-  const isFrozenToday = (c: Chain) => c.cadence === 'daily' && c.frozenDates.includes(getTodayStr());
+  const isProtectedToday = (c: Chain) =>
+    c.completedDates.includes(getTodayStr()) || c.minimumDates.includes(getTodayStr()) || c.frozenDates.includes(getTodayStr());
+  const isFrozenToday = (c: Chain) => c.frozenDates.includes(getTodayStr());
   const getRemainingFreezeTokens = (c: Chain) => c.freezeCredits;
 
   return (

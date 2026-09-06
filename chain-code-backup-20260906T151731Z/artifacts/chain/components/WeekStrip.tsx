@@ -1,10 +1,9 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { ChainSymbol } from './ui/ChainSymbol';
+import { Ionicons } from '@expo/vector-icons';
 import { useColors } from '@/hooks/useColors';
 import { Chain, isRestDay, toLocalDateString } from '@/context/ChainsContext';
 import { SPACE, TYPE } from '@/constants/designSystem';
-import { readableTextColor } from '@/constants/sectionTheme';
 
 interface Props {
   chain: Chain;
@@ -67,15 +66,11 @@ export default function WeekStrip({ chain }: Props) {
                   : { backgroundColor: 'transparent', borderColor: colors.border, borderWidth: 1 },
               ]}
             >
-              {completed ? (
-                <ChainSymbol name="check" size={12} color={readableTextColor(chain.color)} />
-              ) : minimum ? (
-                <ChainSymbol name="minimum" size={13} color={chain.color} />
-              ) : frozen ? (
-                <ChainSymbol name="freeze" size={13} color="#4488ff" />
-              ) : rest ? (
-                <ChainSymbol name="rest" size={13} color={colors.foreground} />
-              ) : null}
+              {frozen && !completed && (
+                <Ionicons name="snow-outline" size={9} color="#4488ff" />
+              )}
+              {minimum && !completed && <Ionicons name="leaf-outline" size={10} color={chain.color} />}
+              {rest && !completed && !frozen && <Ionicons name="moon" size={13} color={colors.foreground} />}
             </View>
           </View>
         );

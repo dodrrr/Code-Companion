@@ -23,27 +23,6 @@ export interface Chain {
 
 export type DayStatus = 'done' | 'minimum' | 'frozen' | 'missed';
 
-/** Read-only fields shared by Chains, Plan and Gate when evaluating a promise. */
-export interface ChainCommitment {
-  createdAt: string;
-  cadence: 'daily' | 'weekly';
-  weeklyTarget: number;
-  restDays: readonly number[];
-  completedDates: readonly string[];
-  minimumDates: readonly string[];
-  frozenDates: readonly string[];
-}
-
-export interface ChainCommitmentStatus {
-  status: 'not-started' | 'rest' | 'done' | 'minimum' | 'frozen' | 'weekly-target-met' | 'pending';
-  /** Eligible for today's summary; daily rest days are not due. */
-  isDue: boolean;
-  /** The promise is covered, which need not mean an action was logged today. */
-  isKept: boolean;
-  weeklyProgress: number;
-  weeklyTargetMet: boolean;
-}
-
 export interface DayStatusResult {
   accepted: boolean;
   changed: boolean;
@@ -95,17 +74,11 @@ export function normalizeRestDays(values: unknown): number[] {
   );
 }
 
-/** Reject new schedules with no active day without rewriting legacy records. */
-export function normalizeRestDayUpdate(values: unknown): number[] | null {
-  const days = normalizeRestDays(values);
-  return days.length < 7 ? days : null;
-}
-
 export function normalizeWeeklyTarget(value: unknown): number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 7 ? value : 3;
 }
 
-export function isRestDay(chain: Pick<ChainCommitment, 'cadence' | 'restDays'>, date: string): boolean {
+export function isRestDay(chain: Chain, date: string): boolean {
   if (chain.cadence === 'weekly') return false;
   return (chain.restDays ?? []).includes(getLocalDateFromString(date).getDay());
 }
@@ -117,54 +90,13 @@ function getWeekStart(value: Date): Date {
   return date;
 }
 
-export function getWeeklyProgress(
-  chain: Pick<ChainCommitment, 'completedDates' | 'minimumDates'>,
-  referenceDate = getTodayStr(),
-): number {
+export function getWeeklyProgress(chain: Chain, referenceDate = getTodayStr()): number {
   const start = getWeekStart(getLocalDateFromString(referenceDate));
   const end = new Date(start);
   end.setDate(start.getDate() + 6);
   const startKey = toLocalDateString(start);
   const endKey = toLocalDateString(end);
   return new Set([...chain.completedDates, ...chain.minimumDates].filter((date) => date >= startKey && date <= endKey)).size;
-}
-
-export function getChainCommitmentStatus(
-  chain: ChainCommitment,
-  requestedDate = getTodayStr(),
-): ChainCommitmentStatus {
-  const date = isDateKey(requestedDate) ? requestedDate : getTodayStr();
-  const weeklyProgress = chain.cadence === 'weekly' ? getWeeklyProgress(chain, date) : 0;
-  const weeklyTargetMet = chain.cadence === 'weekly' && weeklyProgress >= chain.weeklyTarget;
-  let status: ChainCommitmentStatus['status'];
-
-  if (chain.createdAt > date) status = 'not-started';
-  else if (isRestDay(chain, date)) status = 'rest';
-  else if (chain.completedDates.includes(date)) status = 'done';
-  else if (chain.minimumDates.includes(date)) status = 'minimum';
-  else if (weeklyTargetMet) status = 'weekly-target-met';
-  else if (chain.cadence === 'daily' && chain.frozenDates.includes(date)) status = 'frozen';
-  else status = 'pending';
-
-  return {
-    status,
-    isDue: status !== 'not-started' && status !== 'rest',
-    isKept: status !== 'not-started' && status !== 'pending',
-    weeklyProgress,
-    weeklyTargetMet,
-  };
-}
-
-export function isChainKeptOnDate(chain: ChainCommitment, date = getTodayStr()): boolean {
-  return getChainCommitmentStatus(chain, date).isKept;
-}
-
-/** The primary completion action upgrades a minimum; only Done is undone. */
-export function getNextCompletionStatus(
-  chain: Pick<ChainCommitment, 'completedDates'>,
-  date = getTodayStr(),
-): 'done' | 'missed' {
-  return chain.completedDates.includes(date) ? 'missed' : 'done';
 }
 
 export function normalizeChain(value: unknown): Chain | null {
@@ -252,7 +184,6 @@ export function parseChains(raw: string | null): Chain[] {
 }
 
 export function getStreak(chain: Chain, referenceDate = getTodayStr()): number {
-  if (!isDateKey(referenceDate) || referenceDate < chain.createdAt) return 0;
   if (chain.cadence === 'weekly') {
     let weekStart = getWeekStart(getLocalDateFromString(referenceDate));
     if (getWeeklyProgress(chain, referenceDate) < chain.weeklyTarget) weekStart.setDate(weekStart.getDate() - 7);
@@ -270,22 +201,13 @@ export function getStreak(chain: Chain, referenceDate = getTodayStr()): number {
   const completed = new Set([...chain.completedDates, ...chain.minimumDates]);
   const frozen = new Set(chain.frozenDates);
   const coveredDays = new Set([...completed, ...frozen]);
-  // Old records can contain seven rest days. Preserve them, but never scan
-  // indefinitely: by the existing rules completions on rest days do not count.
-  if (normalizeRestDays(chain.restDays).length === 7) return 0;
   let streak = 0;
-  let scannedDays = 0;
-  // Preserve the existing 3,650-completion limit even with six rest days per
-  // week, plus every stored Freeze that can bridge another active day.
-  const maxScannedDays = (3650 + frozen.size) * 7;
   const date = getLocalDateFromString(referenceDate);
 
   if (!coveredDays.has(referenceDate)) date.setDate(date.getDate() - 1);
 
-  while (streak < 3650 && scannedDays < maxScannedDays) {
+  while (streak < 3650) {
     const dateKey = toLocalDateString(date);
-    if (dateKey < chain.createdAt) break;
-    scannedDays += 1;
     if (isRestDay(chain, dateKey) || frozen.has(dateKey)) {
       date.setDate(date.getDate() - 1);
     } else if (completed.has(dateKey)) {
@@ -311,11 +233,6 @@ export function applyDayStatus(
   const wasFrozen = chain.frozenDates.includes(date);
   const previousStatus: DayStatus = wasDone ? 'done' : wasMinimum ? 'minimum' : wasFrozen ? 'frozen' : 'missed';
   if (previousStatus === status) return { accepted: true, changed: false, chain };
-  // Existing weekly Freeze dates remain editable/refundable, but a new one
-  // must not spend credit for a weekly streak it cannot protect.
-  if (status === 'frozen' && chain.cadence !== 'daily') {
-    return { accepted: false, changed: false, chain };
-  }
   if (status === 'frozen' && !wasFrozen && chain.freezeCredits <= 0) {
     return { accepted: false, changed: false, chain };
   }
