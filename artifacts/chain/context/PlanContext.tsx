@@ -42,7 +42,7 @@ interface PlanContextValue {
   isActiveDayClosed: boolean;
   tomorrowItemCount: number;
   readItemsForDate: (date: string) => Promise<PlanItem[]>;
-  readYearSummary: (year: number) => Promise<Record<string, number>>;
+  readYearSummary: (year: number) => Promise<Record<string, PlanItem[]>>;
   showToday: () => void;
   showTomorrow: () => Promise<PlanItem[]>;
   showDate: (date: string) => Promise<PlanItem[]>;
@@ -97,22 +97,22 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const readYearSummary = useCallback(async (year: number): Promise<Record<string, number>> => {
+  const readYearSummary = useCallback(async (year: number): Promise<Record<string, PlanItem[]>> => {
     const snapshot = await planStore.readSnapshot();
     const today = getPlanTodayKey();
-    const counts: Record<string, number> = {};
+    const days: Record<string, PlanItem[]> = {};
     for (let month = 0; month < 12; month += 1) {
       const daysInMonth = new Date(year, month + 1, 0).getDate();
       for (let day = 1; day <= daysInMonth; day += 1) {
         const date = toPlanDateKey(new Date(year, month, day));
         const saved = snapshot.days[date] ?? [];
-        const count = date < today
-          ? saved.length
-          : resolveRecurringPlanForDate(saved, snapshot.repeatRules, date, () => 'preview').length;
-        if (count) counts[date] = count;
+        const itemsForDate = date < today
+          ? saved
+          : resolveRecurringPlanForDate(saved, snapshot.repeatRules, date, () => 'preview');
+        if (itemsForDate.length) days[date] = itemsForDate;
       }
     }
-    return counts;
+    return days;
   }, []);
 
   function replaceVisiblePlan(date: string, nextItems: PlanItem[]) {
