@@ -5,6 +5,8 @@ import {
   getPlanTodayKey,
   getPlanTomorrowKey,
   normalizeClosedDates,
+  resolveRecurringPlanForDate,
+  toPlanDateKey,
   type FocusLogEntry,
   type PlanItem,
   type PlanItemOptions,
@@ -40,6 +42,7 @@ interface PlanContextValue {
   isActiveDayClosed: boolean;
   tomorrowItemCount: number;
   readItemsForDate: (date: string) => Promise<PlanItem[]>;
+  readYearSummary: (year: number) => Promise<Record<string, number>>;
   showToday: () => void;
   showTomorrow: () => Promise<PlanItem[]>;
   showDate: (date: string) => Promise<PlanItem[]>;
@@ -92,6 +95,24 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       reportDiagnostic({ area: 'storage', operation: 'plan.readDateSnapshot', severity: 'warning', error });
       return [];
     }
+  }, []);
+
+  const readYearSummary = useCallback(async (year: number): Promise<Record<string, number>> => {
+    const snapshot = await planStore.readSnapshot();
+    const today = getPlanTodayKey();
+    const counts: Record<string, number> = {};
+    for (let month = 0; month < 12; month += 1) {
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      for (let day = 1; day <= daysInMonth; day += 1) {
+        const date = toPlanDateKey(new Date(year, month, day));
+        const saved = snapshot.days[date] ?? [];
+        const count = date < today
+          ? saved.length
+          : resolveRecurringPlanForDate(saved, snapshot.repeatRules, date, () => 'preview').length;
+        if (count) counts[date] = count;
+      }
+    }
+    return counts;
   }, []);
 
   function replaceVisiblePlan(date: string, nextItems: PlanItem[]) {
@@ -568,7 +589,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     return result;
   }
 
-  const value = useMemo(() => ({ items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, readItemsForDate, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, completeFocusItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys, readItemsForDate]);
+  const value = useMemo(() => ({ items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, readItemsForDate, readYearSummary, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderMetadata, completeItemForDate, completeFocusItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem }), [items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, closedDateKeys, readItemsForDate, readYearSummary]);
   return <PlanContext.Provider value={value}>{children}</PlanContext.Provider>;
 }
 

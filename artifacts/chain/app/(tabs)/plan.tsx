@@ -34,6 +34,8 @@ import { CLOCK_MINUTE_OPTIONS, isClockMinuteOption } from '@/constants/time';
 import { playFeedback } from '@/lib/feedback';
 import { SevenChoiceSelector } from '@/components/ui/SevenChoiceSelector';
 import { ChainSymbol } from '@/components/ui/ChainSymbol';
+import { PlanCalendar } from '@/components/plan/PlanCalendar';
+import { getPlanTomorrowKey } from '@/domain/plan';
 
 const QUICK_TIMES = ['7 AM', '9 AM', '12 PM', '3 PM', '6 PM', '8 PM'];
 const HOURS = Array.from({ length: 18 }, (_, index) => index + 6);
@@ -82,7 +84,7 @@ export default function PlanScreen() {
   const insets = useSafeAreaInsets();
   const { fontScale } = useWindowDimensions();
   const { chains, setDayStatus, isProtectedToday } = useChains();
-  const { items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem } = usePlan();
+  const { items, isLoading, loadError, retryLoad, activeDate, isToday, isActiveDayClosed, tomorrowItemCount, readYearSummary, showToday, showTomorrow, showDate, closeToday, reopenToday, addItem, updateItem, updateReminderForDate, moveItemToTomorrow, copyItemToTomorrow, removeItem, toggleItem } = usePlan();
   const { taskId, planDate } = useLocalSearchParams<{ taskId?: string; planDate?: string }>();
   const [inputText, setInputText] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
@@ -93,6 +95,7 @@ export default function PlanScreen() {
   const [selectedDuration, setSelectedDuration] = useState<number | undefined>();
   const [isPriority, setIsPriority] = useState(false);
   const [showInput, setShowInput] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [briefingHour, setBriefingHour] = useState<number | null>(null);
@@ -130,6 +133,7 @@ export default function PlanScreen() {
   const plannedFocusMinutes = items.reduce((total, item) => total + (item.durationMinutes || 0), 0);
   const reminderCount = items.filter((item) => Boolean(item.timeSlot) && item.reminderMinutes !== undefined).length;
   const canEditActivePlan = !isToday || !isActiveDayClosed;
+  const isTomorrow = activeDate === getPlanTomorrowKey();
 
   useEffect(() => {
     void AsyncStorage.getItem(MORNING_BRIEFING_KEY)
@@ -669,10 +673,15 @@ export default function PlanScreen() {
 
   return (
     <AmbientScreen tone="plan" style={styles.root}>
-      <View style={[styles.header, { paddingTop: topPad + 12 }]}>
-        <Text style={[styles.headerEyebrow, { color: colors.primary }]}>{isToday ? 'ONE THING AT A TIME' : 'MAKE TOMORROW LIGHTER'}</Text>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>{isToday ? "Today's Plan" : "Tonight's Plan"}</Text>
-        <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>{getPlanLabel(activeDate)}</Text>
+      <View style={[styles.header, styles.headerRow, { paddingTop: topPad + 12 }]}>
+        <View style={styles.headerCopy}>
+          <Text style={[styles.headerEyebrow, { color: colors.primary }]}>{isToday ? 'ONE THING AT A TIME' : isTomorrow ? 'MAKE TOMORROW LIGHTER' : 'MAKE SPACE AHEAD'}</Text>
+          <Text style={[styles.headerTitle, { color: colors.foreground }]}>{isToday ? "Today's Plan" : isTomorrow ? "Tonight's Plan" : 'Future Plan'}</Text>
+          <Text style={[styles.headerSub, { color: colors.mutedForeground }]}>{getPlanLabel(activeDate)}</Text>
+        </View>
+        <Pressable accessibilityRole="button" accessibilityLabel="Open Plan calendar" accessibilityHint="Plan tasks for another day or browse the year" onPress={() => { Keyboard.dismiss(); setShowCalendar(true); }} style={({ pressed }) => [styles.calendarButton, { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? OPACITY.pressed : 1 }]}>
+          <Ionicons name="calendar-outline" size={22} color={colors.primary} />
+        </Pressable>
       </View>
 
       <KeyboardAwareScrollViewCompat
@@ -697,7 +706,7 @@ export default function PlanScreen() {
           </View>
         )}</>}
 
-        {!isToday && items.length > 0 && (
+        {isTomorrow && items.length > 0 && (
           <View style={[styles.tomorrowSet, { backgroundColor: colors.primary + '12', borderColor: colors.primary + '55' }]}>
             <View style={[styles.tomorrowSetIcon, { backgroundColor: colors.primary + '22' }]}><ChainSymbol name="rest" size={20} color={colors.primary} /></View>
             <View style={styles.tomorrowSetCopy}><Text style={[styles.tomorrowSetTitle, { color: colors.foreground }]}>Tomorrow is set</Text><Text style={[styles.tomorrowSetBody, { color: colors.mutedForeground }]}>{items.length} tasks{plannedFocusMinutes ? ` · ${formatDurationLabel(plannedFocusMinutes)} of focus` : ''}{reminderCount ? ` · ${reminderCount === 1 ? 'reminder' : 'reminders'} ready` : ''} · {priorityItem ? `One thing: ${priorityItem.text}` : 'Choose one thing that matters most.'}</Text></View>
@@ -706,8 +715,8 @@ export default function PlanScreen() {
 
         <View style={styles.focusHeading}>
           <View style={styles.focusHeadingCopy}>
-            <Text style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 3 }]}>{isToday ? "TODAY'S AGENDA" : "TOMORROW'S FOCUS"}</Text>
-            <Text style={[styles.focusCaption, { color: colors.foreground }]}>{isToday ? 'Move through it gently.' : 'Keep it to what matters.'}</Text>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground, marginBottom: 3 }]}>{isToday ? "TODAY'S AGENDA" : isTomorrow ? "TOMORROW'S FOCUS" : "FUTURE FOCUS"}</Text>
+            <Text style={[styles.focusCaption, { color: colors.foreground }]}>{isToday ? 'Move through it gently.' : isTomorrow ? 'Keep it to what matters.' : getPlanLabel(activeDate)}</Text>
           </View>
           <View style={[styles.countPill, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[styles.itemCount, { color: colors.mutedForeground }]}>{items.length} task{items.length === 1 ? '' : 's'}</Text>
@@ -754,8 +763,8 @@ export default function PlanScreen() {
           <View style={[styles.emptyFocus, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <GlassSurface pointerEvents="none" style={StyleSheet.absoluteFill} />
             <View style={[styles.moonCircle, { backgroundColor: colors.primary + '18' }]}><ChainSymbol name="rest" size={22} color={colors.primary} /></View>
-            <Text style={[styles.emptyFocusTitle, { color: colors.foreground }]}>{isToday ? 'Your day is clear.' : 'A calm start begins tonight.'}</Text>
-            <Text style={[styles.emptyFocusBody, { color: colors.mutedForeground }]}>{isToday ? 'There are no unfinished tasks waiting for you.' : 'Choose what deserves space tomorrow, then let the plan hold the rest.'}</Text>
+            <Text style={[styles.emptyFocusTitle, { color: colors.foreground }]}>{isToday ? 'Your day is clear.' : isTomorrow ? 'A calm start begins tonight.' : 'An open day ahead.'}</Text>
+            <Text style={[styles.emptyFocusBody, { color: colors.mutedForeground }]}>{isToday ? 'There are no unfinished tasks waiting for you.' : isTomorrow ? 'Choose what deserves space tomorrow, then let the plan hold the rest.' : 'Add what matters to this day. You can come back and adjust it anytime.'}</Text>
           </View>
         )}
 
@@ -810,7 +819,7 @@ export default function PlanScreen() {
                   ref={inputRef}
                   value={inputText}
                   onChangeText={setInputText}
-                  placeholder={isToday ? 'What needs to happen today?' : 'What needs to happen tomorrow?'}
+                  placeholder={isToday ? 'What needs to happen today?' : isTomorrow ? 'What needs to happen tomorrow?' : 'What needs to happen this day?'}
                   placeholderTextColor={colors.mutedForeground}
                   style={[styles.input, { color: colors.foreground }]}
                   returnKeyType="done"
@@ -851,7 +860,7 @@ export default function PlanScreen() {
             ) : (
               <Pressable accessibilityRole="button" accessibilityLabel="Add task" onPress={() => setShowInput(true)} style={styles.addTrigger}>
                 <View style={[styles.addIcon, { backgroundColor: colors.primary + '18' }]}><Ionicons name="add" size={20} color={colors.primary} /></View>
-                <View style={styles.addCopy}><Text style={[styles.addTriggerText, { color: colors.foreground }]}>Add task</Text><Text style={[styles.addTriggerSub, { color: colors.mutedForeground }]}>{isToday ? 'Add it to today' : 'Set a time or link a chain'}</Text></View>
+                <View style={styles.addCopy}><Text style={[styles.addTriggerText, { color: colors.foreground }]}>Add task</Text><Text style={[styles.addTriggerSub, { color: colors.mutedForeground }]}>{isToday ? 'Add it to today' : isTomorrow ? 'Set a time or link a chain' : `Plan for ${getPlanLabel(activeDate)}`}</Text></View>
                 <Ionicons name="chevron-forward" size={18} color={colors.mutedForeground} />
               </Pressable>
             )}
@@ -861,6 +870,19 @@ export default function PlanScreen() {
             <Text style={{ color: colors.primary, fontSize: 13, fontFamily: 'Inter_600SemiBold' }}>Reopen</Text>
           </Pressable>}
       </KeyboardAwareScrollViewCompat>
+
+      <PlanCalendar
+        visible={showCalendar}
+        activeDate={activeDate}
+        readYearSummary={readYearSummary}
+        onClose={() => setShowCalendar(false)}
+        onSelect={async (date) => {
+          await showDate(date);
+          resetComposer();
+          setShowCalendar(false);
+          playFeedback('selection');
+        }}
+      />
 
       <TimePickerModal
         visible={showTimePicker}
@@ -1409,6 +1431,9 @@ function TimePickerModal({ visible, hour, minute, setHour, setMinute, onClose, o
 const styles = StyleSheet.create({
   root: { flex: 1 },
   header: { paddingHorizontal: CONTROL.screenHorizontal, paddingBottom: SPACE.lg },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SPACE.sm },
+  headerCopy: { flex: 1, minWidth: 0 },
+  calendarButton: { width: CONTROL.minimumTarget, height: CONTROL.minimumTarget, borderWidth: StyleSheet.hairlineWidth, borderRadius: RADIUS.control, alignItems: 'center', justifyContent: 'center' },
   headerEyebrow: { ...TYPE.eyebrow, fontSize: 11, lineHeight: 15, marginBottom: SPACE.xs },
   headerTitle: { ...TYPE.display },
   headerSub: { ...TYPE.body, marginTop: SPACE.xxs },
