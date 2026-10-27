@@ -232,7 +232,7 @@ export function GateWindowsContent({ embedded = false, live = true, onWindowsCha
     setNotice(undefined);
   };
   const persistenceFailure = () => presentNotice('Chain couldn’t save that change. Your previous windows are still here.');
-  const topPad = embedded ? 0 : Platform.OS === 'web' ? 50 : insets.top + 8;
+  const topPad = embedded ? 0 : insets.top + 8;
 
   useEffect(() => {
     let mounted = true;

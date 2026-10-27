@@ -120,8 +120,8 @@ export default function PlanScreen() {
   const reminderActionIdsRef = useRef(new Set<string>());
   const savingPlanItemRef = useRef(false);
   const chainCompletionBusyRef = useRef(false);
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
-  const botPad = Platform.OS === 'web' ? 84 : insets.bottom;
+  const topPad = insets.top;
+  const botPad = insets.bottom;
   const today = getTodayStr();
   const completedCount = items.filter((item) => item.completed).length;
   const protectedChains = chains.filter((chain) => isRestDay(chain, today) || isProtectedToday(chain)).length;

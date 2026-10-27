@@ -79,8 +79,8 @@ export default function NewChainScreen() {
   const inputRef = useRef<TextInput>(null);
   const submittingRef = useRef(false);
 
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
-  const botPad = Platform.OS === 'web' ? 34 : insets.bottom;
+  const topPad = insets.top;
+  const botPad = insets.bottom;
 
   async function handleCreate() {
     if (submittingRef.current) return;

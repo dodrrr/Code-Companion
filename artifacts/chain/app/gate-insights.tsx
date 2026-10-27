@@ -41,7 +41,7 @@ export default function GateInsightsScreen() {
   const card = { backgroundColor: colors.cardSolid, borderColor: colors.border };
   return (
     <AmbientScreen tone="gate" style={styles.root}>
-      <View style={[styles.header, { paddingTop: (Platform.OS === 'web' ? 48 : insets.top) + SPACE.xs }]}>
+      <View style={[styles.header, { paddingTop: (insets.top) + SPACE.xs }]}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back to Gate" onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)/gate')} style={styles.back}>
           <Ionicons name="chevron-back" size={25} color={colors.foreground} />
         </Pressable>

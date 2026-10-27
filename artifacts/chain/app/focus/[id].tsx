@@ -245,7 +245,7 @@ export default function FocusSession() {
     session && item && session.itemId === item.id && session.planDate === item.planDate,
   );
   const paused = !sessionMatchesItem || session?.runningSince === undefined;
-  const topPad = Platform.OS === 'web' ? 40 : insets.top + 8;
+  const topPad = insets.top + 8;
   const compactLayout = width < 360;
   const dialDiameter = compactLayout ? 210 : 232;
 
