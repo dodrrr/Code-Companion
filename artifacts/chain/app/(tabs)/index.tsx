@@ -81,8 +81,8 @@ export default function ChainsScreen() {
     }
   }, [activeDate, items, localDay]);
 
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
-  const bottomSafe = Platform.OS === 'web' ? 0 : insets.bottom;
+  const topPad = insets.top;
+  const bottomSafe = insets.bottom;
   const focusTask = todayItems.find((item) => item.isPriority && !item.completed);
   const dueChains = chains.filter((chain) => getChainCommitmentStatus(chain, localDay).isDue);
   const eligibleChains = dueChains.filter(

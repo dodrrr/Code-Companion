@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Platform, Text, View } from 'react-native';
+import { prepareWebStorage } from '@/lib/webStorage';
 import { useReducedMotion } from 'react-native-reanimated';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -73,6 +74,7 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  const [storageError] = useState(prepareWebStorage);
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -82,7 +84,7 @@ export default function RootLayout() {
   const didBootstrap = useRef(false);
 
   useEffect(() => {
-    if ((!fontsLoaded && !fontError) || didBootstrap.current) return;
+    if (storageError || (!fontsLoaded && !fontError) || didBootstrap.current) return;
     didBootstrap.current = true;
 
     const hideSplashAfterNavigationSettles = () => {
@@ -107,8 +109,9 @@ export default function RootLayout() {
         router.replace('/onboarding');
         hideSplashAfterNavigationSettles();
       });
-  }, [fontsLoaded, fontError]);
+  }, [fontsLoaded, fontError, storageError]);
 
+  if (storageError) return <View style={{ flex: 1, justifyContent: 'center', padding: 32, backgroundColor: '#050506' }}><Text style={{ color: '#fff' }}>{storageError}</Text></View>;
   if (!fontsLoaded && !fontError) return null;
 
   return (

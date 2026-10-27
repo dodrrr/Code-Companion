@@ -11,7 +11,9 @@
     "test": "node --no-warnings --experimental-strip-types --test tests/*.test.mjs",
     "check": "pnpm run typecheck && pnpm run test",
     "release:doctor": "node scripts/release-doctor.js",
-    "release:doctor:app-store": "node scripts/release-doctor.js --app-store"
+    "release:doctor:app-store": "node scripts/release-doctor.js --app-store",
+    "build:web": "expo export --platform web && node scripts/prepare-pwa.mjs",
+    "serve:web": "node server/web-serve.mjs"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

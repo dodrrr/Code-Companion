@@ -1,3 +1,4 @@
+import LocalDataControls from '@/components/LocalDataControls';
 import React, { useEffect, useState, type ComponentProps } from 'react';
 import { Alert, Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
@@ -32,7 +33,7 @@ export default function SettingsScreen() {
     ? 'Control Chain reminders in iPhone Settings.'
     : Platform.OS === 'android'
       ? 'Control Chain reminders in your device settings.'
-      : 'Notification controls become available in the installed app.';
+      : 'Notifications are not enabled in the web app.';
 
   useEffect(() => {
     let cancelled = false;
@@ -141,6 +142,8 @@ export default function SettingsScreen() {
           colors={colors}
         />
       </Surface>
+
+      <LocalDataControls />
 
       {__DEV__ && <>
         <SectionLabel>DEVELOPER READINESS</SectionLabel>

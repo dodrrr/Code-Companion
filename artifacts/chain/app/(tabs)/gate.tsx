@@ -394,8 +394,8 @@ export default function GateScreen() {
   const rulesRef = useRef<GateRules>({});
   const previewStorageQueueRef = useRef<Promise<void>>(Promise.resolve());
 
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
-  const botPad = Platform.OS === 'web' ? 0 : insets.bottom;
+  const topPad = insets.top;
+  const botPad = insets.bottom;
   const useSingleColumn = pageWidth < 370 || fontScale >= 1.3;
   const gridContentWidth = Math.max(0, pageWidth - CONTROL.screenHorizontal * 2);
   const appTileWidth = useSingleColumn
