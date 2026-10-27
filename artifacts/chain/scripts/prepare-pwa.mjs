@@ -98,10 +98,29 @@ const hash = createHash('sha256');
 for (const file of files) { hash.update(path.relative(root, file)); hash.update(await readFile(file)); }
 const version = hash.digest('hex').slice(0, 16);
 const urls = files.map(file => './' + path.relative(root, file).split(path.sep).map(encodeURIComponent).join('/'));
-await writeFile(path.join(root, 'sw.js'), `const CACHE = 'chain-offline-${version}';
+await writeFile(path.join(root, 'sw.js'), `const CACHE = 'chain-offline-safari-v2-${version}';
 const ASSETS = ${JSON.stringify(urls)};
 const root = new URL('./', self.registration.scope);
-self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS.map(url => new URL(url, root).href)))));
+function cleanResponse(response) {
+  // A followed redirect retains a URL list in CacheStorage. Safari rejects it
+  // when reused for navigation. Copy the readable body into a fresh response.
+  if (!response.redirected) return response;
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers: response.headers });
+}
+self.addEventListener('install', event => event.waitUntil((async () => {
+  const cache = await caches.open(CACHE);
+  await Promise.all(ASSETS.map(async asset => {
+    const key = new URL(asset, root);
+    const response = await fetch(key, { cache: 'reload', credentials: 'same-origin' });
+    const finalURL = new URL(response.url);
+    const isShell = key.pathname === new URL('index.html', root).pathname;
+    const validPath = finalURL.pathname === key.pathname || (isShell && finalURL.pathname === root.pathname);
+    if (!response.ok || finalURL.origin !== root.origin || !validPath) throw new Error('Unexpected offline asset response');
+    await cache.put(key, cleanResponse(response));
+  }));
+  // Recovery release: broken Safari pages cannot click the update button.
+  await self.skipWaiting();
+})()));
 self.addEventListener('message', event => { if (event.data === 'ACTIVATE_UPDATE') self.skipWaiting(); });
 self.addEventListener('activate', event => event.waitUntil((async () => {
   for (const key of await caches.keys()) if (key.startsWith('chain-offline-') && key !== CACHE) await caches.delete(key);
@@ -110,10 +129,15 @@ self.addEventListener('activate', event => event.waitUntil((async () => {
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== root.origin || !url.pathname.startsWith(root.pathname)) return;
+  const route = url.pathname.slice(root.pathname.length).replace(/\\/$/, '');
+  const appRoute = /^(|index.html|gate|plan|settings|onboarding|paywall|pause-gate-demo|gate-insights|gate-windows|chain\\/[^/]+|focus\\/[^/]+|rhythm\\/[^/]+)$/.test(route);
+  // Let the browser handle authentication and other hosting routes directly.
+  if (event.request.mode === 'navigate' && !appRoute) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const key = event.request.mode === 'navigate' ? new URL('index.html', root).href : event.request;
-    return await cache.match(key) || fetch(event.request);
+    const cached = await cache.match(key);
+    return cached ? cleanResponse(cached) : fetch(event.request);
   })());
 });`);
 console.log(`Chain PWA prepared: ${files.length} offline assets, version ${version}`);
