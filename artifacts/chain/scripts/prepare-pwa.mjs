@@ -1,8 +1,49 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile, writeFile, copyFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile, copyFile, rename, rmdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const root = path.resolve('dist');
+// Static hosts may omit dependency/hidden directories. Publish exported assets
+// under plain, content-hashed filenames and update Expo's literal asset URLs.
+const assetsRoot = path.join(root, 'assets');
+const assetPaths = await filesIn(assetsRoot);
+const replacements = [];
+for (const file of assetPaths) {
+  const target = path.join(assetsRoot, path.basename(file));
+  if (file === target) continue;
+  if (assetPaths.some(other => other !== file && path.basename(other) === path.basename(file))) {
+    throw new Error(`Duplicate exported asset filename: ${path.basename(file)}`);
+  }
+  replacements.push(['/' + path.relative(root, file).split(path.sep).join('/'), '/assets/' + path.basename(file)]);
+  await rename(file, target);
+}
+async function removeEmptyDirectories(directory) {
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      const child = path.join(directory, entry.name);
+      await removeEmptyDirectories(child);
+      await rmdir(child);
+    }
+  }
+}
+await removeEmptyDirectories(assetsRoot);
+for (const file of await filesIn(root)) {
+  if (!/\.(js|css|html|json)$/.test(file)) continue;
+  let contents = await readFile(file, 'utf8');
+  for (const [before, after] of replacements) contents = contents.replaceAll(before, after);
+  await writeFile(file, contents);
+}
+// Asset URL rewriting changes the bundle: give it a fresh URL for HTTP caches.
+for (const file of await filesIn(path.join(root, '_expo', 'static', 'js'))) {
+  if (!file.endsWith('.js')) continue;
+  const digest = createHash('sha256').update(await readFile(file)).digest('hex').slice(0, 32);
+  const basename = path.basename(file);
+  const nextName = basename.replace(/-[a-f0-9]+\.js$/, `-${digest}.js`);
+  if (basename === nextName) continue;
+  await rename(file, path.join(path.dirname(file), nextName));
+  const indexPath = path.join(root, 'index.html');
+  await writeFile(indexPath, (await readFile(indexPath, 'utf8')).replaceAll(basename, nextName));
+}
 await copyFile('assets/images/icon.png', path.join(root, 'chain-icon.png'));
 await writeFile(path.join(root, 'manifest.webmanifest'), JSON.stringify({
   id: './', name: 'Chain', short_name: 'Chain', start_url: './', scope: './',
@@ -76,3 +117,4 @@ self.addEventListener('fetch', event => {
   })());
 });`);
 console.log(`Chain PWA prepared: ${files.length} offline assets, version ${version}`);
+
