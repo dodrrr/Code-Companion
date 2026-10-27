@@ -2,11 +2,10 @@ import React from 'react';
 import GlassTabBar from '@/components/GlassTabBar';
 import { Platform } from 'react-native';
 import { SECTION_ACCENTS } from '@/constants/sectionTheme';
-import { Feather } from '@expo/vector-icons';
+import { TabSymbol } from '@/components/ui/TabSymbol';
 import { isLiquidGlassAvailable } from 'expo-glass-effect';
 import { Tabs } from 'expo-router';
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
-import { SymbolView } from 'expo-symbols';
 
 function NativeTabLayout() {
   return (
@@ -18,7 +17,7 @@ function NativeTabLayout() {
     >
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Icon sf={{ default: 'link', selected: 'link' }} selectedColor={SECTION_ACCENTS.today} />
-        <NativeTabs.Trigger.Label selectedStyle={{ color: SECTION_ACCENTS.today, fontWeight: '600' }}>Chains</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label selectedStyle={{ color: SECTION_ACCENTS.today, fontWeight: '600' }}>Today</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="gate">
         <NativeTabs.Trigger.Icon sf={{ default: 'shield', selected: 'shield.fill' }} selectedColor={SECTION_ACCENTS.gate} />
@@ -33,20 +32,14 @@ function NativeTabLayout() {
 }
 
 function ClassicTabLayout() {
-  const isIOS = Platform.OS === 'ios';
   return (
     <Tabs tabBar={props => <GlassTabBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Chains',
+          title: 'Today',
           tabBarActiveTintColor: SECTION_ACCENTS.today,
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="link" tintColor={color} size={22} />
-            ) : (
-              <Feather name="link" size={22} color={color} />
-            ),
+          tabBarIcon: ({ color, focused, size }) => <TabSymbol name="link" color={String(color)} focused={focused} size={size} />,
         }}
       />
       <Tabs.Screen
@@ -54,12 +47,7 @@ function ClassicTabLayout() {
         options={{
           title: 'Gate',
           tabBarActiveTintColor: SECTION_ACCENTS.gate,
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="shield.fill" tintColor={color} size={22} />
-            ) : (
-              <Feather name="shield" size={22} color={color} />
-            ),
+          tabBarIcon: ({ color, focused, size }) => <TabSymbol name="shield" color={String(color)} focused={focused} size={size} />,
         }}
       />
       <Tabs.Screen
@@ -67,12 +55,7 @@ function ClassicTabLayout() {
         options={{
           title: 'Plan',
           tabBarActiveTintColor: SECTION_ACCENTS.plan,
-          tabBarIcon: ({ color }) =>
-            isIOS ? (
-              <SymbolView name="moon.fill" tintColor={color} size={22} />
-            ) : (
-              <Feather name="moon" size={22} color={color} />
-            ),
+          tabBarIcon: ({ color, focused, size }) => <TabSymbol name="moon" color={String(color)} focused={focused} size={size} />,
         }}
       />
     </Tabs>

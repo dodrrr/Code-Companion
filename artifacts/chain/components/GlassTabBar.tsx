@@ -13,11 +13,10 @@ export default function GlassTabBar({ state, descriptors, navigation }: BottomTa
   const [width, setWidth] = useState(0);
   const [reduceMotion, setReduceMotion] = useState(false);
   const position = useRef(new Animated.Value(state.index)).current;
-  const slot = Math.max(0, width - 12) / state.routes.length;
-  const activeTint = descriptors[state.routes[state.index].key].options.tabBarActiveTintColor;
-  const accent = typeof activeTint === 'string' && /^#[0-9a-f]{6}$/i.test(activeTint) ? activeTint : '#ffffff';
+  const slot = Math.max(0, width - 8) / state.routes.length;
   const pan = useMemo(() => PanResponder.create({
     onMoveShouldSetPanResponder: (_, gesture) => Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+    onMoveShouldSetPanResponderCapture: (_, gesture) => Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
     onPanResponderMove: (_, gesture) => {
       if (!reduceMotion && slot > 0) position.setValue(Math.max(0, Math.min(state.routes.length - 1, state.index + gesture.dx / slot)));
     },
@@ -51,16 +50,14 @@ export default function GlassTabBar({ state, descriptors, navigation }: BottomTa
   return <View pointerEvents="box-none" style={[styles.dock, { bottom: Math.max(insets.bottom, 12), left: Math.max(insets.left, 16), right: Math.max(insets.right, 16) }]}>
     <View style={styles.shadow}>
       <View {...pan.panHandlers} onLayout={event => setWidth(event.nativeEvent.layout.width)} style={styles.capsule}>
-        <BlurView pointerEvents="none" intensity={65} tint="systemUltraThinMaterialDark" style={StyleSheet.absoluteFill} />
-        <LinearGradient pointerEvents="none" colors={['rgba(255,255,255,0.12)', 'rgba(255,255,255,0.025)', 'rgba(4,4,8,0.18)']} style={StyleSheet.absoluteFill} />
-        {slot > 0 && <Animated.View pointerEvents="none" style={[styles.selection, { width: slot, backgroundColor: accent + '12', borderColor: accent + '35', transform: [{ translateX: Animated.multiply(position, slot) }] }]}>
-          <LinearGradient colors={['rgba(255,255,255,0.14)', 'rgba(255,255,255,0.035)']} style={StyleSheet.absoluteFill} />
-        </Animated.View>}
+        <BlurView pointerEvents="none" intensity={45} tint="systemUltraThinMaterialDark" style={StyleSheet.absoluteFill} />
+        <LinearGradient pointerEvents="none" colors={['rgba(255,255,255,0.025)', 'rgba(255,255,255,0.005)']} style={StyleSheet.absoluteFill} />
+        {slot > 0 && <Animated.View pointerEvents="none" style={[styles.selection, { width: slot + 2, transform: [{ translateX: Animated.multiply(position, slot) }] }]} />}
         {state.routes.map((route, index) => {
           const { options } = descriptors[route.key];
           const focused = state.index === index;
           const label = typeof options.tabBarLabel === 'string' ? options.tabBarLabel : options.title ?? route.name;
-          const color = focused ? options.tabBarActiveTintColor ?? '#ffffff' : '#A7A7B0';
+          const color = focused ? options.tabBarActiveTintColor ?? '#ffffff' : '#E8E8ED';
           return <Pressable key={route.key} accessibilityRole="tab" accessibilityState={{ selected: focused }} aria-selected={focused}
             accessibilityLabel={options.tabBarAccessibilityLabel ?? label}
             onLongPress={() => navigation.emit({ type: 'tabLongPress', target: route.key })}
@@ -68,8 +65,8 @@ export default function GlassTabBar({ state, descriptors, navigation }: BottomTa
               const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
               if (!focused && !event.defaultPrevented) { playFeedback('selection'); navigation.navigate(route.name, route.params); }
             }} style={({ pressed }) => [styles.tab, { opacity: pressed ? 0.65 : 1 }]}>
-            {options.tabBarIcon?.({ focused, color, size: 22 })}
-            <Text numberOfLines={1} style={[styles.label, { color }]}>{label}</Text>
+            {options.tabBarIcon?.({ focused, color, size: 26 })}
+            <Text numberOfLines={1} style={[styles.label, focused && styles.activeLabel, { color }]}>{label}</Text>
           </Pressable>;
         })}
       </View>
@@ -79,9 +76,10 @@ export default function GlassTabBar({ state, descriptors, navigation }: BottomTa
 
 const styles = StyleSheet.create({
   dock: { position: 'absolute', alignItems: 'center' },
-  shadow: { width: '100%', maxWidth: 460, borderRadius: 34, shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.24, shadowRadius: 18, elevation: 8 },
-  capsule: { flexDirection: 'row', height: 66, borderRadius: 34, overflow: 'hidden', padding: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)', backgroundColor: 'rgba(18,18,23,0.64)' },
-  selection: { position: 'absolute', top: 6, bottom: 6, left: 6, borderRadius: 28, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.14)' },
-  tab: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', gap: 3, borderRadius: 28 },
-  label: { fontSize: 11, lineHeight: 14, fontFamily: 'Inter_600SemiBold' },
+  shadow: { width: 276, maxWidth: '100%', borderRadius: 32, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.12, shadowRadius: 10, elevation: 4 },
+  capsule: { flexDirection: 'row', height: 62, borderRadius: 32, overflow: 'hidden', padding: 3, borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', backgroundColor: 'rgba(17,17,21,0.80)' },
+  selection: { position: 'absolute', top: 3, bottom: 3, left: 3, borderRadius: 29, backgroundColor: 'rgba(59,59,63,0.76)' },
+  tab: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', gap: 0, borderRadius: 29 },
+  label: { fontSize: 11, lineHeight: 15, fontFamily: 'Inter_500Medium' },
+  activeLabel: { fontSize: 14, lineHeight: 17, fontFamily: 'Inter_600SemiBold' },
 });
