@@ -72,6 +72,7 @@ await writeFile(path.join(root, 'pwa.js'), `(() => {
   window.addEventListener('load', async () => {
     try {
       const registration = await navigator.serviceWorker.register(new URL('sw.js', base), { scope: base.pathname });
+      navigator.serviceWorker.ready.then(ready => ready.active?.postMessage('WARM_CACHE'));
       const offerUpdate = () => {
         if (!registration.waiting || document.getElementById('chain-update')) return;
         const button = document.createElement('button');
@@ -98,7 +99,7 @@ const hash = createHash('sha256');
 for (const file of files) { hash.update(path.relative(root, file)); hash.update(await readFile(file)); }
 const version = hash.digest('hex').slice(0, 16);
 const urls = files.map(file => './' + path.relative(root, file).split(path.sep).map(encodeURIComponent).join('/'));
-await writeFile(path.join(root, 'sw.js'), `const CACHE = 'chain-offline-safari-v2-${version}';
+await writeFile(path.join(root, 'sw.js'), `const CACHE = 'chain-offline-safari-v3-${version}';
 const ASSETS = ${JSON.stringify(urls)};
 const root = new URL('./', self.registration.scope);
 function cleanResponse(response) {
@@ -107,23 +108,26 @@ function cleanResponse(response) {
   if (!response.redirected) return response;
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers: response.headers });
 }
-self.addEventListener('install', event => event.waitUntil((async () => {
+async function warmCache() {
   const cache = await caches.open(CACHE);
-  await Promise.all(ASSETS.map(async asset => {
+  await Promise.allSettled(ASSETS.map(async asset => {
     const key = new URL(asset, root);
     const response = await fetch(key, { cache: 'reload', credentials: 'same-origin' });
     const finalURL = new URL(response.url);
     const isShell = key.pathname === new URL('index.html', root).pathname;
-    const validPath = finalURL.pathname === key.pathname || (isShell && finalURL.pathname === root.pathname);
+    const validPath = decodeURIComponent(finalURL.pathname) === decodeURIComponent(key.pathname) || (isShell && finalURL.pathname === root.pathname);
     if (!response.ok || finalURL.origin !== root.origin || !validPath) throw new Error('Unexpected offline asset response');
     await cache.put(key, cleanResponse(response));
   }));
-  // Recovery release: broken Safari pages cannot click the update button.
-  await self.skipWaiting();
-})()));
-self.addEventListener('message', event => { if (event.data === 'ACTIVATE_UPDATE') self.skipWaiting(); });
+}
+// Recovery must install even when authentication or an optional asset fails.
+self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
+self.addEventListener('message', event => {
+  if (event.data === 'ACTIVATE_UPDATE') self.skipWaiting();
+  if (event.data === 'WARM_CACHE') event.waitUntil(warmCache());
+});
 self.addEventListener('activate', event => event.waitUntil((async () => {
-  for (const key of await caches.keys()) if (key.startsWith('chain-offline-') && key !== CACHE) await caches.delete(key);
+  // Keep previous offline assets available during recovery. No user storage is touched.
   await self.clients.claim();
 })()));
 self.addEventListener('fetch', event => {
@@ -136,7 +140,14 @@ self.addEventListener('fetch', event => {
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     const key = event.request.mode === 'navigate' ? new URL('index.html', root).href : event.request;
-    const cached = await cache.match(key);
+    let cached = await cache.match(key);
+    if (!cached) {
+      for (const name of (await caches.keys()).reverse()) {
+        if (!name.startsWith('chain-offline-')) continue;
+        cached = await (await caches.open(name)).match(key);
+        if (cached) break;
+      }
+    }
     return cached ? cleanResponse(cached) : fetch(event.request);
   })());
 });`);
